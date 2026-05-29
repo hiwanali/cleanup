@@ -1,0 +1,3182 @@
+/*
+ * Vyer.
+ * En vy per sida i sidkartan (§8 i mvpfinal.md).
+ * För första leveransen: Login, en riktig landningsvy per roll och placeholders
+ * för resterande sidor – varje placeholder pekar på §-numret i mvpfinal.md
+ * så att vi kan bygga vidare stegvis.
+ */
+(function () {
+  const { useState, useMemo, useEffect } = React;
+
+  /* ============================================================
+   * LOGIN (mock — auth kommer via Supabase senare)
+   * ============================================================ */
+  function LoginView({ onLogin }) {
+    const profiles = useMemo(() => {
+      // Snabb-login som visar separationsregeln tydligt
+      const u = db.state.users;
+      return [
+        { kind: 'role', userId: u.find(x => x.role === 'admin').id, label: 'Sara Lindqvist', sub: 'Admin · CleanUp', tone: 'brand', icon: 'shield' },
+        { kind: 'role', userId: u.find(x => x.name === 'Anna Berg').id, label: 'Anna Berg', sub: 'Städare · Acme + Lab', tone: 'accent', icon: 'sparkles' },
+        { kind: 'role', userId: u.find(x => x.name === 'David Nilsson').id, label: 'David Nilsson', sub: 'Städare · Acme + NorthCo', tone: 'accent', icon: 'sparkles' },
+        { kind: 'role', userId: u.find(x => x.name === 'Maria Karlsson').id, label: 'Maria Karlsson', sub: 'Städare · NorthCo + Lager', tone: 'accent', icon: 'sparkles' },
+        { kind: 'role', userId: u.find(x => x.name === 'Erik Holm').id, label: 'Erik Holm', sub: 'Kund · Acme AB (huvudkontakt)', tone: 'emerald', icon: 'briefcase' },
+        { kind: 'role', userId: u.find(x => x.name === 'Lisa Ek').id, label: 'Lisa Ek', sub: 'Kundanställd · Acme AB (endast Acme HQ)', tone: 'emerald', icon: 'user' },
+        { kind: 'role', userId: u.find(x => x.name === 'Per Sundberg').id, label: 'Per Sundberg', sub: 'Kund · NorthCo AB', tone: 'emerald', icon: 'briefcase' },
+      ];
+    }, []);
+
+    const toneClasses = {
+      brand: 'bg-brand-50 text-brand-700 border-brand-100',
+      accent: 'bg-accent-50 text-accent-700 border-accent-100',
+      emerald: 'bg-emerald-50 text-emerald-700 border-emerald-100',
+    };
+
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-brand-50 via-white to-accent-50 flex items-center justify-center p-4">
+        <div className="w-full max-w-4xl">
+          <div className="text-center mb-8">
+            <div className="inline-flex items-center gap-3 mb-3">
+              <div className="w-12 h-12 rounded-2xl bg-brand-600 text-white flex items-center justify-center text-xl font-extrabold">C<span className="text-accent-500">.</span></div>
+              <h1 className="text-3xl font-extrabold tracking-tight text-slate-900">CleanUp</h1>
+            </div>
+            <p className="text-slate-600">Plattform för städ — admin, städare och kund.</p>
+          </div>
+
+          <Card padding="lg" className="mb-4">
+            <h2 className="text-lg font-bold text-slate-900 mb-1">Logga in (utvecklingsläge)</h2>
+            <p className="text-sm text-slate-500 mb-5">Auth kommer senare via Supabase. Välj profil för att se vyn för respektive roll.</p>
+            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {profiles.map(p => (
+                <button
+                  key={p.userId}
+                  onClick={() => onLogin(p.userId)}
+                  className={cx(
+                    'text-left p-4 rounded-2xl border-2 transition-all hover:shadow-md hover:-translate-y-0.5',
+                    'bg-white border-slate-200 hover:border-brand-300',
+                  )}
+                >
+                  <div className="flex items-start gap-3">
+                    <span className={cx('w-10 h-10 rounded-xl flex items-center justify-center border', toneClasses[p.tone])}>
+                      <Icon name={p.icon} className="w-5 h-5" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="font-semibold text-slate-900 truncate">{p.label}</p>
+                      <p className="text-xs text-slate-500 mt-0.5">{p.sub}</p>
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </Card>
+
+          <p className="text-center text-xs text-slate-400">
+            Roll-väljare i toppraden låter dig snabbt byta profil under utvecklingen.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  /* ============================================================
+   * Gemensamma kort
+   * ============================================================ */
+  function ShiftCard({ shift, viewerRole, viewerUserId, onClick }) {
+    const prop = db.propertyById(shift.property_id);
+    const cleanerLabel = db.displayCleaner(shift.cleaner_user_id, viewerRole);
+    const isAnon = viewerRole === 'customer' || viewerRole === 'customer_employee';
+    return (
+      <button
+        onClick={() => onClick && onClick(shift)}
+        className="w-full text-left bg-white rounded-2xl border border-slate-200 p-4 hover:border-brand-300 hover:shadow-sm transition-all"
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{relativeDay(shift.start_at)} · {formatRange(shift.start_at, shift.end_at)}</p>
+            <p className="mt-1 font-semibold text-slate-900 truncate">{prop?.name}</p>
+            <p className="text-xs text-slate-500 truncate">{prop?.address}</p>
+          </div>
+          <StatusBadge status={shift.status} />
+        </div>
+        <div className="mt-3 flex items-center gap-2 text-xs text-slate-600">
+          <Avatar size="xs" name={cleanerLabel} anonymous={isAnon} />
+          <span className="font-medium">{cleanerLabel}</span>
+        </div>
+      </button>
+    );
+  }
+
+  // Hjälpare: navigera till pass-detalj utifrån roll
+  function shiftDetailPath(role, shiftId) {
+    if (role === 'cleaner') return `/stadare/pass/${shiftId}`;
+    if (role === 'customer' || role === 'customer_employee') return `/kund/pass/${shiftId}`;
+    if (role === 'admin') return `/admin/schema/${shiftId}`;
+    return '/';
+  }
+
+  // Hjälpare: ISO-datum + HH:MM utan TZ-strul
+  function toDateInput(d) {
+    const x = new Date(d);
+    const y = x.getFullYear();
+    const m = String(x.getMonth() + 1).padStart(2, '0');
+    const day = String(x.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+  function toTimeInput(d) {
+    const x = new Date(d);
+    return `${String(x.getHours()).padStart(2, '0')}:${String(x.getMinutes()).padStart(2, '0')}`;
+  }
+  function combineDateTime(dateStr, timeStr) {
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const [h, mi] = timeStr.split(':').map(Number);
+    return new Date(y, m - 1, d, h, mi, 0, 0);
+  }
+
+  /* ============================================================
+   * ShiftDetail – återanvänds av cleaner/customer (admin senare)
+   * ============================================================ */
+  function ShiftDetail({ shift, session, onBack, breadcrumbs }) {
+    useDb();
+    const prop = db.propertyById(shift.property_id);
+    const checklist = db.checklistForShift(shift.id);
+    const role = session.user.role;
+    const isOwnerCleaner = role === 'cleaner' && shift.cleaner_user_id === session.userId;
+    const isCustomerView = role === 'customer' || role === 'customer_employee';
+    const cleanerLabel = db.displayCleaner(shift.cleaner_user_id, role);
+    // Nyckel/larm: admin + städare med minst ett pass på objektet
+    const canSeeAccess = role === 'admin' || (role === 'cleaner' && db.shiftsForCleaner(session.userId).some(s => s.property_id === shift.property_id));
+    const done = checklist.filter(c => c.done_at).length;
+    const total = checklist.length;
+    const pct = total === 0 ? 0 : Math.round((done / total) * 100);
+
+    const canCheckIn = isOwnerCleaner && ['Godkänt', 'Planerat'].includes(shift.status);
+    const canCheckOut = isOwnerCleaner && shift.status === 'Pågående';
+    const canReportSick = isOwnerCleaner && ['Godkänt', 'Planerat'].includes(shift.status);
+    const canCheckItems = isOwnerCleaner && ['Pågående', 'Utfört'].includes(shift.status);
+
+    const [sickOpen, setSickOpen] = useState(false);
+
+    return (
+      <div>
+        <PageHeader
+          breadcrumbs={breadcrumbs}
+          title={prop?.name || 'Pass'}
+          subtitle={`${relativeDay(shift.start_at)} · ${formatRange(shift.start_at, shift.end_at)}  ·  ${prop?.address || ''}`}
+          actions={
+            <div className="flex items-center gap-2">
+              {onBack && <Button variant="ghost" icon="chevron-left" onClick={onBack}>Tillbaka</Button>}
+              <StatusBadge status={shift.status} />
+            </div>
+          }
+        />
+
+        <div className="grid lg:grid-cols-3 gap-4">
+          <div className="lg:col-span-2 space-y-4">
+            {/* Åtgärds-rad */}
+            {(canCheckIn || canCheckOut) && (
+              <Card padding="md">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900">
+                      {canCheckIn ? 'Redo att börja' : 'Pågående pass'}
+                    </p>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      {canCheckIn ? 'Checka in när du är på plats för att starta passet.' : `Incheckad ${shift.checked_in_at ? formatTime(shift.checked_in_at) : ''}`}
+                    </p>
+                  </div>
+                  {canCheckIn && (
+                    <Button variant="primary" icon="play" onClick={() => {
+                      db.checkIn(shift.id, session.userId);
+                      toast.success('Incheckad. Lycka till med passet!');
+                    }}>Checka in</Button>
+                  )}
+                  {canCheckOut && (
+                    <Button variant="success" icon="check" onClick={() => {
+                      db.checkOut(shift.id, session.userId);
+                      toast.success('Utcheckad. Tack för idag!');
+                    }}>Checka ut</Button>
+                  )}
+                </div>
+              </Card>
+            )}
+
+            {/* Checklist / städschema */}
+            <Card padding="md">
+              <div className="flex items-start justify-between mb-3">
+                <div>
+                  <h3 className="font-bold text-slate-900">Städschema</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    {total === 0 ? 'Inget städschema är upplagt för det här objektet.' :
+                      `${done} av ${total} punkter utförda${pct === 100 ? ' — klart!' : ''}`}
+                  </p>
+                </div>
+                {total > 0 && (
+                  <div className="text-right">
+                    <p className="text-2xl font-extrabold text-brand-700 leading-none">{pct}%</p>
+                  </div>
+                )}
+              </div>
+              {total > 0 && (
+                <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden mb-4">
+                  <div className="h-full bg-emerald-500 transition-all" style={{ width: pct + '%' }} />
+                </div>
+              )}
+              {total === 0 ? (
+                <EmptyState icon="list" title="Tomt städschema" description={role === 'admin' ? 'Lägg till mallpunkter på objektets sida.' : 'Kontakta admin om något ska finnas här.'} />
+              ) : (
+                <ul className="divide-y divide-slate-100 -mx-2">
+                  {checklist.map(item => (
+                    <li key={item.id} className="px-2 py-2.5 flex items-start gap-3">
+                      <button
+                        disabled={!canCheckItems}
+                        onClick={() => {
+                          const wasDone = !!item.done_at;
+                          db.toggleChecklistItem(item.id, session.userId, !wasDone);
+                          toast.success(wasDone ? 'Avbockat.' : 'Klart!');
+                        }}
+                        className={cx(
+                          'mt-0.5 inline-flex items-center justify-center w-5 h-5 rounded-md border transition-colors flex-shrink-0',
+                          item.done_at ? 'bg-emerald-600 border-emerald-600 text-white' : 'bg-white border-slate-300',
+                          canCheckItems && !item.done_at && 'hover:border-emerald-400 cursor-pointer',
+                          !canCheckItems && 'cursor-default opacity-90',
+                        )}
+                        aria-label={item.done_at ? 'Markera som ogjort' : 'Markera som klart'}
+                      >
+                        {item.done_at && <Icon name="check" className="w-3.5 h-3.5" strokeWidth={3} />}
+                      </button>
+                      <div className="flex-1 min-w-0">
+                        <p className={cx('text-sm font-medium', item.done_at ? 'text-slate-400 line-through' : 'text-slate-900')}>{item.title}</p>
+                        {item.done_at && (
+                          <p className="text-[11px] text-slate-400 mt-0.5">
+                            Utfört {formatTime(item.done_at)}
+                            {role === 'admin' && item.done_by_cleaner_user_id ? ` · ${db.userById(item.done_by_cleaner_user_id)?.name}` : ''}
+                          </p>
+                        )}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Card>
+
+            {/* §7.6 Avvikelse / reklamation — formulär + lista */}
+            {isOwnerCleaner && <CleanerIncidentSection shift={shift} session={session} />}
+            {isCustomerView && shift.status === 'Utfört' && session.user.role === 'customer' && (
+              <CustomerComplaintSection shift={shift} session={session} />
+            )}
+            {/* §7.6 ärenden kopplade till passet — synliga för admin + kund */}
+            {!isOwnerCleaner && <ShiftIncidentsList shift={shift} session={session} />}
+          </div>
+
+          <div className="space-y-4">
+            {/* Översikt */}
+            <Card padding="md">
+              <h3 className="font-bold text-slate-900 mb-3">Information</h3>
+              <dl className="text-sm space-y-2.5">
+                <div className="flex items-start gap-2">
+                  <Icon name="calendar" className="w-4 h-4 text-slate-400 mt-0.5" />
+                  <div className="flex-1">
+                    <dt className="text-xs text-slate-500">Datum</dt>
+                    <dd className="font-medium text-slate-900">{formatDateLong(shift.start_at)}</dd>
+                  </div>
+                </div>
+                <div className="flex items-start gap-2">
+                  <Icon name="clock" className="w-4 h-4 text-slate-400 mt-0.5" />
+                  <div className="flex-1">
+                    <dt className="text-xs text-slate-500">Tid</dt>
+                    <dd className="font-medium text-slate-900">{formatRange(shift.start_at, shift.end_at)}</dd>
+                  </div>
+                </div>
+                <div className="flex items-start gap-2">
+                  <Icon name="map-pin" className="w-4 h-4 text-slate-400 mt-0.5" />
+                  <div className="flex-1">
+                    <dt className="text-xs text-slate-500">Adress</dt>
+                    <dd className="font-medium text-slate-900">{prop?.address}</dd>
+                  </div>
+                </div>
+                <div className="flex items-start gap-2">
+                  <Icon name="user" className="w-4 h-4 text-slate-400 mt-0.5" />
+                  <div className="flex-1">
+                    <dt className="text-xs text-slate-500">Städare</dt>
+                    <dd className="font-medium text-slate-900 flex items-center gap-2">
+                      <Avatar size="xs" name={cleanerLabel} anonymous={isCustomerView} />
+                      {cleanerLabel}
+                    </dd>
+                  </div>
+                </div>
+                {prop?.notes && (
+                  <div className="flex items-start gap-2 pt-2 border-t border-slate-100">
+                    <Icon name="info" className="w-4 h-4 text-slate-400 mt-0.5" />
+                    <div className="flex-1">
+                      <dt className="text-xs text-slate-500">Att tänka på</dt>
+                      <dd className="text-slate-700">{prop.notes}</dd>
+                    </div>
+                  </div>
+                )}
+              </dl>
+            </Card>
+
+            {/* Nyckel / larm */}
+            {canSeeAccess && prop?.access_info && (
+              <Card padding="md" className="border-amber-200 bg-amber-50/40">
+                <div className="flex items-start gap-2 mb-2">
+                  <Icon name="key" className="w-4 h-4 text-amber-700 mt-0.5" />
+                  <div>
+                    <h3 className="font-bold text-amber-900">Nyckel / larm</h3>
+                    <p className="text-[11px] text-amber-700/80">Visas endast för admin och tilldelade städare.</p>
+                  </div>
+                </div>
+                <p className="text-sm text-amber-900/90 whitespace-pre-line">{prop.access_info}</p>
+              </Card>
+            )}
+
+            {/* Sjukanmälan – endast egen städare på Godkänt/Planerat */}
+            {canReportSick && (
+              <Card padding="md">
+                <h3 className="font-bold text-slate-900 mb-1">Kan du inte arbeta?</h3>
+                <p className="text-xs text-slate-500 mb-3">Sjukanmäl passet så får admin och kund besked direkt.</p>
+                <Button variant="danger-ghost" icon="alert-circle" className="w-full" onClick={() => setSickOpen(true)}>
+                  Sjukanmäl pass
+                </Button>
+              </Card>
+            )}
+
+            {role === 'cleaner' && shift.status === 'Sjukanmäld' && (
+              <Card padding="md" className="border-amber-200 bg-amber-50/40">
+                <h3 className="font-bold text-amber-900 mb-1">Sjukanmält pass</h3>
+                <p className="text-sm text-amber-900/90">Admin hanterar ombokningen. Du behöver inte göra något mer.</p>
+              </Card>
+            )}
+
+            {role === 'admin' && <AdminShiftActions shift={shift} session={session} onClose={onBack} />}
+            {isCustomerView && <CustomerShiftActions shift={shift} session={session} onClose={onBack} />}
+          </div>
+        </div>
+
+        <SickReportModal open={sickOpen} onClose={() => setSickOpen(false)} shift={shift} session={session} onDone={() => onBack && onBack()} />
+      </div>
+    );
+  }
+
+  /* ============================================================
+   * AdminShiftActions – §7.1 + §7.4 åtgärdspanel
+   * ============================================================ */
+  function AdminShiftActions({ shift, session, onClose }) {
+    useDb();
+    const [assignOpen, setAssignOpen] = useState(false);
+    const [adjustOpen, setAdjustOpen] = useState(false);
+    const [sickOpen, setSickOpen] = useState(false);
+    const isSick = shift.status === 'Sjukanmäld';
+    const isPlanned = ['Godkänt', 'Planerat'].includes(shift.status);
+    const isLive = shift.status === 'Pågående';
+    const cleaner = db.userById(shift.cleaner_user_id);
+
+    if (isSick) {
+      return (
+        <>
+          <Card padding="md" className="border-amber-200 bg-amber-50/50">
+            <div className="flex items-start gap-2 mb-2">
+              <Icon name="alert-circle" className="w-4 h-4 text-amber-700 mt-0.5" />
+              <div>
+                <h3 className="font-bold text-amber-900">Kräver din åtgärd</h3>
+                <p className="text-[12px] text-amber-800/90 mt-0.5">
+                  {cleaner?.name} sjukanmälde sig. Välj hur passet ska hanteras.
+                </p>
+              </div>
+            </div>
+          </Card>
+          <Card padding="md">
+            <h3 className="font-bold text-slate-900 mb-3">Åtgärder</h3>
+            <div className="space-y-2">
+              <Button variant="primary" icon="user-plus" className="w-full justify-start" onClick={() => setAssignOpen(true)}>
+                Tilldela annan städare
+              </Button>
+              <Button variant="outline" icon="clock" className="w-full justify-start" onClick={() => setAdjustOpen(true)}>
+                Justera tiden manuellt
+              </Button>
+              {shift.sick_finalized_at ? (
+                <div className="text-xs text-slate-500 mt-2 flex items-start gap-2">
+                  <Icon name="check" className="w-4 h-4 text-emerald-600 mt-0.5" />
+                  <span>Markerat som hanterat – passet uteblir.</span>
+                </div>
+              ) : (
+                <Button variant="ghost" icon="x" className="w-full justify-start" onClick={() => {
+                  if (confirm('Lämna passet som "Sjukanmäld" och meddela kund att det uteblir?')) {
+                    db.markSickAsFinal(shift.id, session.userId);
+                    toast.success('Passet markerat som hanterat. Kund har fått besked.');
+                    onClose && onClose();
+                  }
+                }}>
+                  Lämna som "Sjukanmäld" (passet uteblir)
+                </Button>
+              )}
+            </div>
+          </Card>
+          <AssignReplacementModal open={assignOpen} onClose={() => setAssignOpen(false)} shift={shift} session={session} onDone={onClose} />
+          <AdjustShiftModal open={adjustOpen} onClose={() => setAdjustOpen(false)} shift={shift} session={session} onDone={onClose} />
+        </>
+      );
+    }
+
+    if (isPlanned) {
+      return (
+        <>
+          <Card padding="md">
+            <h3 className="font-bold text-slate-900 mb-3">Admin-åtgärder</h3>
+            <div className="space-y-2">
+              <Button variant="outline" icon="user-plus" className="w-full justify-start" onClick={() => setAssignOpen(true)}>
+                Byt städare
+              </Button>
+              <Button variant="outline" icon="clock" className="w-full justify-start" onClick={() => setAdjustOpen(true)}>
+                Justera tid
+              </Button>
+              <Button variant="danger-ghost" icon="alert-circle" className="w-full justify-start" onClick={() => setSickOpen(true)}>
+                Sjukanmäl åt städaren
+              </Button>
+              <Button variant="danger-ghost" icon="trash" className="w-full justify-start" onClick={() => {
+                if (confirm('Ta bort passet helt? Det kommer markeras som "Borttaget".')) {
+                  db.adminDelete(shift.id, session.userId);
+                  toast.success('Passet borttaget.');
+                  onClose && onClose();
+                }
+              }}>
+                Ta bort pass
+              </Button>
+            </div>
+          </Card>
+          <AssignReplacementModal open={assignOpen} onClose={() => setAssignOpen(false)} shift={shift} session={session} onDone={onClose} />
+          <AdjustShiftModal open={adjustOpen} onClose={() => setAdjustOpen(false)} shift={shift} session={session} onDone={onClose} />
+          <SickReportModal open={sickOpen} onClose={() => setSickOpen(false)} shift={shift} session={session} adminActor onDone={onClose} />
+        </>
+      );
+    }
+
+    if (isLive) {
+      return (
+        <Card padding="md">
+          <h3 className="font-bold text-slate-900 mb-1">Pågående pass</h3>
+          <p className="text-xs text-slate-500">Du kan följa städarens framsteg via checklistan.</p>
+        </Card>
+      );
+    }
+
+    // Read-only summary för avslutade / borttagna / pausade / utförda
+    return (
+      <Card padding="md">
+        <h3 className="font-bold text-slate-900 mb-1">Avslutat pass</h3>
+        <p className="text-xs text-slate-500">Status: <span className="font-medium text-slate-700">{shift.status}</span>. Inga ytterligare åtgärder krävs.</p>
+      </Card>
+    );
+  }
+
+  /* ============================================================
+   * AssignReplacementModal – §7.1 tilldela annan städare
+   * ============================================================ */
+  function AssignReplacementModal({ open, onClose, shift, session, onDone }) {
+    const [query, setQuery] = useState('');
+    useEffect(() => { if (open) setQuery(''); }, [open]);
+    if (!open) return null;
+    const candidates = db.availableCleanersFor(shift.id);
+    const filtered = candidates
+      .filter(c => !query || c.user.name.toLowerCase().includes(query.toLowerCase()))
+      .sort((a, b) => {
+        if (a.conflict !== b.conflict) return a.conflict ? 1 : -1;
+        if (a.inPool !== b.inPool) return a.inPool ? -1 : 1;
+        return a.user.name.localeCompare(b.user.name);
+      });
+    const currentId = shift.cleaner_user_id;
+
+    return (
+      <Modal
+        open={open}
+        onClose={onClose}
+        title={shift.status === 'Sjukanmäld' ? 'Tilldela annan städare' : 'Byt städare'}
+        size="md"
+      >
+        <p className="text-xs text-slate-500 mb-3">
+          Städare i objektets pool visas först. <span className="text-rose-600 font-medium">Röd</span> = krock med annat pass.
+        </p>
+        <Input
+          autoFocus
+          placeholder="Sök städare…"
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          className="mb-3"
+        />
+        <div className="max-h-80 overflow-y-auto -mx-1">
+          {filtered.length === 0 ? (
+            <EmptyState icon="users" title="Inga städare matchar" />
+          ) : (
+            <ul className="divide-y divide-slate-100">
+              {filtered.map(c => {
+                const isCurrent = c.user.id === currentId;
+                return (
+                  <li key={c.user.id} className="px-1">
+                    <button
+                      disabled={isCurrent}
+                      onClick={() => {
+                        if (c.conflict && !confirm(`${c.user.name} har redan ett pass under den här tiden. Tilldela ändå?`)) return;
+                        db.swapCleaner(shift.id, c.user.id, session.userId);
+                        toast.success(shift.status === 'Sjukanmäld'
+                          ? `${c.user.name} tilldelad passet. Kund och städare är notifierade.`
+                          : `${c.user.name} tar nu passet.`);
+                        onClose();
+                        onDone && onDone();
+                      }}
+                      className={cx(
+                        'w-full flex items-center gap-3 py-2.5 px-2 rounded-lg text-left transition-colors',
+                        isCurrent ? 'opacity-50 cursor-default' : 'hover:bg-slate-50',
+                      )}
+                    >
+                      <Avatar size="sm" name={c.user.name} />
+                      <div className="flex-1 min-w-0">
+                        <p className="font-semibold text-slate-900 truncate flex items-center gap-2">
+                          {c.user.name}
+                          {isCurrent && <Badge variant="slate">Nuvarande</Badge>}
+                          {c.inPool && !isCurrent && <Badge variant="brand">I poolen</Badge>}
+                        </p>
+                        <p className="text-xs text-slate-500 truncate">{c.user.email}</p>
+                      </div>
+                      {c.conflict ? (
+                        <Badge variant="rose" icon="alert-triangle">Krock</Badge>
+                      ) : !isCurrent && (
+                        <Icon name="chevron-right" className="w-4 h-4 text-slate-400" />
+                      )}
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      </Modal>
+    );
+  }
+
+  /* ============================================================
+   * AdjustShiftModal – §7.1 / §7.4 justera tid (+ valfri städar-byte)
+   * ============================================================ */
+  function AdjustShiftModal({ open, onClose, shift, session, onDone }) {
+    const [date, setDate] = useState('');
+    const [start, setStart] = useState('');
+    const [end, setEnd] = useState('');
+    const [swapCleaner, setSwapCleaner] = useState(false);
+    const [newCleanerId, setNewCleanerId] = useState('');
+
+    useEffect(() => {
+      if (open) {
+        setDate(toDateInput(shift.start_at));
+        setStart(toTimeInput(shift.start_at));
+        setEnd(toTimeInput(shift.end_at));
+        setSwapCleaner(false);
+        setNewCleanerId('');
+      }
+    }, [open, shift.id]);
+
+    if (!open) return null;
+    const prop = db.propertyById(shift.property_id);
+    const newStart = combineDateTime(date, start);
+    const newEnd = combineDateTime(date, end);
+    const validTime = newEnd > newStart;
+    const cleaners = db.state.users.filter(u => u.role === 'cleaner' && u.active);
+
+    return (
+      <Modal
+        open={open}
+        onClose={onClose}
+        title="Justera tiden"
+        size="sm"
+        footer={
+          <>
+            <Button variant="ghost" onClick={onClose}>Avbryt</Button>
+            <Button variant="primary" icon="check" disabled={!validTime || (swapCleaner && !newCleanerId)} onClick={() => {
+              db.adjustTime(shift.id, newStart, newEnd, session.userId);
+              if (swapCleaner && newCleanerId) {
+                db.swapCleaner(shift.id, newCleanerId, session.userId);
+              }
+              toast.success('Tiden uppdaterad. Berörda parter notifierade.');
+              onClose();
+              onDone && onDone();
+            }}>Spara</Button>
+          </>
+        }
+      >
+        <p className="text-sm text-slate-700 mb-1"><span className="font-semibold">{prop?.name}</span></p>
+        <p className="text-xs text-slate-500 mb-4">Originaltiden sparas under historiken och kund + städare notifieras.</p>
+
+        <Field label="Datum">
+          <Input type="date" value={date} onChange={e => setDate(e.target.value)} />
+        </Field>
+        <div className="grid grid-cols-2 gap-3 mt-3">
+          <Field label="Starttid">
+            <Input type="time" value={start} onChange={e => setStart(e.target.value)} />
+          </Field>
+          <Field label="Sluttid">
+            <Input type="time" value={end} onChange={e => setEnd(e.target.value)} />
+          </Field>
+        </div>
+        {!validTime && (
+          <p className="text-xs text-rose-600 mt-2">Sluttiden måste ligga efter starttiden.</p>
+        )}
+
+        <div className="mt-4 pt-4 border-t border-slate-100">
+          <Checkbox checked={swapCleaner} onChange={setSwapCleaner} label="Byt även städare" />
+          {swapCleaner && (
+            <div className="mt-3">
+              <Select value={newCleanerId} onChange={e => setNewCleanerId(e.target.value)}>
+                <option value="">— välj städare —</option>
+                {cleaners.map(c => (
+                  <option key={c.id} value={c.id} disabled={c.id === shift.cleaner_user_id}>
+                    {c.name}{c.id === shift.cleaner_user_id ? ' (nuvarande)' : ''}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          )}
+        </div>
+      </Modal>
+    );
+  }
+
+  /* ============================================================
+   * CustomerShiftActions – §7.2 48h-avbokning
+   * ============================================================ */
+  function CustomerShiftActions({ shift, session, onClose }) {
+    useDb();
+    const [cancelOpen, setCancelOpen] = useState(false);
+    const status = shift.status;
+    const startMs = new Date(shift.start_at).getTime();
+    const hoursToStart = (startMs - Date.now()) / 36e5;
+
+    if (status === 'Avbokat') {
+      return (
+        <Card padding="md" className="border-slate-200 bg-slate-50/60">
+          <div className="flex items-start gap-2 mb-1">
+            <Icon name="x" className="w-4 h-4 text-slate-500 mt-0.5" />
+            <h3 className="font-bold text-slate-700">Avbokat pass</h3>
+          </div>
+          <p className="text-sm text-slate-600">Passet är avbokat. Inga vidare åtgärder krävs.</p>
+          {shift.cancel_reason && (
+            <p className="text-xs text-slate-500 mt-2">Orsak: {shift.cancel_reason}</p>
+          )}
+        </Card>
+      );
+    }
+
+    if (status === 'Borttaget') {
+      return (
+        <Card padding="md" className="border-slate-200 bg-slate-50/60">
+          <h3 className="font-bold text-slate-700 mb-1">Passet är borttaget</h3>
+          <p className="text-sm text-slate-600">Admin har tagit bort passet.</p>
+        </Card>
+      );
+    }
+
+    if (status === 'Pausat (kundledighet)') {
+      return (
+        <Card padding="md" className="border-sky-200 bg-sky-50/40">
+          <h3 className="font-bold text-sky-900 mb-1">Pausat – kundledighet</h3>
+          <p className="text-sm text-sky-900/90">Passet är pausat enligt registrerad ledighet.</p>
+        </Card>
+      );
+    }
+
+    if (status !== 'Godkänt' && status !== 'Planerat') {
+      // Pågående / Utfört / Sjukanmäld → ingen avbokningsmöjlighet
+      return null;
+    }
+
+    // Status är Godkänt / Planerat → 48h-regeln gäller
+    if (hoursToStart > 48) {
+      return (
+        <Card padding="md">
+          <h3 className="font-bold text-slate-900 mb-1">Behöver du avboka?</h3>
+          <p className="text-xs text-slate-500 mb-3">Avbokning är möjlig fram till 48 timmar före passet.</p>
+          <Button variant="danger-ghost" icon="x" className="w-full" onClick={() => setCancelOpen(true)}>
+            Avboka pass
+          </Button>
+          <CancelShiftModal open={cancelOpen} onClose={() => setCancelOpen(false)} shift={shift} session={session} onDone={onClose} />
+        </Card>
+      );
+    }
+
+    // ≤ 48 h kvar → infobox med admins kontaktuppgifter
+    const support = db.orgSupportContact();
+    const hoursLeft = Math.max(0, Math.floor(hoursToStart));
+    return (
+      <Card padding="md" className="border-amber-200 bg-amber-50/40">
+        <div className="flex items-start gap-2 mb-2">
+          <Icon name="alert-circle" className="w-4 h-4 text-amber-700 mt-0.5" />
+          <div>
+            <h3 className="font-bold text-amber-900">Inom 48 timmar</h3>
+            <p className="text-xs text-amber-800/90 mt-0.5">
+              {hoursLeft <= 0 ? 'Passet börjar inom kort.' : `Cirka ${hoursLeft} timmar kvar.`} Kontakta oss för att avboka.
+            </p>
+          </div>
+        </div>
+        <div className="mt-3 space-y-1.5 text-sm">
+          <div className="flex items-center gap-2 text-slate-900">
+            <Icon name="phone" className="w-4 h-4 text-amber-700" />
+            <a href={`tel:${support.phone}`} className="font-medium hover:underline">{support.phone || '—'}</a>
+          </div>
+          <div className="flex items-center gap-2 text-slate-900">
+            <Icon name="mail" className="w-4 h-4 text-amber-700" />
+            <a href={`mailto:${support.email}`} className="font-medium hover:underline">{support.email}</a>
+          </div>
+        </div>
+      </Card>
+    );
+  }
+
+  /* ============================================================
+   * CancelShiftModal – §7.2 bekräfta kundavbokning
+   * ============================================================ */
+  function CancelShiftModal({ open, onClose, shift, session, onDone }) {
+    const [reason, setReason] = useState('');
+    useEffect(() => { if (open) setReason(''); }, [open]);
+    if (!shift) return null;
+    const prop = db.propertyById(shift.property_id);
+    const hoursToStart = (new Date(shift.start_at).getTime() - Date.now()) / 36e5;
+    return (
+      <Modal
+        open={open}
+        onClose={onClose}
+        title="Avboka pass"
+        size="sm"
+        footer={
+          <>
+            <Button variant="ghost" onClick={onClose}>Behåll passet</Button>
+            <Button variant="danger" icon="x" onClick={() => {
+              const result = db.cancelByCustomer(shift.id, session.userId, reason);
+              if (result?.error === 'INSIDE_48H') {
+                toast.error('Passet ligger inom 48 timmar – kontakta admin för att avboka.');
+                return;
+              }
+              toast.success('Passet är avbokat. Admin och städaren är notifierade.');
+              onClose();
+              onDone && onDone();
+            }}>Avboka pass</Button>
+          </>
+        }
+      >
+        <p className="text-sm text-slate-700 mb-1">
+          <span className="font-semibold">{prop?.name}</span> · {relativeDay(shift.start_at)} {formatRange(shift.start_at, shift.end_at)}
+        </p>
+        <p className="text-xs text-slate-500 mb-4">
+          Cirka {Math.floor(hoursToStart)} timmar kvar till passet. Admin och tilldelad städare får besked direkt.
+        </p>
+        <Field label="Orsak (valfri)">
+          <Textarea rows={3} value={reason} onChange={e => setReason(e.target.value)} placeholder="T.ex. helgstängt, ombyggnad…" />
+        </Field>
+      </Modal>
+    );
+  }
+
+  /* ============================================================
+   * Sjukanmälan-modal (§7.1) – fungerar både för städare och admin
+   * ============================================================ */
+  function SickReportModal({ open, onClose, shift, session, adminActor = false, onDone }) {
+    const [reason, setReason] = useState('');
+    useEffect(() => { if (open) setReason(''); }, [open]);
+    if (!shift) return null;
+    const prop = db.propertyById(shift.property_id);
+    const cleaner = db.userById(shift.cleaner_user_id);
+    return (
+      <Modal
+        open={open}
+        onClose={onClose}
+        title={adminActor ? 'Sjukanmäl åt städaren' : 'Sjukanmäl pass'}
+        size="sm"
+        footer={
+          <>
+            <Button variant="ghost" onClick={onClose}>Avbryt</Button>
+            <Button variant="danger" icon="alert-circle" onClick={() => {
+              db.reportSick(shift.id, session.userId, reason.trim());
+              toast.success(adminActor
+                ? `${cleaner?.name} är sjukanmäld. Kund har fått besked.`
+                : 'Sjukanmält. Admin och kund har fått besked.');
+              onClose();
+              onDone && onDone();
+            }}>{adminActor ? 'Sjukanmäl' : 'Sjukanmäl pass'}</Button>
+          </>
+        }
+      >
+        <p className="text-sm text-slate-700 mb-1">
+          <span className="font-semibold">{prop?.name}</span> · {relativeDay(shift.start_at)} {formatRange(shift.start_at, shift.end_at)}
+        </p>
+        {adminActor && cleaner && (
+          <p className="text-xs text-slate-500 mb-1">Städare: {cleaner.name}</p>
+        )}
+        <p className="text-xs text-slate-500 mb-4">
+          {adminActor
+            ? 'Passet får status "Sjukanmäld" och du kan därefter tilldela en ersättare.'
+            : 'Admin notifieras direkt och kan boka om till en annan städare.'}
+        </p>
+        <Field label="Orsak (valfri)">
+          <Textarea rows={3} value={reason} onChange={e => setReason(e.target.value)} placeholder="T.ex. förkyld, hög feber…" />
+        </Field>
+      </Modal>
+    );
+  }
+
+  /* ============================================================
+   * §7.6 Avvikelse / reklamation — kategorier + bilage-hjälp
+   * ============================================================ */
+  const CLEANER_CATEGORIES = [
+    { id: 'broken_equipment', label: 'Trasig utrustning' },
+    { id: 'no_access', label: 'Kom ej in' },
+    { id: 'alarm', label: 'Larm / larmproblem' },
+    { id: 'missing_supplies', label: 'Material slut' },
+    { id: 'other', label: 'Annat' },
+  ];
+  const CUSTOMER_CATEGORIES = [
+    { id: 'missed_area', label: 'Missad yta' },
+    { id: 'poor_quality', label: 'Bristfällig städning' },
+    { id: 'damage', label: 'Skada' },
+    { id: 'other', label: 'Annat' },
+  ];
+  const ALL_CATEGORIES = [...CLEANER_CATEGORIES, ...CUSTOMER_CATEGORIES];
+  function categoryLabel(id) {
+    return ALL_CATEGORIES.find(c => c.id === id)?.label || id;
+  }
+  const MAX_ATTACHMENTS = 5;
+  const MAX_FILE_SIZE = 5 * 1024 * 1024;
+  const ACCEPTED_MIME = ['image/jpeg', 'image/png'];
+
+  function fileToAttachment(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve({
+        name: file.name,
+        size: file.size,
+        mime: file.type,
+        path: `mock://incident/${Date.now()}_${file.name}`,
+        dataUrl: reader.result,
+      });
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function AttachmentUploader({ value, onChange, hint }) {
+    const [error, setError] = useState('');
+    const remaining = MAX_ATTACHMENTS - value.length;
+    async function handleFiles(files) {
+      setError('');
+      const list = Array.from(files);
+      if (value.length + list.length > MAX_ATTACHMENTS) {
+        setError(`Max ${MAX_ATTACHMENTS} bilder per ärende.`);
+        return;
+      }
+      for (const f of list) {
+        if (!ACCEPTED_MIME.includes(f.type)) {
+          setError(`Endast JPEG och PNG. (${f.name})`);
+          return;
+        }
+        if (f.size > MAX_FILE_SIZE) {
+          setError(`Max 5 MB per bild. (${f.name})`);
+          return;
+        }
+      }
+      const next = [...value];
+      for (const f of list) next.push(await fileToAttachment(f));
+      onChange(next);
+    }
+    return (
+      <div>
+        <div className="flex flex-wrap gap-2 mb-2">
+          {value.map((a, i) => (
+            <div key={i} className="relative group">
+              <img src={a.dataUrl} alt={a.name} className="w-20 h-20 object-cover rounded-lg border border-slate-200" />
+              <button
+                type="button"
+                onClick={() => onChange(value.filter((_, j) => j !== i))}
+                className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-slate-900 text-white text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                aria-label={`Ta bort ${a.name}`}
+              >
+                <Icon name="x" className="w-3 h-3" />
+              </button>
+            </div>
+          ))}
+          {remaining > 0 && (
+            <label className="w-20 h-20 rounded-lg border-2 border-dashed border-slate-300 hover:border-brand-400 hover:bg-brand-50/40 cursor-pointer flex flex-col items-center justify-center text-slate-400 hover:text-brand-600 transition-colors">
+              <Icon name="plus" className="w-5 h-5" />
+              <span className="text-[10px] mt-0.5">Lägg till</span>
+              <input
+                type="file"
+                accept="image/jpeg,image/png"
+                multiple
+                className="hidden"
+                onChange={e => { handleFiles(e.target.files); e.target.value = ''; }}
+              />
+            </label>
+          )}
+        </div>
+        <p className="text-xs text-slate-500">
+          {hint || `Upp till ${MAX_ATTACHMENTS} bilder (JPEG/PNG, max 5 MB/st). ${value.length} av ${MAX_ATTACHMENTS} valda.`}
+        </p>
+        {error && <p className="text-xs text-rose-600 mt-1">{error}</p>}
+      </div>
+    );
+  }
+
+  function AttachmentGallery({ items, emptyText = 'Inga bilagor.' }) {
+    if (!items || items.length === 0) {
+      return <p className="text-xs text-slate-400">{emptyText}</p>;
+    }
+    return (
+      <div className="flex flex-wrap gap-2">
+        {items.map((a, i) => (
+          <a
+            key={i}
+            href={a.dataUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="block w-24 h-24 rounded-lg overflow-hidden border border-slate-200 hover:border-brand-400 transition-colors group"
+            title={a.name}
+          >
+            <img src={a.dataUrl} alt={a.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+          </a>
+        ))}
+      </div>
+    );
+  }
+
+  function StatusPill({ status }) {
+    const map = {
+      open: { label: 'Öppen', variant: 'rose' },
+      in_progress: { label: 'Pågående', variant: 'amber' },
+      resolved: { label: 'Åtgärdad', variant: 'emerald' },
+    };
+    const c = map[status] || { label: status, variant: 'slate' };
+    return <Badge variant={c.variant}>{c.label}</Badge>;
+  }
+
+  function CleanerIncidentReportModal({ open, onClose, shift, session, onDone }) {
+    const prop = shift ? db.propertyById(shift.property_id) : null;
+    const [category, setCategory] = useState('broken_equipment');
+    const [title, setTitle] = useState('');
+    const [description, setDescription] = useState('');
+
+    useEffect(() => {
+      if (open) { setCategory('broken_equipment'); setTitle(''); setDescription(''); }
+    }, [open]);
+
+    const canSubmit = title.trim().length > 0 && description.trim().length > 0;
+    return (
+      <Modal
+        open={open}
+        onClose={onClose}
+        title="Rapportera avvikelse"
+        size="md"
+        footer={
+          <>
+            <Button variant="ghost" onClick={onClose}>Avbryt</Button>
+            <Button
+              variant="primary"
+              disabled={!canSubmit}
+              onClick={() => {
+                db.createIncident({
+                  shiftId: shift?.id,
+                  propertyId: shift.property_id,
+                  reporterUserId: session.userId,
+                  reporterRole: 'cleaner',
+                  kind: 'cleaner_issue',
+                  category, title, description,
+                });
+                toast.success('Avvikelse skickad. Admin notifieras.');
+                onClose();
+                onDone && onDone();
+              }}
+            >Skicka in</Button>
+          </>
+        }
+      >
+        <p className="text-xs text-slate-500 mb-3">
+          {prop?.name} · {formatRange(shift.start_at, shift.end_at)} · går till admin
+        </p>
+        <Field label="Kategori *" className="mb-3">
+          <Select value={category} onChange={e => setCategory(e.target.value)}>
+            {CLEANER_CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+          </Select>
+        </Field>
+        <Field label="Titel *" className="mb-3">
+          <Input value={title} onChange={e => setTitle(e.target.value)} placeholder="Kort sammanfattning" />
+        </Field>
+        <Field label="Beskrivning *">
+          <Textarea rows={5} value={description} onChange={e => setDescription(e.target.value)} placeholder="Vad hände? Vad gjorde du? Behövs uppföljning?" />
+        </Field>
+        <p className="text-[11px] text-slate-400 mt-3">Bildbilagor från städare läggs till i v1.1.</p>
+      </Modal>
+    );
+  }
+
+  function CustomerComplaintModal({ open, onClose, shift, session, onDone }) {
+    const prop = shift ? db.propertyById(shift.property_id) : null;
+    const [category, setCategory] = useState('missed_area');
+    const [title, setTitle] = useState('');
+    const [description, setDescription] = useState('');
+    const [attachments, setAttachments] = useState([]);
+
+    useEffect(() => {
+      if (open) { setCategory('missed_area'); setTitle(''); setDescription(''); setAttachments([]); }
+    }, [open]);
+
+    const canSubmit = title.trim().length > 0 && description.trim().length > 0;
+    return (
+      <Modal
+        open={open}
+        onClose={onClose}
+        title="Reklamera passet"
+        size="md"
+        footer={
+          <>
+            <Button variant="ghost" onClick={onClose}>Avbryt</Button>
+            <Button
+              variant="primary"
+              disabled={!canSubmit}
+              onClick={() => {
+                db.createIncident({
+                  shiftId: shift?.id,
+                  propertyId: shift.property_id,
+                  reporterUserId: session.userId,
+                  reporterRole: session.user.role,
+                  kind: 'customer_complaint',
+                  category, title, description, attachments,
+                });
+                toast.success('Tack — vi tar tag i det direkt.');
+                onClose();
+                onDone && onDone();
+              }}
+            >Skicka in</Button>
+          </>
+        }
+      >
+        <p className="text-xs text-slate-500 mb-3">
+          {prop?.name} · {formatDateLong(shift.start_at)} · {formatRange(shift.start_at, shift.end_at)}
+        </p>
+        <Field label="Kategori *" className="mb-3">
+          <Select value={category} onChange={e => setCategory(e.target.value)}>
+            {CUSTOMER_CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+          </Select>
+        </Field>
+        <Field label="Titel *" className="mb-3">
+          <Input value={title} onChange={e => setTitle(e.target.value)} placeholder="Kort sammanfattning" />
+        </Field>
+        <Field label="Beskrivning *" className="mb-3">
+          <Textarea rows={4} value={description} onChange={e => setDescription(e.target.value)} placeholder="Beskriv vad som inte stämmer." />
+        </Field>
+        <Field label="Bildbilagor">
+          <AttachmentUploader value={attachments} onChange={setAttachments} />
+        </Field>
+      </Modal>
+    );
+  }
+
+  function ResolveIncidentModal({ open, onClose, incident, session, onDone }) {
+    const [note, setNote] = useState('');
+    const [attachments, setAttachments] = useState([]);
+
+    useEffect(() => {
+      if (open) { setNote(''); setAttachments([]); }
+    }, [open]);
+
+    if (!incident) return null;
+    const canSubmit = note.trim().length > 0;
+    return (
+      <Modal
+        open={open}
+        onClose={onClose}
+        title="Åtgärda ärende"
+        size="md"
+        footer={
+          <>
+            <Button variant="ghost" onClick={onClose}>Avbryt</Button>
+            <Button
+              variant="primary"
+              disabled={!canSubmit}
+              onClick={() => {
+                db.resolveIncident(incident.id, session.userId, note, attachments);
+                toast.success('Ärendet är markerat som åtgärdat.');
+                onClose();
+                onDone && onDone();
+              }}
+            >Markera som åtgärdat</Button>
+          </>
+        }
+      >
+        <p className="text-sm font-semibold text-slate-900 mb-1">{incident.title}</p>
+        <p className="text-xs text-slate-500 mb-4">{categoryLabel(incident.category)} · rapporterat {formatDateTime(incident.created_at)}</p>
+        <Field label="Åtgärdsnotering *" className="mb-3">
+          <Textarea rows={4} value={note} onChange={e => setNote(e.target.value)} placeholder="Vad gjordes? Skicka vidare till städaren / kunden om relevant." />
+        </Field>
+        <Field label="Bildbilagor (valfritt)">
+          <AttachmentUploader value={attachments} onChange={setAttachments} hint={`Upp till ${MAX_ATTACHMENTS} bilder (JPEG/PNG, max 5 MB/st). Visas för rapportören.`} />
+        </Field>
+      </Modal>
+    );
+  }
+
+  function IncidentRow({ incident, viewerRole, onClick }) {
+    const reporter = db.userById(incident.reported_by_user_id);
+    const reporterLabel = viewerRole === 'customer' || viewerRole === 'customer_employee'
+      ? (incident.reporter_role === 'cleaner' ? 'Städare' : reporter?.name)
+      : reporter?.name;
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        className="w-full text-left px-3 py-2.5 rounded-lg hover:bg-slate-50 border border-slate-100 transition-colors"
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 mb-0.5 flex-wrap">
+              <Badge variant={incident.kind === 'customer_complaint' ? 'rose' : 'amber'}>
+                {incident.kind === 'customer_complaint' ? 'Reklamation' : 'Avvikelse'}
+              </Badge>
+              <StatusPill status={incident.status} />
+              <span className="text-[11px] text-slate-400">{categoryLabel(incident.category)}</span>
+            </div>
+            <p className="font-semibold text-sm text-slate-900 truncate">{incident.title}</p>
+            <p className="text-xs text-slate-500 mt-0.5">
+              {reporterLabel} · {formatDateTime(incident.created_at)}
+              {incident.attachments?.length > 0 && ` · ${incident.attachments.length} bild${incident.attachments.length === 1 ? '' : 'er'}`}
+            </p>
+          </div>
+          <Icon name="chevron-down" className="w-4 h-4 text-slate-400 mt-1 -rotate-90 flex-shrink-0" />
+        </div>
+      </button>
+    );
+  }
+
+  function CleanerIncidentSection({ shift, session }) {
+    useDb();
+    const [open, setOpen] = useState(false);
+    const myIncidents = db.state.incidents.filter(
+      i => i.shift_id === shift.id && i.reported_by_user_id === session.userId,
+    ).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    const canReport = ['Pågående', 'Utfört'].includes(shift.status);
+    return (
+      <Card padding="md">
+        <div className="flex items-center justify-between gap-3 mb-3">
+          <div>
+            <p className="text-sm font-semibold text-slate-900">Något att rapportera?</p>
+            <p className="text-xs text-slate-500 mt-0.5">Trasig utrustning, larmproblem, slut på material eller annat.</p>
+          </div>
+          <Button variant="outline" icon="alert-triangle" onClick={() => setOpen(true)} disabled={!canReport}>
+            Rapportera avvikelse
+          </Button>
+        </div>
+        {!canReport && (
+          <p className="text-xs text-slate-400">Du kan rapportera när passet pågår eller är utfört.</p>
+        )}
+        {myIncidents.length > 0 && (
+          <div className="mt-3 pt-3 border-t border-slate-100 space-y-2">
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Mina ärenden på passet</p>
+            {myIncidents.map(i => (
+              <IncidentRow key={i.id} incident={i} viewerRole="cleaner" onClick={() => location.hash = `#/stadare/avvikelser/${i.id}`} />
+            ))}
+          </div>
+        )}
+        <CleanerIncidentReportModal open={open} onClose={() => setOpen(false)} shift={shift} session={session} />
+      </Card>
+    );
+  }
+
+  function CustomerComplaintSection({ shift, session }) {
+    useDb();
+    const [open, setOpen] = useState(false);
+    const myComplaints = db.state.incidents.filter(
+      i => i.shift_id === shift.id && i.kind === 'customer_complaint',
+    ).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    return (
+      <Card padding="md">
+        <div className="flex items-center justify-between gap-3 mb-3">
+          <div>
+            <p className="text-sm font-semibold text-slate-900">Synpunkter på utfört arbete?</p>
+            <p className="text-xs text-slate-500 mt-0.5">Missad yta, bristfällig städning, skada — vi tar tag i det direkt.</p>
+          </div>
+          <Button variant="outline" icon="alert-triangle" onClick={() => setOpen(true)}>
+            Reklamera / avvikelse
+          </Button>
+        </div>
+        {myComplaints.length > 0 && (
+          <div className="mt-3 pt-3 border-t border-slate-100 space-y-2">
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Tidigare reklamationer på passet</p>
+            {myComplaints.map(i => (
+              <IncidentRow key={i.id} incident={i} viewerRole={session.user.role} onClick={() => location.hash = `#/kund/avvikelser/${i.id}`} />
+            ))}
+          </div>
+        )}
+        <CustomerComplaintModal open={open} onClose={() => setOpen(false)} shift={shift} session={session} />
+      </Card>
+    );
+  }
+
+  function IncidentDetailView({ session, onNavigate, incidentId }) {
+    useDb();
+    const detail = db.incidentDetail(incidentId);
+    const role = session.user.role;
+    const [resolveOpen, setResolveOpen] = useState(false);
+
+    const backLink = role === 'admin' ? '/admin/avvikelser'
+      : role === 'cleaner' ? '/stadare/avvikelser'
+      : '/kund/avvikelser';
+
+    if (!detail) {
+      return (
+        <div>
+          <PageHeader breadcrumbs={[{ label: 'Avvikelser', href: `#${backLink}` }]} title="Ärendet finns inte" />
+          <Card padding="lg">
+            <EmptyState icon="alert-circle" title="Inte hittat" description="Ärendet du letar efter finns inte eller har tagits bort." />
+          </Card>
+        </div>
+      );
+    }
+
+    const isAdmin = role === 'admin';
+    const isCustomer = role === 'customer' || role === 'customer_employee';
+    const reporterLabel = isCustomer && detail.reporter_role === 'cleaner' ? 'Städare' : detail.reporter?.name;
+    const cleanerLabel = db.displayCleaner(detail.shift?.cleaner_user_id, role);
+
+    return (
+      <div>
+        <PageHeader
+          breadcrumbs={[{ label: 'Avvikelser', href: `#${backLink}` }]}
+          title={detail.title}
+          subtitle={`${categoryLabel(detail.category)} · ${detail.property?.name}`}
+          actions={<Button variant="ghost" icon="chevron-left" onClick={() => onNavigate(backLink)}>Tillbaka</Button>}
+        />
+
+        <div className="grid lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-2 space-y-4">
+            <Card padding="md">
+              <div className="flex items-center gap-2 mb-3 flex-wrap">
+                <Badge variant={detail.kind === 'customer_complaint' ? 'rose' : 'amber'}>
+                  {detail.kind === 'customer_complaint' ? 'Reklamation' : 'Avvikelse'}
+                </Badge>
+                <StatusPill status={detail.status} />
+                <span className="text-xs text-slate-500">{categoryLabel(detail.category)}</span>
+              </div>
+              <p className="text-sm font-semibold text-slate-900 mb-1">Beskrivning</p>
+              <p className="text-sm text-slate-700 whitespace-pre-line">{detail.description}</p>
+            </Card>
+
+            <Card padding="md">
+              <h3 className="font-bold text-slate-900 mb-3">Bildbilagor</h3>
+              <AttachmentGallery items={detail.attachments} emptyText="Inga bildbilagor på det här ärendet." />
+            </Card>
+
+            {detail.status === 'resolved' && (
+              <Card padding="md" className="border-emerald-200 bg-emerald-50/40">
+                <div className="flex items-start gap-2 mb-2">
+                  <Icon name="check-circle" className="w-5 h-5 text-emerald-600 mt-0.5" />
+                  <div>
+                    <h3 className="font-bold text-emerald-900">Åtgärdat {formatDateTime(detail.resolved_at)}</h3>
+                    {detail.resolver && <p className="text-xs text-emerald-700">av {detail.resolver.name}</p>}
+                  </div>
+                </div>
+                <p className="text-sm text-emerald-900/90 whitespace-pre-line">{detail.resolution_note}</p>
+              </Card>
+            )}
+
+            {isAdmin && (
+              <Card padding="md">
+                <h3 className="font-bold text-slate-900 mb-3">Admin-åtgärder</h3>
+                <div className="flex flex-wrap gap-2">
+                  {detail.status === 'open' && (
+                    <Button variant="outline" icon="refresh" onClick={() => {
+                      db.setIncidentInProgress(detail.id, session.userId);
+                      toast.success('Ärendet är markerat som pågående.');
+                    }}>Markera som pågående</Button>
+                  )}
+                  {detail.status !== 'resolved' && (
+                    <Button variant="primary" icon="check-circle" onClick={() => setResolveOpen(true)}>Åtgärda</Button>
+                  )}
+                  {detail.status === 'resolved' && (
+                    <Button variant="ghost" icon="refresh" onClick={() => {
+                      db.reopenIncident(detail.id);
+                      toast.info('Ärendet är återöppnat.');
+                    }}>Återöppna ärende</Button>
+                  )}
+                </div>
+              </Card>
+            )}
+          </div>
+
+          <div className="space-y-4">
+            <Card padding="md">
+              <h3 className="font-bold text-slate-900 mb-3">Information</h3>
+              <dl className="text-sm space-y-2.5">
+                <div>
+                  <dt className="text-xs text-slate-500">Objekt</dt>
+                  <dd className="font-medium text-slate-900">{detail.property?.name}</dd>
+                </div>
+                {!isCustomer && (
+                  <div>
+                    <dt className="text-xs text-slate-500">Kund</dt>
+                    <dd className="font-medium text-slate-900">{detail.customer?.name}</dd>
+                  </div>
+                )}
+                {detail.shift && (
+                  <div>
+                    <dt className="text-xs text-slate-500">Pass</dt>
+                    <dd className="font-medium text-slate-900">
+                      <a
+                        href={`#${role === 'admin' ? '/admin/schema' : role === 'cleaner' ? '/stadare/pass' : '/kund/pass'}/${detail.shift.id}`}
+                        className="text-brand-600 hover:underline"
+                      >
+                        {formatDateLong(detail.shift.start_at)} · {formatRange(detail.shift.start_at, detail.shift.end_at)}
+                      </a>
+                    </dd>
+                  </div>
+                )}
+                <div>
+                  <dt className="text-xs text-slate-500">Rapporterad</dt>
+                  <dd className="font-medium text-slate-900">{formatDateTime(detail.created_at)}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-slate-500">Rapportör</dt>
+                  <dd className="font-medium text-slate-900">{reporterLabel}</dd>
+                </div>
+                {detail.cleaner && !isCustomer && (
+                  <div>
+                    <dt className="text-xs text-slate-500">Städare på passet</dt>
+                    <dd className="font-medium text-slate-900">{cleanerLabel}</dd>
+                  </div>
+                )}
+              </dl>
+            </Card>
+          </div>
+        </div>
+
+        <ResolveIncidentModal open={resolveOpen} onClose={() => setResolveOpen(false)} incident={detail} session={session} />
+      </div>
+    );
+  }
+
+  function AdminIncidentsView({ session, onNavigate }) {
+    useDb();
+    const [statusFilter, setStatusFilter] = useState('open_first');
+    const [customerFilter, setCustomerFilter] = useState('all');
+    const [propertyFilter, setPropertyFilter] = useState('all');
+    const [cleanerFilter, setCleanerFilter] = useState('all');
+    const [categoryFilter, setCategoryFilter] = useState('all');
+    const [periodFilter, setPeriodFilter] = useState('all');
+
+    const customers = db.state.customers;
+    const properties = db.state.properties;
+    const cleaners = db.state.users.filter(u => u.role === 'cleaner');
+
+    let list = db.state.incidents.slice();
+
+    if (statusFilter !== 'open_first' && statusFilter !== 'all') {
+      list = list.filter(i => i.status === statusFilter);
+    }
+    if (customerFilter !== 'all') {
+      const customerProps = new Set(properties.filter(p => p.customer_id === customerFilter).map(p => p.id));
+      list = list.filter(i => customerProps.has(i.property_id));
+    }
+    if (propertyFilter !== 'all') list = list.filter(i => i.property_id === propertyFilter);
+    if (cleanerFilter !== 'all') {
+      list = list.filter(i => {
+        const sh = i.shift_id ? db.shiftById(i.shift_id) : null;
+        return sh?.cleaner_user_id === cleanerFilter;
+      });
+    }
+    if (categoryFilter !== 'all') list = list.filter(i => i.category === categoryFilter);
+    if (periodFilter !== 'all') {
+      const now = Date.now();
+      const cutoff = periodFilter === '7d' ? now - 7 * 24 * 36e5
+        : periodFilter === '30d' ? now - 30 * 24 * 36e5
+        : periodFilter === '90d' ? now - 90 * 24 * 36e5 : 0;
+      list = list.filter(i => new Date(i.created_at).getTime() >= cutoff);
+    }
+
+    const order = { open: 0, in_progress: 1, resolved: 2 };
+    list.sort((a, b) => (order[a.status] - order[b.status]) || (new Date(b.created_at) - new Date(a.created_at)));
+
+    const stats = {
+      open: db.state.incidents.filter(i => i.status === 'open').length,
+      in_progress: db.state.incidents.filter(i => i.status === 'in_progress').length,
+      resolved: db.state.incidents.filter(i => i.status === 'resolved').length,
+    };
+
+    const filteredProperties = customerFilter === 'all' ? properties : properties.filter(p => p.customer_id === customerFilter);
+
+    return (
+      <div>
+        <PageHeader title="Avvikelser" subtitle="Alla ärenden — öppna först" />
+
+        <div className="grid grid-cols-3 gap-3 mb-6">
+          <Stat label="Öppna" value={stats.open} icon="alert-circle" tone="rose" />
+          <Stat label="Pågående" value={stats.in_progress} icon="refresh" tone="amber" />
+          <Stat label="Åtgärdade" value={stats.resolved} icon="check-circle" tone="emerald" />
+        </div>
+
+        <Card padding="md" className="mb-4">
+          <div className="grid md:grid-cols-3 lg:grid-cols-6 gap-3">
+            <Field label="Status">
+              <Select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+                <option value="open_first">Öppna först</option>
+                <option value="open">Endast öppna</option>
+                <option value="in_progress">Endast pågående</option>
+                <option value="resolved">Endast åtgärdade</option>
+                <option value="all">Alla</option>
+              </Select>
+            </Field>
+            <Field label="Kund">
+              <Select value={customerFilter} onChange={e => { setCustomerFilter(e.target.value); setPropertyFilter('all'); }}>
+                <option value="all">Alla kunder</option>
+                {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </Select>
+            </Field>
+            <Field label="Objekt">
+              <Select value={propertyFilter} onChange={e => setPropertyFilter(e.target.value)}>
+                <option value="all">Alla objekt</option>
+                {filteredProperties.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </Select>
+            </Field>
+            <Field label="Städare">
+              <Select value={cleanerFilter} onChange={e => setCleanerFilter(e.target.value)}>
+                <option value="all">Alla städare</option>
+                {cleaners.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </Select>
+            </Field>
+            <Field label="Kategori">
+              <Select value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)}>
+                <option value="all">Alla kategorier</option>
+                <optgroup label="Städare">
+                  {CLEANER_CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+                </optgroup>
+                <optgroup label="Kund">
+                  {CUSTOMER_CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+                </optgroup>
+              </Select>
+            </Field>
+            <Field label="Period">
+              <Select value={periodFilter} onChange={e => setPeriodFilter(e.target.value)}>
+                <option value="all">All tid</option>
+                <option value="7d">Senaste 7 dagar</option>
+                <option value="30d">Senaste 30 dagar</option>
+                <option value="90d">Senaste 90 dagar</option>
+              </Select>
+            </Field>
+          </div>
+        </Card>
+
+        {list.length === 0 ? (
+          <Card padding="lg">
+            <EmptyState icon="check-circle" title="Inga ärenden" description="Inga avvikelser matchar dina filter." />
+          </Card>
+        ) : (
+          <Card padding="sm">
+            <div className="divide-y divide-slate-100">
+              {list.map(i => (
+                <div key={i.id} className="px-2">
+                  <IncidentRow incident={i} viewerRole="admin" onClick={() => onNavigate(`/admin/avvikelser/${i.id}`)} />
+                </div>
+              ))}
+            </div>
+          </Card>
+        )}
+      </div>
+    );
+  }
+
+  function CleanerIncidentsView({ session, onNavigate }) {
+    useDb();
+    const [statusFilter, setStatusFilter] = useState('all');
+    let list = db.incidents({ viewerUserId: session.userId });
+    if (statusFilter !== 'all') list = list.filter(i => i.status === statusFilter);
+
+    return (
+      <div>
+        <PageHeader title="Mina avvikelser" subtitle="Avvikelser du själv rapporterat eller som rör dina pass" />
+
+        <Card padding="md" className="mb-4">
+          <Field label="Status">
+            <Select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+              <option value="all">Alla</option>
+              <option value="open">Öppna</option>
+              <option value="in_progress">Pågående</option>
+              <option value="resolved">Åtgärdade</option>
+            </Select>
+          </Field>
+        </Card>
+
+        {list.length === 0 ? (
+          <Card padding="lg">
+            <EmptyState icon="check-circle" title="Inga ärenden" description="Du har inga avvikelser just nu." />
+          </Card>
+        ) : (
+          <Card padding="sm">
+            <div className="divide-y divide-slate-100">
+              {list.map(i => (
+                <div key={i.id} className="px-2">
+                  <IncidentRow incident={i} viewerRole="cleaner" onClick={() => onNavigate(`/stadare/avvikelser/${i.id}`)} />
+                </div>
+              ))}
+            </div>
+          </Card>
+        )}
+      </div>
+    );
+  }
+
+  function CustomerIncidentsView({ session, onNavigate }) {
+    useDb();
+    const [statusFilter, setStatusFilter] = useState('all');
+    let list = db.incidents({ viewerUserId: session.userId });
+    if (statusFilter !== 'all') list = list.filter(i => i.status === statusFilter);
+
+    return (
+      <div>
+        <PageHeader title="Avvikelser & reklamationer" subtitle="Allt som rapporterats kring era objekt" />
+
+        <Card padding="md" className="mb-4">
+          <Field label="Status">
+            <Select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+              <option value="all">Alla</option>
+              <option value="open">Öppna</option>
+              <option value="in_progress">Pågående</option>
+              <option value="resolved">Åtgärdade</option>
+            </Select>
+          </Field>
+        </Card>
+
+        {list.length === 0 ? (
+          <Card padding="lg">
+            <EmptyState icon="check-circle" title="Inga ärenden" description="Inga avvikelser eller reklamationer just nu." />
+          </Card>
+        ) : (
+          <Card padding="sm">
+            <div className="divide-y divide-slate-100">
+              {list.map(i => (
+                <div key={i.id} className="px-2">
+                  <IncidentRow incident={i} viewerRole={session.user.role} onClick={() => onNavigate(`/kund/avvikelser/${i.id}`)} />
+                </div>
+              ))}
+            </div>
+          </Card>
+        )}
+      </div>
+    );
+  }
+
+  function ShiftIncidentsList({ shift, session }) {
+    useDb();
+    const role = session.user.role;
+    const items = db.state.incidents.filter(i => i.shift_id === shift.id)
+      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    if (items.length === 0) return null;
+    const linkPrefix = role === 'admin' ? '/admin/avvikelser' : '/kund/avvikelser';
+    return (
+      <Card padding="md">
+        <h3 className="font-bold text-slate-900 mb-3 flex items-center gap-2">
+          <Icon name="alert-triangle" className="w-4 h-4 text-rose-600" />
+          Ärenden på passet <Badge variant="slate">{items.length}</Badge>
+        </h3>
+        <div className="space-y-2">
+          {items.map(i => (
+            <IncidentRow key={i.id} incident={i} viewerRole={role} onClick={() => location.hash = `#${linkPrefix}/${i.id}`} />
+          ))}
+        </div>
+      </Card>
+    );
+  }
+
+  /* ============================================================
+   * ADMIN · Pass-detalj
+   * ============================================================ */
+  /* ============================================================
+   * ADMIN · Schema (§7.4) – listvy med filter
+   * ============================================================ */
+  function AdminSchemaView({ session, onNavigate }) {
+    useDb();
+    const [statusFilter, setStatusFilter] = useState('all');
+    const [cleanerFilter, setCleanerFilter] = useState('all');
+    const [customerFilter, setCustomerFilter] = useState('all');
+    const [dateRange, setDateRange] = useState('upcoming');
+    const [createOpen, setCreateOpen] = useState(false);
+
+    const cleaners = db.state.users.filter(u => u.role === 'cleaner' && u.active);
+    const customers = db.state.customers;
+
+    const allShifts = db.state.shifts.slice();
+    const now = Date.now();
+    let filtered = allShifts;
+
+    if (dateRange === 'today') {
+      const todayStr = formatDateShort(new Date());
+      filtered = filtered.filter(s => formatDateShort(s.start_at) === todayStr);
+    } else if (dateRange === 'upcoming') {
+      filtered = filtered.filter(s => new Date(s.end_at).getTime() >= now);
+    } else if (dateRange === 'past') {
+      filtered = filtered.filter(s => new Date(s.end_at).getTime() < now);
+    } else if (dateRange === 'week') {
+      const weekEnd = Date.now() + 7 * 24 * 36e5;
+      filtered = filtered.filter(s => new Date(s.start_at).getTime() <= weekEnd && new Date(s.end_at).getTime() >= now);
+    }
+
+    if (statusFilter !== 'all') filtered = filtered.filter(s => s.status === statusFilter);
+    if (cleanerFilter !== 'all') filtered = filtered.filter(s => s.cleaner_user_id === cleanerFilter);
+    if (customerFilter !== 'all') {
+      const propIds = new Set(db.state.properties.filter(p => p.customer_id === customerFilter).map(p => p.id));
+      filtered = filtered.filter(s => propIds.has(s.property_id));
+    }
+
+    filtered.sort((a, b) => new Date(a.start_at) - new Date(b.start_at));
+
+    function resetFilters() {
+      setStatusFilter('all'); setCleanerFilter('all'); setCustomerFilter('all'); setDateRange('upcoming');
+    }
+
+    return (
+      <div>
+        <PageHeader
+          title="Schema"
+          subtitle="Alla pass – filtrera på datum, status, städare och kund."
+          actions={<Button icon="plus" onClick={() => setCreateOpen(true)}>Nytt pass</Button>}
+        />
+
+        <Card padding="md" className="mb-4">
+          <div className="grid md:grid-cols-4 gap-3">
+            <Field label="Period">
+              <Select value={dateRange} onChange={e => setDateRange(e.target.value)}>
+                <option value="upcoming">Kommande</option>
+                <option value="today">Idag</option>
+                <option value="week">7 dagar</option>
+                <option value="past">Historik</option>
+                <option value="all">Alla</option>
+              </Select>
+            </Field>
+            <Field label="Status">
+              <Select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+                <option value="all">Alla</option>
+                <option value="Godkänt">Godkänt</option>
+                <option value="Planerat">Planerat</option>
+                <option value="Pågående">Pågående</option>
+                <option value="Utfört">Utfört</option>
+                <option value="Sjukanmäld">Sjukanmäld</option>
+                <option value="Pausat (kundledighet)">Pausat (kundledighet)</option>
+                <option value="Avbokat">Avbokat</option>
+                <option value="Borttaget">Borttaget</option>
+              </Select>
+            </Field>
+            <Field label="Städare">
+              <Select value={cleanerFilter} onChange={e => setCleanerFilter(e.target.value)}>
+                <option value="all">Alla städare</option>
+                {cleaners.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </Select>
+            </Field>
+            <Field label="Kund">
+              <Select value={customerFilter} onChange={e => setCustomerFilter(e.target.value)}>
+                <option value="all">Alla kunder</option>
+                {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </Select>
+            </Field>
+          </div>
+          <div className="mt-3 flex items-center justify-between">
+            <p className="text-sm text-slate-600"><strong className="text-slate-900">{filtered.length}</strong> {filtered.length === 1 ? 'pass' : 'pass'} matchar filtret.</p>
+            <Button variant="ghost" size="sm" icon="refresh" onClick={resetFilters}>Återställ filter</Button>
+          </div>
+        </Card>
+
+        {filtered.length === 0 ? (
+          <Card padding="lg"><EmptyState icon="calendar" title="Inga pass matchar" description="Justera filtret eller skapa ett nytt pass." /></Card>
+        ) : (
+          <div className="grid md:grid-cols-2 gap-3">
+            {filtered.slice(0, 100).map(s => (
+              <ShiftCard key={s.id} shift={s} viewerRole="admin" viewerUserId={session.userId} onClick={() => onNavigate(`/admin/schema/${s.id}`)} />
+            ))}
+          </div>
+        )}
+        {filtered.length > 100 && (
+          <p className="text-xs text-slate-500 mt-3 text-center">Visar de första 100 passen. Förfina filtret för att se färre.</p>
+        )}
+
+        <CreateShiftModal open={createOpen} onClose={() => setCreateOpen(false)} session={session} />
+      </div>
+    );
+  }
+
+  /* ============================================================
+   * CreateShiftModal (§7.4) – nytt one-off pass
+   * ============================================================ */
+  function CreateShiftModal({ open, onClose, session, preselectPropertyId = null }) {
+    const [propertyId, setPropertyId] = useState(preselectPropertyId || '');
+    const [cleanerId, setCleanerId] = useState('');
+    const [date, setDate] = useState(toDateInput(new Date()));
+    const [startTime, setStartTime] = useState('08:00');
+    const [endTime, setEndTime] = useState('10:00');
+    const [notes, setNotes] = useState('');
+
+    useEffect(() => {
+      if (open) {
+        setPropertyId(preselectPropertyId || '');
+        setCleanerId('');
+        setDate(toDateInput(new Date()));
+        setStartTime('08:00');
+        setEndTime('10:00');
+        setNotes('');
+      }
+    }, [open, preselectPropertyId]);
+
+    const cleaners = db.state.users.filter(u => u.role === 'cleaner' && u.active);
+    const properties = db.state.properties.slice().sort((a, b) => a.name.localeCompare(b.name));
+
+    const validTime = startTime && endTime && startTime < endTime;
+    const canSubmit = propertyId && cleanerId && date && validTime;
+
+    function submit() {
+      const startAt = combineDateTime(date, startTime);
+      const endAt = combineDateTime(date, endTime);
+      const shift = db.createOneOffShift({
+        propertyId, cleanerUserId: cleanerId,
+        startAt, endAt,
+        actorUserId: session.userId,
+        notes: notes.trim(),
+      });
+      toast.success('Nytt pass skapat. Städare och kund notifieras.');
+      onClose();
+    }
+
+    return (
+      <Modal
+        open={open}
+        onClose={onClose}
+        title="Nytt pass"
+        size="md"
+        footer={
+          <>
+            <Button variant="ghost" onClick={onClose}>Avbryt</Button>
+            <Button disabled={!canSubmit} icon="plus" onClick={submit}>Skapa pass</Button>
+          </>
+        }
+      >
+        <Field label="Objekt" required>
+          <Select value={propertyId} onChange={e => setPropertyId(e.target.value)} disabled={!!preselectPropertyId}>
+            <option value="">Välj objekt…</option>
+            {properties.map(p => {
+              const cust = db.customerById(p.customer_id);
+              return <option key={p.id} value={p.id}>{cust?.name} · {p.name}</option>;
+            })}
+          </Select>
+        </Field>
+        <div className="mt-3">
+          <Field label="Städare" required>
+            <Select value={cleanerId} onChange={e => setCleanerId(e.target.value)}>
+              <option value="">Välj städare…</option>
+              {cleaners.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </Select>
+          </Field>
+        </div>
+        <div className="grid grid-cols-3 gap-3 mt-3">
+          <Field label="Datum">
+            <Input type="date" value={date} onChange={e => setDate(e.target.value)} />
+          </Field>
+          <Field label="Starttid">
+            <Input type="time" value={startTime} onChange={e => setStartTime(e.target.value)} />
+          </Field>
+          <Field label="Sluttid" error={!validTime && startTime && endTime ? 'Måste vara efter starttid.' : null}>
+            <Input type="time" value={endTime} onChange={e => setEndTime(e.target.value)} />
+          </Field>
+        </div>
+        <div className="mt-3">
+          <Field label="Interna anteckningar" hint="Visas för admin och städare.">
+            <Textarea rows={2} value={notes} onChange={e => setNotes(e.target.value)} placeholder="T.ex. extrastädning efter event." />
+          </Field>
+        </div>
+      </Modal>
+    );
+  }
+
+  function AdminShiftDetailView({ session, onNavigate, shiftId }) {
+    useDb();
+    const shift = db.shiftById(shiftId);
+    if (!shift) return <ComingSoonView title="Pass saknas" section="—" description="Passet kunde inte hittas." />;
+    const prop = db.propertyById(shift.property_id);
+    const cust = prop ? db.state.customers.find(c => c.id === prop.customer_id) : null;
+    return <ShiftDetail
+      shift={shift}
+      session={session}
+      onBack={() => onNavigate('/admin/dashboard')}
+      breadcrumbs={[
+        { label: 'Schema', href: '#/admin/schema' },
+        cust && { label: cust.name, href: `#/admin/kunder/${cust.id}` },
+        prop && { label: prop.name, href: `#/admin/kunder/${cust?.id}/objekt/${prop.id}` },
+        { label: relativeDay(shift.start_at) },
+      ].filter(Boolean)}
+    />;
+  }
+
+  /* ============================================================
+   * CLEANER · Mina pass
+   * ============================================================ */
+  function CleanerShiftsListView({ session, onNavigate }) {
+    useDb();
+    const [tab, setTab] = useState('upcoming');
+    const all = db.shiftsForCleaner(session.userId);
+    const now = Date.now();
+    const upcoming = all.filter(s => new Date(s.end_at).getTime() >= now && !['Avbokat', 'Borttaget', 'Pausat (kundledighet)'].includes(s.status));
+    const past = all.filter(s => new Date(s.end_at).getTime() < now).reverse();
+    const cancelled = all.filter(s => ['Avbokat', 'Borttaget', 'Pausat (kundledighet)', 'Sjukanmäld'].includes(s.status));
+
+    const tabs = [
+      { id: 'upcoming', label: 'Kommande', count: upcoming.length, icon: 'calendar' },
+      { id: 'past', label: 'Historik', count: past.length, icon: 'check' },
+      { id: 'other', label: 'Avbokat / pausat', count: cancelled.length, icon: 'pause' },
+    ];
+
+    const items = tab === 'upcoming' ? upcoming : tab === 'past' ? past : cancelled;
+
+    return (
+      <div>
+        <PageHeader title="Mina pass" subtitle={`Totalt ${all.length} pass tilldelade dig.`} />
+        <Tabs tabs={tabs} value={tab} onChange={setTab} className="mb-5" />
+        {items.length === 0 ? (
+          <Card padding="lg"><EmptyState icon="inbox" title="Inga pass här" /></Card>
+        ) : (
+          <div className="grid md:grid-cols-2 gap-3">
+            {items.map(s => (
+              <ShiftCard key={s.id} shift={s} viewerRole="cleaner" viewerUserId={session.userId}
+                onClick={() => onNavigate(shiftDetailPath('cleaner', s.id))} />
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  function CleanerShiftDetailView({ session, onNavigate, shiftId }) {
+    useDb();
+    const shift = db.shiftById(shiftId);
+    if (!shift) return <ComingSoonView title="Pass saknas" section="—" description="Passet kunde inte hittas." />;
+    if (shift.cleaner_user_id !== session.userId) {
+      // Separationsregel: städare kan endast se egna pass
+      return (
+        <div>
+          <PageHeader title="Åtkomst nekas" />
+          <Card padding="lg"><EmptyState icon="shield" title="Det här passet tillhör inte dig" description="Du kan bara öppna pass där du är tilldelad städare." action={<Button onClick={() => onNavigate('/stadare/idag')}>Tillbaka till Idag</Button>} /></Card>
+        </div>
+      );
+    }
+    return <ShiftDetail
+      shift={shift}
+      session={session}
+      onBack={() => onNavigate('/stadare/pass')}
+      breadcrumbs={[{ label: 'Mina pass', href: '#/stadare/pass' }, { label: relativeDay(shift.start_at) }]}
+    />;
+  }
+
+  /* ============================================================
+   * CUSTOMER · Pass-detalj (read-only, anonymiserad)
+   * ============================================================ */
+  function CustomerShiftDetailView({ session, onNavigate, shiftId }) {
+    useDb();
+    const shift = db.shiftById(shiftId);
+    if (!shift) return <ComingSoonView title="Pass saknas" section="—" description="Passet kunde inte hittas." />;
+    // Separationsregel: kund ser endast sina egna pass
+    const allowed = db.shiftsForCustomerUser(session.userId).some(s => s.id === shiftId);
+    if (!allowed) {
+      return (
+        <div>
+          <PageHeader title="Åtkomst nekas" />
+          <Card padding="lg"><EmptyState icon="shield" title="Det här passet tillhör inte dig" action={<Button onClick={() => onNavigate('/kund/oversikt')}>Tillbaka</Button>} /></Card>
+        </div>
+      );
+    }
+    return <ShiftDetail
+      shift={shift}
+      session={session}
+      onBack={() => onNavigate('/kund/oversikt')}
+      breadcrumbs={[{ label: 'Översikt', href: '#/kund/oversikt' }, { label: relativeDay(shift.start_at) }]}
+    />;
+  }
+
+  /* ============================================================
+   * CUSTOMER · Ledighet (§7.3)
+   * ============================================================ */
+  function CustomerHolidayView({ session, onNavigate }) {
+    useDb();
+    const customer = db.customerForUser(session.userId);
+    if (!customer) return <ComingSoonView title="Ledighet" section="§7.3" description="Ingen kund kopplad till denna profil." />;
+
+    const allProperties = db.propertiesForUser(session.userId);
+    const isHuvudkontakt = session.user.role === 'customer';
+    const isEmployee = session.user.role === 'customer_employee';
+    const holidays = db.holidaysWithSummary(customer.id);
+
+    return (
+      <div>
+        <PageHeader
+          title="Ledighet"
+          subtitle="Pausa pass när ert kontor är stängt – t.ex. semester, helger eller ombyggnad."
+        />
+        <div className="grid lg:grid-cols-5 gap-6">
+          <div className="lg:col-span-3 space-y-4">
+            {isHuvudkontakt ? (
+              <HolidayForm session={session} customer={customer} properties={allProperties} />
+            ) : (
+              <Card padding="md" className="border-slate-200 bg-slate-50/60">
+                <h3 className="font-bold text-slate-700 mb-1">Endast huvudkontakt kan registrera ledighet</h3>
+                <p className="text-sm text-slate-600">Som kundanställd kan du se befintliga ledigheter. Be {customer.name}s huvudkontakt registrera ny ledighet.</p>
+              </Card>
+            )}
+          </div>
+          <div className="lg:col-span-2 space-y-3">
+            <h2 className="text-lg font-bold text-slate-900">Registrerade ledigheter</h2>
+            {holidays.length === 0 ? (
+              <Card padding="md"><EmptyState icon="calendar" title="Inga registrerade ledigheter" /></Card>
+            ) : (
+              holidays.map(h => <HolidayCard key={h.id} holiday={h} session={session} isAdmin={false} isEmployee={isEmployee} />)
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function HolidayForm({ session, customer, properties }) {
+    const today = new Date();
+    const todayStr = toDateInput(today);
+    const [scope, setScope] = useState('all_properties');
+    const [propertyIds, setPropertyIds] = useState([]);
+    const [startDate, setStartDate] = useState(todayStr);
+    const [endDate, setEndDate] = useState(todayStr);
+    const [reason, setReason] = useState('');
+    const [submitting, setSubmitting] = useState(false);
+
+    const validDates = startDate && endDate && new Date(endDate) >= new Date(startDate);
+    const validReason = reason.trim().length >= 3;
+    const validScope = scope === 'all_properties' || (propertyIds && propertyIds.length > 0);
+    const canSubmit = validDates && validReason && validScope && !submitting;
+
+    const preview = validDates && validScope
+      ? db.previewPausedShifts({
+          customerId: customer.id,
+          scope,
+          propertyIds,
+          startDate: new Date(startDate),
+          endDate: new Date(endDate + 'T23:59:59'),
+        })
+      : [];
+
+    function togglePropertyId(pid) {
+      setPropertyIds(prev => prev.includes(pid) ? prev.filter(x => x !== pid) : [...prev, pid]);
+    }
+
+    function submit() {
+      setSubmitting(true);
+      const result = db.createHoliday({
+        customerId: customer.id,
+        createdByUserId: session.userId,
+        scope,
+        propertyIds: scope === 'selected' ? propertyIds : [],
+        startDate: new Date(startDate),
+        endDate: new Date(endDate + 'T23:59:59'),
+        reason: reason.trim(),
+      });
+      setSubmitting(false);
+      toast.success(`Ledighet registrerad – ${result.pausedCount} pass pausade.`);
+      setScope('all_properties');
+      setPropertyIds([]);
+      setReason('');
+      setStartDate(todayStr);
+      setEndDate(todayStr);
+    }
+
+    return (
+      <Card padding="lg">
+        <h3 className="font-bold text-slate-900 mb-1">Ny ledighet</h3>
+        <p className="text-xs text-slate-500 mb-5">Pass i perioden pausas automatiskt och städaren får besked.</p>
+
+        <Field label="Objekt">
+          <div className="space-y-2">
+            <Radio name="scope" value="all_properties" checked={scope === 'all_properties'} onChange={setScope} label={`Alla objekt (${properties.length})`} />
+            <Radio name="scope" value="selected" checked={scope === 'selected'} onChange={setScope} label="Välj specifika objekt" />
+            {scope === 'selected' && (
+              <div className="ml-7 mt-2 space-y-1.5 border-l-2 border-slate-200 pl-4">
+                {properties.map(p => (
+                  <Checkbox key={p.id} checked={propertyIds.includes(p.id)} onChange={() => togglePropertyId(p.id)} label={p.name} />
+                ))}
+              </div>
+            )}
+          </div>
+        </Field>
+
+        <div className="grid grid-cols-2 gap-3 mt-4">
+          <Field label="Fr.o.m.">
+            <Input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} min={todayStr} />
+          </Field>
+          <Field label="T.o.m." error={startDate && endDate && new Date(endDate) < new Date(startDate) ? 'Slutdatum måste vara samma eller efter startdatum.' : null}>
+            <Input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} min={startDate || todayStr} />
+          </Field>
+        </div>
+
+        <div className="mt-4">
+          <Field label="Anledning" hint="Minst 3 tecken. Visas för admin och städare.">
+            <Textarea rows={2} value={reason} onChange={e => setReason(e.target.value)} placeholder="T.ex. Semester, ombyggnad, helgstängt." />
+          </Field>
+        </div>
+
+        <div className="mt-5 rounded-lg border border-sky-200 bg-sky-50/50 p-3">
+          <div className="flex items-start gap-2 mb-2">
+            <Icon name="info" className="w-4 h-4 text-sky-700 mt-0.5" />
+            <div>
+              <p className="font-semibold text-sm text-sky-900">Förhandsvisning</p>
+              {!validDates || !validScope ? (
+                <p className="text-xs text-sky-800/80">Välj period och objekt för att se vilka pass som påverkas.</p>
+              ) : preview.length === 0 ? (
+                <p className="text-xs text-sky-800/80">Inga pass i perioden påverkas.</p>
+              ) : (
+                <p className="text-xs text-sky-800/90">
+                  <strong>{preview.length} pass</strong> kommer att pausas mellan {startDate} och {endDate}.
+                </p>
+              )}
+            </div>
+          </div>
+          {preview.length > 0 && (
+            <div className="mt-2 max-h-40 overflow-y-auto space-y-1 text-xs">
+              {preview.map(s => {
+                const prop = db.propertyById(s.property_id);
+                const cleanerLabel = db.displayCleaner(s.cleaner_user_id, session.user.role);
+                return (
+                  <div key={s.id} className="flex items-center justify-between gap-2 py-1 px-2 rounded bg-white border border-sky-100">
+                    <span className="text-slate-700">{formatDateShort(s.start_at)} · {formatRange(s.start_at, s.end_at)}</span>
+                    <span className="text-slate-500 truncate">{prop?.name} · {cleanerLabel}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        <div className="mt-5 flex justify-end">
+          <Button disabled={!canSubmit} icon="pause" onClick={submit}>Registrera ledighet</Button>
+        </div>
+      </Card>
+    );
+  }
+
+  function HolidayCard({ holiday, session, isAdmin, isEmployee }) {
+    const [confirmOpen, setConfirmOpen] = useState(false);
+    const scopeLabel = holiday.scope === 'all_properties'
+      ? `Alla objekt (${holiday.properties.length})`
+      : `${holiday.properties.length} ${holiday.properties.length === 1 ? 'objekt' : 'objekt'}`;
+    const datesPassed = new Date(holiday.end_date).getTime() < Date.now();
+    return (
+      <Card padding="md">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex-1 min-w-0">
+            <p className="font-bold text-slate-900">{formatDateShort(holiday.start_date)} – {formatDateShort(holiday.end_date)}</p>
+            <p className="text-xs text-slate-500 mt-0.5">{scopeLabel} · {holiday.pausedCount} pass</p>
+          </div>
+          <Badge variant={datesPassed ? 'slate' : 'sky'}>{datesPassed ? 'Avslutad' : 'Aktiv'}</Badge>
+        </div>
+        <p className="text-sm text-slate-700 mt-2 italic">"{holiday.reason}"</p>
+        <div className="mt-2 flex flex-wrap gap-1">
+          {holiday.properties.map(p => (
+            <span key={p.id} className="text-[11px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{p.name}</span>
+          ))}
+        </div>
+        <p className="text-[11px] text-slate-400 mt-3">Skapad av {holiday.creator?.name || 'okänd'} · {formatDateShort(holiday.created_at)}</p>
+        {isAdmin && !datesPassed && (
+          <div className="mt-3">
+            <Button variant="danger-ghost" icon="trash" onClick={() => setConfirmOpen(true)}>Ta bort ledighet</Button>
+            <ConfirmDialog
+              open={confirmOpen}
+              onClose={() => setConfirmOpen(false)}
+              title="Ta bort ledigheten?"
+              message={`${holiday.pausedCount} pausade pass kommer att återaktiveras. Städare och admin notifieras.`}
+              confirmLabel="Ta bort"
+              danger
+              onConfirm={() => {
+                const r = db.deleteHoliday(holiday.id, session.userId);
+                if (r?.ok) toast.success(`Ledighet borttagen – ${r.restoredCount} pass återaktiverade.`);
+                setConfirmOpen(false);
+              }}
+            />
+          </div>
+        )}
+      </Card>
+    );
+  }
+
+  /* ============================================================
+   * ADMIN · Kunder
+   * ============================================================ */
+  /* ============================================================
+   * §7.7 Kontakter & kundanställda
+   * ============================================================ */
+  function AddCustomerEmployeeModal({ open, onClose, customer, properties, session, editEmployee = null }) {
+    const isEdit = !!editEmployee;
+    const [name, setName] = useState('');
+    const [email, setEmail] = useState('');
+    const [phone, setPhone] = useState('');
+    const [scope, setScope] = useState('all_properties');
+    const [propertyIds, setPropertyIds] = useState([]);
+    const [error, setError] = useState('');
+
+    useEffect(() => {
+      if (!open) return;
+      setError('');
+      if (editEmployee) {
+        setName(editEmployee.user?.name || '');
+        setEmail(editEmployee.user?.email || '');
+        setPhone(editEmployee.user?.phone || '');
+        setScope(editEmployee.scope);
+        setPropertyIds(editEmployee.properties?.map(p => p.id) || []);
+      } else {
+        setName('');
+        setEmail('');
+        setPhone('');
+        setScope('all_properties');
+        setPropertyIds([]);
+      }
+    }, [open, editEmployee?.id]);
+
+    const validName = name.trim().length >= 2;
+    const validEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+    const validScope = scope === 'all_properties' || propertyIds.length > 0;
+    const canSubmit = validName && validEmail && validScope;
+
+    function togglePropertyId(pid) {
+      setPropertyIds(prev => prev.includes(pid) ? prev.filter(x => x !== pid) : [...prev, pid]);
+    }
+
+    function submit() {
+      setError('');
+      try {
+        if (isEdit) {
+          db.updateCustomerEmployee(editEmployee.id, {
+            name, email, phone, scope,
+            selectedPropertyIds: scope === 'selected' ? propertyIds : [],
+          });
+          toast.success('Kundanställd uppdaterad.');
+        } else {
+          db.addCustomerEmployee({
+            customerId: customer.id,
+            name, email, phone, scope,
+            selectedPropertyIds: scope === 'selected' ? propertyIds : [],
+            adminUserId: session.userId,
+          });
+          toast.success('Kundanställd tillagd. Inbjudan skickas när auth är på plats.');
+        }
+        onClose();
+      } catch (e) {
+        if (e.message === 'EMAIL_EXISTS') setError('Mejladressen används redan av en annan användare.');
+        else setError('Kunde inte spara. Försök igen.');
+      }
+    }
+
+    return (
+      <Modal
+        open={open}
+        onClose={onClose}
+        title={isEdit ? 'Redigera kundanställd' : 'Lägg till kundanställd'}
+        size="md"
+        footer={
+          <>
+            <Button variant="ghost" onClick={onClose}>Avbryt</Button>
+            <Button variant="primary" disabled={!canSubmit} onClick={submit}>
+              {isEdit ? 'Spara' : 'Lägg till'}
+            </Button>
+          </>
+        }
+      >
+        <p className="text-xs text-slate-500 mb-4">
+          {customer.name} · kundanställda kan logga in och följa pass (läsbehörighet). Inbjudningsmejl skickas när Supabase Auth är aktivt.
+        </p>
+        <Field label="Namn *" className="mb-3">
+          <Input value={name} onChange={e => setName(e.target.value)} placeholder="För- och efternamn" />
+        </Field>
+        <Field label="Mejl *" className="mb-3">
+          <Input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="namn@foretag.se" />
+        </Field>
+        <Field label="Telefon" className="mb-3">
+          <Input type="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="+46 70 123 45 67" />
+        </Field>
+        <Field label="Åtkomst till objekt *">
+          <div className="space-y-2">
+            <Radio name="emp_scope" value="all_properties" checked={scope === 'all_properties'} onChange={setScope} label={`Alla objekt (${properties.length})`} />
+            <Radio name="emp_scope" value="selected" checked={scope === 'selected'} onChange={setScope} label="Valda objekt" />
+            {scope === 'selected' && (
+              <div className="ml-7 mt-2 space-y-1.5 border-l-2 border-slate-200 pl-4">
+                {properties.map(p => (
+                  <Checkbox key={p.id} checked={propertyIds.includes(p.id)} onChange={() => togglePropertyId(p.id)} label={p.name} />
+                ))}
+              </div>
+            )}
+          </div>
+        </Field>
+        {error && <p className="text-xs text-rose-600 mt-3">{error}</p>}
+      </Modal>
+    );
+  }
+
+  function AdminCustomerEmployeesCard({ customer, properties, session }) {
+    useDb();
+    const [modalOpen, setModalOpen] = useState(false);
+    const [editTarget, setEditTarget] = useState(null);
+    const [removeTarget, setRemoveTarget] = useState(null);
+    const employees = db.customerEmployeesForCustomer(customer.id);
+
+    return (
+      <>
+        <Card padding="md">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-bold text-slate-900">Kundanställda</h3>
+            <Button variant="ghost" size="sm" icon="plus" onClick={() => { setEditTarget(null); setModalOpen(true); }}>
+              Lägg till
+            </Button>
+          </div>
+          {employees.length === 0 ? (
+            <EmptyState icon="users" title="Inga kundanställda" description="Lägg till medarbetare som ska kunna följa pass och avvikelser." />
+          ) : (
+            <ul className="divide-y divide-slate-100 -mx-2">
+              {employees.map(e => (
+                <li key={e.id} className="px-2 py-3 flex items-start gap-3">
+                  <Avatar size="sm" name={e.user?.name} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-slate-900 truncate">{e.user?.name}</p>
+                    <p className="text-xs text-slate-500 truncate">{e.user?.email}</p>
+                    {e.user?.phone && <p className="text-xs text-slate-400">{e.user.phone}</p>}
+                    <div className="mt-1.5 flex flex-wrap gap-1">
+                      <Badge variant="slate">{e.scope === 'all_properties' ? 'Alla objekt' : `${e.properties.length} objekt`}</Badge>
+                      {e.scope === 'selected' && e.properties.map(p => (
+                        <Badge key={p.id} variant="brand">{p.name}</Badge>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1 flex-shrink-0">
+                    <Button variant="ghost" size="sm" iconOnly icon="edit" aria-label="Redigera" onClick={() => { setEditTarget(e); setModalOpen(true); }} />
+                    <Button variant="danger-ghost" size="sm" iconOnly icon="trash" aria-label="Ta bort" onClick={() => setRemoveTarget(e)} />
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+
+        <AddCustomerEmployeeModal
+          open={modalOpen}
+          onClose={() => { setModalOpen(false); setEditTarget(null); }}
+          customer={customer}
+          properties={properties}
+          session={session}
+          editEmployee={editTarget}
+        />
+
+        <ConfirmDialog
+          open={!!removeTarget}
+          onClose={() => setRemoveTarget(null)}
+          title="Ta bort kundanställd?"
+          message={removeTarget ? `${removeTarget.user?.name} förlorar åtkomst till ${customer.name}. Kontot inaktiveras.` : ''}
+          confirmLabel="Ta bort"
+          danger
+          onConfirm={() => {
+            db.removeCustomerEmployee(removeTarget.id);
+            toast.success('Kundanställd borttagen.');
+            setRemoveTarget(null);
+          }}
+        />
+      </>
+    );
+  }
+
+  function AdminPropertyContactsTab({ property, customer, session }) {
+    useDb();
+    const employees = db.customerEmployeesForProperty(property.id);
+    const assignedCleaners = db.propertyCleanersForProperty(property.id);
+    const allCleaners = db.state.users.filter(u => u.role === 'cleaner' && u.active);
+    const assignedKey = assignedCleaners.map(pc => pc.cleaner_user_id).sort().join(',');
+    const [cleanerIds, setCleanerIds] = useState(() => assignedCleaners.map(pc => pc.cleaner_user_id));
+    const dirty = JSON.stringify([...cleanerIds].sort()) !== JSON.stringify([...assignedKey.split(',')].filter(Boolean).sort());
+
+    useEffect(() => {
+      setCleanerIds(assignedCleaners.map(pc => pc.cleaner_user_id));
+    }, [property.id, assignedKey]);
+
+    function toggleCleaner(uid) {
+      setCleanerIds(prev => prev.includes(uid) ? prev.filter(x => x !== uid) : [...prev, uid]);
+    }
+
+    return (
+      <div className="space-y-4">
+        <Card padding="md">
+          <h3 className="font-bold text-slate-900 mb-1">Kundanställda med åtkomst</h3>
+          <p className="text-xs text-slate-500 mb-4">Medarbetare hos {customer.name} som kan se pass på det här objektet.</p>
+          {employees.length === 0 ? (
+            <p className="text-sm text-slate-500">Ingen kundanställd har åtkomst till det här objektet. Lägg till under kundens sida.</p>
+          ) : (
+            <ul className="divide-y divide-slate-100">
+              {employees.map(e => (
+                <li key={e.id} className="py-3 flex items-center gap-3">
+                  <Avatar size="sm" name={e.user?.name} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-slate-900">{e.user?.name}</p>
+                    <p className="text-xs text-slate-500">{e.user?.email}</p>
+                  </div>
+                  <Badge variant={e.scope === 'all_properties' ? 'emerald' : 'brand'}>
+                    {e.scope === 'all_properties' ? 'Alla objekt' : 'Detta objekt'}
+                  </Badge>
+                </li>
+              ))}
+            </ul>
+          )}
+          <Button variant="outline" size="sm" className="mt-4" icon="users" onClick={() => { location.hash = `#/admin/kunder/${customer.id}`; }}>
+            Hantera alla kontakter
+          </Button>
+        </Card>
+
+        <Card padding="md">
+          <h3 className="font-bold text-slate-900 mb-1">Tilldelade städare (baspool)</h3>
+          <p className="text-xs text-slate-500 mb-4">Förslag vid schemaläggning – admin kan tilldela vem som helst per pass.</p>
+          <ul className="space-y-2 mb-4">
+            {allCleaners.map(c => (
+              <li key={c.id}>
+                <Checkbox
+                  checked={cleanerIds.includes(c.id)}
+                  onChange={() => toggleCleaner(c.id)}
+                  label={c.name}
+                />
+              </li>
+            ))}
+          </ul>
+          {dirty && (
+            <Button variant="primary" size="sm" onClick={() => {
+              db.setPropertyCleaners(property.id, cleanerIds);
+              toast.success('Städarpool uppdaterad.');
+            }}>Spara städare</Button>
+          )}
+        </Card>
+      </div>
+    );
+  }
+
+  function CustomerSettingsView({ session }) {
+    useDb();
+    const customer = db.customerForUser(session.userId);
+    if (!customer) return <ComingSoonView title="Inställningar" section="§7.7" description="Ingen kund kopplad till denna profil." />;
+
+    const isHuvudkontakt = session.user.role === 'customer';
+    const properties = db.propertiesForUser(session.userId);
+    const main = db.userById(customer.primary_contact_user_id);
+
+    if (!isHuvudkontakt) {
+      const ce = db.state.customer_employees.find(x => x.user_id === session.userId);
+      const myProps = db.propertiesForUser(session.userId);
+      return (
+        <div>
+          <PageHeader title="Inställningar" subtitle="Din profil som kundanställd" />
+          <Card padding="md" className="mb-4">
+            <h3 className="font-bold text-slate-900 mb-3">Din profil</h3>
+            <dl className="text-sm space-y-2">
+              <div><dt className="text-xs text-slate-500">Namn</dt><dd className="font-medium">{session.user.name}</dd></div>
+              <div><dt className="text-xs text-slate-500">Mejl</dt><dd className="font-medium">{session.user.email}</dd></div>
+              {session.user.phone && (
+                <div><dt className="text-xs text-slate-500">Telefon</dt><dd className="font-medium">{session.user.phone}</dd></div>
+              )}
+              <div><dt className="text-xs text-slate-500">Företag</dt><dd className="font-medium">{customer.name}</dd></div>
+              <div><dt className="text-xs text-slate-500">Åtkomst</dt><dd className="font-medium">{ce?.scope === 'all_properties' ? 'Alla objekt' : `${myProps.length} valda objekt`}</dd></div>
+            </dl>
+          </Card>
+          <Card padding="md" className="border-slate-200 bg-slate-50/60">
+            <p className="text-sm text-slate-600">Som kundanställd har du läsbehörighet. Be huvudkontakten ({main?.name}) om du behöver fler objekt eller vill lägga till kollegor.</p>
+          </Card>
+        </div>
+      );
+    }
+
+    return (
+      <div>
+        <PageHeader
+          title="Inställningar"
+          subtitle={`${customer.name} · hantera kundanställda och kontaktuppgifter`}
+        />
+        <div className="grid lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-2">
+            <AdminCustomerEmployeesCard customer={customer} properties={properties} session={session} />
+          </div>
+          <div>
+            <Card padding="md">
+              <h3 className="font-bold text-slate-900 mb-3">Huvudkontakt (du)</h3>
+              <div className="flex items-center gap-3 mb-3">
+                <Avatar name={session.user.name} />
+                <div>
+                  <p className="font-semibold text-slate-900">{session.user.name}</p>
+                  <p className="text-xs text-slate-500">{session.user.email}</p>
+                </div>
+              </div>
+              <p className="text-xs text-slate-500">Org.nr {customer.org_number}. Ändring av företagsuppgifter görs via admin på CleanUp.</p>
+            </Card>
+            {customer.notes && (
+              <Card padding="md" className="mt-4">
+                <h3 className="font-bold text-slate-900 mb-2">Anteckningar från admin</h3>
+                <p className="text-sm text-slate-600">{customer.notes}</p>
+              </Card>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function AdminCustomersListView({ session, onNavigate }) {
+    useDb();
+    const customers = db.state.customers;
+    return (
+      <div>
+        <PageHeader
+          title="Kunder"
+          subtitle={`${customers.length} kunder totalt.`}
+          actions={<Button variant="primary" icon="plus" onClick={() => toast.info('Skapa kund byggs i §7.7.')}>Ny kund</Button>}
+        />
+        <div className="grid md:grid-cols-2 gap-3">
+          {customers.map(c => {
+            const props = db.state.properties.filter(p => p.customer_id === c.id);
+            const upcoming = db.state.shifts.filter(s => props.some(p => p.id === s.property_id) && new Date(s.start_at) > new Date() && s.status === 'Godkänt').length;
+            return (
+              <button
+                key={c.id}
+                onClick={() => onNavigate(`/admin/kunder/${c.id}`)}
+                className="text-left bg-white rounded-2xl border border-slate-200 p-5 hover:border-brand-300 hover:shadow-sm transition-all"
+              >
+                <div className="flex items-start gap-3">
+                  <span className="w-11 h-11 rounded-xl bg-brand-50 text-brand-700 flex items-center justify-center font-bold">
+                    {initials(c.name) || 'KU'}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-bold text-slate-900">{c.name}</p>
+                    <p className="text-xs text-slate-500 truncate">Org.nr {c.org_number}</p>
+                  </div>
+                  <Icon name="chevron-right" className="w-5 h-5 text-slate-300" />
+                </div>
+                <div className="mt-4 grid grid-cols-2 gap-2 text-center">
+                  <div className="bg-slate-50 rounded-lg py-2">
+                    <p className="text-xl font-extrabold text-slate-900">{props.length}</p>
+                    <p className="text-[11px] uppercase text-slate-500">objekt</p>
+                  </div>
+                  <div className="bg-slate-50 rounded-lg py-2">
+                    <p className="text-xl font-extrabold text-slate-900">{upcoming}</p>
+                    <p className="text-[11px] uppercase text-slate-500">kommande pass</p>
+                  </div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  function AdminCustomerView({ session, onNavigate, customerId }) {
+    useDb();
+    const cust = db.customerById(customerId);
+    if (!cust) return <ComingSoonView title="Kund saknas" section="—" />;
+    const props = db.state.properties.filter(p => p.customer_id === cust.id);
+    const main = db.userById(cust.primary_contact_user_id);
+
+    return (
+      <div>
+        <PageHeader
+          breadcrumbs={[{ label: 'Kunder', href: '#/admin/kunder' }, { label: cust.name }]}
+          title={cust.name}
+          subtitle={`Org.nr ${cust.org_number} · ${props.length} objekt`}
+          actions={<Button variant="primary" icon="plus" onClick={() => toast.info('Nytt objekt byggs i §7.5.')}>Nytt objekt</Button>}
+        />
+
+        <div className="grid lg:grid-cols-3 gap-4">
+          <div className="lg:col-span-2">
+            <h2 className="text-sm font-bold text-slate-700 mb-3 uppercase tracking-wide">Objekt</h2>
+            <div className="space-y-3">
+              {props.map(p => {
+                const next = db.shiftsForProperty(p.id, { from: new Date() })[0];
+                const checklistCount = db.listChecklistTemplate(p.id).length;
+                return (
+                  <button key={p.id}
+                    onClick={() => onNavigate(`/admin/kunder/${cust.id}/objekt/${p.id}`)}
+                    className="w-full text-left bg-white rounded-2xl border border-slate-200 p-4 hover:border-brand-300 hover:shadow-sm transition-all"
+                  >
+                    <div className="flex items-start gap-3">
+                      <span className="w-10 h-10 rounded-xl bg-slate-100 text-slate-500 flex items-center justify-center"><Icon name="building" className="w-5 h-5" /></span>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-bold text-slate-900">{p.name}</p>
+                        <p className="text-xs text-slate-500 truncate">{p.address}</p>
+                        <div className="mt-2 flex items-center gap-2 flex-wrap">
+                          <Badge variant="brand" icon="list">{checklistCount} checklist-punkter</Badge>
+                          {next && <Badge variant="slate" icon="calendar">{relativeDay(next.start_at)} {formatTime(next.start_at)}</Badge>}
+                          {p.access_info && <Badge variant="amber" icon="key">Nyckel/larm</Badge>}
+                        </div>
+                      </div>
+                      <Icon name="chevron-right" className="w-5 h-5 text-slate-300 flex-shrink-0" />
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <Card padding="md">
+              <h3 className="font-bold text-slate-900 mb-3">Huvudkontakt</h3>
+              {main ? (
+                <div className="flex items-center gap-3">
+                  <Avatar name={main.name} />
+                  <div className="min-w-0">
+                    <p className="font-semibold text-slate-900 truncate">{main.name}</p>
+                    <p className="text-xs text-slate-500 truncate">{main.email}</p>
+                    {main.phone && <p className="text-xs text-slate-500">{main.phone}</p>}
+                  </div>
+                </div>
+              ) : <p className="text-sm text-slate-500">Ingen huvudkontakt satt.</p>}
+            </Card>
+
+            <AdminCustomerEmployeesCard customer={cust} properties={props} session={session} />
+
+            {cust.notes && (
+              <Card padding="md">
+                <h3 className="font-bold text-slate-900 mb-2">Anteckningar</h3>
+                <p className="text-sm text-slate-600">{cust.notes}</p>
+              </Card>
+            )}
+
+            <AdminCustomerHolidays customer={cust} session={session} />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function AdminCustomerHolidays({ customer, session }) {
+    useDb();
+    const holidays = db.holidaysWithSummary(customer.id);
+    return (
+      <Card padding="md">
+        <h3 className="font-bold text-slate-900 mb-3">Kundledigheter</h3>
+        {holidays.length === 0 ? (
+          <p className="text-sm text-slate-500">Inga registrerade.</p>
+        ) : (
+          <div className="space-y-2">
+            {holidays.map(h => <HolidayCard key={h.id} holiday={h} session={session} isAdmin={true} />)}
+          </div>
+        )}
+      </Card>
+    );
+  }
+
+  function AdminPropertyView({ session, onNavigate, customerId, propertyId }) {
+    useDb();
+    const cust = db.customerById(customerId);
+    const prop = db.propertyById(propertyId);
+    if (!prop || !cust) return <ComingSoonView title="Objekt saknas" section="—" />;
+    const [tab, setTab] = useState('stadschema');
+    const upcomingShifts = db.shiftsForProperty(prop.id, { from: new Date() }).filter(s => !['Avbokat', 'Borttaget'].includes(s.status)).slice(0, 8);
+
+    const tabs = [
+      { id: 'stadschema', label: 'Städschema', icon: 'list', count: db.listChecklistTemplate(prop.id, { includeInactive: false }).length },
+      { id: 'recurring', label: 'Återkommande', icon: 'refresh', count: db.listRecurringSchedules(prop.id).length },
+      { id: 'access', label: 'Nyckel / larm', icon: 'key' },
+      { id: 'pass', label: 'Pass', icon: 'calendar', count: upcomingShifts.length },
+      { id: 'ledighet', label: 'Ledigheter', icon: 'pause' },
+      { id: 'kontakter', label: 'Kontakter', icon: 'users' },
+    ];
+
+    return (
+      <div>
+        <PageHeader
+          breadcrumbs={[
+            { label: 'Kunder', href: '#/admin/kunder' },
+            { label: cust.name, href: `#/admin/kunder/${cust.id}` },
+            { label: prop.name },
+          ]}
+          title={prop.name}
+          subtitle={prop.address}
+          actions={<Button variant="ghost" icon="chevron-left" onClick={() => onNavigate(`/admin/kunder/${cust.id}`)}>Tillbaka</Button>}
+        />
+        <Tabs tabs={tabs} value={tab} onChange={setTab} className="mb-5" />
+
+        {tab === 'stadschema' && <AdminChecklistEditor propertyId={prop.id} />}
+        {tab === 'recurring' && <AdminRecurringEditor property={prop} session={session} />}
+        {tab === 'access' && <AdminAccessEditor property={prop} />}
+        {tab === 'pass' && <PropertyShiftsList property={prop} session={session} onNavigate={onNavigate} upcomingShifts={upcomingShifts} />}
+        {tab === 'ledighet' && <ComingSoonView title="Ledigheter" section="§7.3" description="Lista över registrerade kundledigheter på det här objektet." />}
+        {tab === 'kontakter' && <AdminPropertyContactsTab property={prop} customer={cust} session={session} />}
+      </div>
+    );
+  }
+
+  function AdminChecklistEditor({ propertyId }) {
+    useDb();
+    const items = db.listChecklistTemplate(propertyId);
+    const activeCount = items.filter(i => i.active).length;
+    const inactiveCount = items.length - activeCount;
+    const [newTitle, setNewTitle] = useState('');
+
+    return (
+      <Card padding="md">
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <div>
+            <h3 className="font-bold text-slate-900">Mallpunkter</h3>
+            <p className="text-xs text-slate-500 mt-0.5">
+              {activeCount} aktiva{inactiveCount > 0 ? ` · ${inactiveCount} inaktiva (kopieras inte till nya pass)` : ''}. Ändringar påverkar inte tidigare pass.
+            </p>
+          </div>
+        </div>
+
+        {items.length === 0 ? (
+          <EmptyState icon="list" title="Inget städschema än" description="Lägg till första punkten nedan." />
+        ) : (
+          <ul className="divide-y divide-slate-100 -mx-2 mb-4">
+            {items.map((it, idx) => (
+              <li key={it.id} className={cx('px-2 py-2 flex items-center gap-2', !it.active && 'opacity-60')}>
+                <span className={cx(
+                  'w-7 h-7 rounded-lg text-xs font-bold flex items-center justify-center flex-shrink-0',
+                  it.active ? 'bg-slate-100 text-slate-500' : 'bg-slate-50 text-slate-400 line-through',
+                )}>{it.position}</span>
+                <Input
+                  value={it.title}
+                  onChange={e => db.renameChecklistTemplateItem(it.id, e.target.value)}
+                  className={cx('flex-1', !it.active && 'line-through text-slate-400')}
+                  disabled={!it.active}
+                />
+                <div className="flex items-center">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    iconOnly
+                    icon={it.active ? 'eye' : 'eye-off'}
+                    title={it.active ? 'Avaktivera (visas inte i nya pass)' : 'Aktivera igen'}
+                    onClick={() => {
+                      const wasActive = it.active;
+                      db.setChecklistTemplateItemActive(it.id, !wasActive);
+                      toast.success(wasActive ? 'Punkten är avaktiverad.' : 'Punkten är aktiv igen.');
+                    }}
+                    aria-label={it.active ? 'Avaktivera' : 'Aktivera'}
+                  />
+                  <Button variant="ghost" size="sm" iconOnly icon="chevron-down" onClick={() => db.reorderChecklistTemplateItem(it.id, 1)} disabled={idx === items.length - 1} aria-label="Flytta ner" />
+                  <Button variant="ghost" size="sm" iconOnly icon="chevron-down" className="rotate-180" onClick={() => db.reorderChecklistTemplateItem(it.id, -1)} disabled={idx === 0} aria-label="Flytta upp" />
+                  <Button variant="danger-ghost" size="sm" iconOnly icon="trash" onClick={() => {
+                    if (confirm(`Ta bort "${it.title}"?`)) {
+                      db.removeChecklistTemplateItem(it.id);
+                      toast.success('Punkten borttagen.');
+                    }
+                  }} aria-label="Ta bort" />
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <div className="flex gap-2">
+          <Input
+            placeholder="Beskriv nästa punkt…"
+            value={newTitle}
+            onChange={e => setNewTitle(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && newTitle.trim()) {
+                db.addChecklistTemplateItem(propertyId, newTitle);
+                toast.success('Punkt tillagd.');
+                setNewTitle('');
+              }
+            }}
+          />
+          <Button
+            variant="primary"
+            icon="plus"
+            disabled={!newTitle.trim()}
+            onClick={() => {
+              db.addChecklistTemplateItem(propertyId, newTitle);
+              toast.success('Punkt tillagd.');
+              setNewTitle('');
+            }}
+          >Lägg till</Button>
+        </div>
+      </Card>
+    );
+  }
+
+  const WEEKDAYS = ['Måndag', 'Tisdag', 'Onsdag', 'Torsdag', 'Fredag', 'Lördag', 'Söndag'];
+  const WEEKDAYS_SHORT = ['Mån', 'Tis', 'Ons', 'Tors', 'Fre', 'Lör', 'Sön'];
+
+  function PropertyShiftsList({ property, session, onNavigate, upcomingShifts }) {
+    const [createOpen, setCreateOpen] = useState(false);
+    return (
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-sm text-slate-600">{upcomingShifts.length === 0 ? 'Inga kommande pass på det här objektet.' : `${upcomingShifts.length} kommande pass.`}</p>
+          <Button size="sm" icon="plus" onClick={() => setCreateOpen(true)}>Nytt pass</Button>
+        </div>
+        {upcomingShifts.length === 0 ? (
+          <Card padding="md"><EmptyState icon="calendar" title="Inga kommande pass" /></Card>
+        ) : (
+          <div className="grid md:grid-cols-2 gap-3">
+            {upcomingShifts.map(s => (
+              <ShiftCard key={s.id} shift={s} viewerRole="admin" viewerUserId={session.userId} onClick={() => onNavigate(`/admin/schema/${s.id}`)} />
+            ))}
+          </div>
+        )}
+        <CreateShiftModal open={createOpen} onClose={() => setCreateOpen(false)} session={session} preselectPropertyId={property.id} />
+      </div>
+    );
+  }
+
+  function AdminRecurringEditor({ property, session }) {
+    useDb();
+    const items = db.listRecurringSchedules(property.id);
+    const [createOpen, setCreateOpen] = useState(false);
+    const [confirmRemoveId, setConfirmRemoveId] = useState(null);
+
+    return (
+      <Card padding="md">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="font-bold text-slate-900">Återkommande pass</h3>
+            <p className="text-xs text-slate-500 mt-0.5">Mallar genererar pass rullande 12 veckor framåt. Ändringar på enskilda pass påverkar inte mallen.</p>
+          </div>
+          <Button icon="plus" onClick={() => setCreateOpen(true)}>Ny mall</Button>
+        </div>
+
+        {items.length === 0 ? (
+          <EmptyState icon="refresh" title="Inga återkommande pass" description="Lägg till en mall så genereras pass automatiskt." />
+        ) : (
+          <ul className="divide-y divide-slate-100 -mx-2">
+            {items.map(rs => (
+              <li key={rs.id} className="px-2 py-3 flex items-center gap-3">
+                <span className="w-10 h-10 rounded-xl bg-brand-50 text-brand-700 text-xs font-bold flex items-center justify-center flex-shrink-0">{WEEKDAYS_SHORT[rs.weekday]}</span>
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold text-slate-900">{WEEKDAYS[rs.weekday]} · {rs.start_time}–{rs.end_time}</p>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Städare: {rs.cleaner?.name || '—'}
+                    {(rs.valid_from || rs.valid_to) && (
+                      <> · Giltig {rs.valid_from ? formatDateShort(rs.valid_from) : '–'} {rs.valid_to ? `→ ${formatDateShort(rs.valid_to)}` : '→ tills vidare'}</>
+                    )}
+                  </p>
+                </div>
+                <Button variant="danger-ghost" size="sm" icon="trash" onClick={() => setConfirmRemoveId(rs.id)}>Ta bort mall</Button>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <CreateRecurringModal open={createOpen} onClose={() => setCreateOpen(false)} property={property} session={session} />
+        <ConfirmDialog
+          open={!!confirmRemoveId}
+          onClose={() => setConfirmRemoveId(null)}
+          title="Ta bort mallen?"
+          message="Alla framtida pass från den här mallen tas bort. Historiska pass bevaras. Berörda städare notifieras."
+          confirmLabel="Ta bort mall"
+          danger
+          onConfirm={() => {
+            const r = db.deleteRecurringSchedule(confirmRemoveId, session.userId);
+            if (r?.ok) toast.success(`Mall borttagen – ${r.removed} framtida pass rensade.`);
+            setConfirmRemoveId(null);
+          }}
+        />
+      </Card>
+    );
+  }
+
+  function CreateRecurringModal({ open, onClose, property, session }) {
+    const [weekday, setWeekday] = useState('0');
+    const [startTime, setStartTime] = useState('08:00');
+    const [endTime, setEndTime] = useState('10:00');
+    const [cleanerId, setCleanerId] = useState('');
+    const [validFrom, setValidFrom] = useState('');
+    const [validTo, setValidTo] = useState('');
+
+    useEffect(() => {
+      if (open) {
+        setWeekday('0'); setStartTime('08:00'); setEndTime('10:00');
+        setCleanerId(''); setValidFrom(''); setValidTo('');
+      }
+    }, [open]);
+
+    const cleaners = db.state.users.filter(u => u.role === 'cleaner' && u.active);
+    const validTime = startTime && endTime && startTime < endTime;
+    const canSubmit = cleanerId && validTime;
+
+    return (
+      <Modal
+        open={open}
+        onClose={onClose}
+        title="Ny återkommande mall"
+        size="md"
+        footer={
+          <>
+            <Button variant="ghost" onClick={onClose}>Avbryt</Button>
+            <Button disabled={!canSubmit} icon="plus" onClick={() => {
+              const r = db.createRecurringSchedule({
+                propertyId: property.id,
+                weekday: Number(weekday),
+                startTime, endTime,
+                defaultCleanerUserId: cleanerId,
+                validFrom: validFrom || null,
+                validTo: validTo || null,
+                generateWeeks: 12,
+                actorUserId: session.userId,
+              });
+              toast.success(`Mall skapad – ${r.generated} pass genererade för 12 veckor framåt.`);
+              onClose();
+            }}>Skapa mall</Button>
+          </>
+        }
+      >
+        <Field label="Veckodag">
+          <Select value={weekday} onChange={e => setWeekday(e.target.value)}>
+            {WEEKDAYS.map((d, i) => <option key={i} value={i}>{d}</option>)}
+          </Select>
+        </Field>
+        <div className="grid grid-cols-2 gap-3 mt-3">
+          <Field label="Starttid">
+            <Input type="time" value={startTime} onChange={e => setStartTime(e.target.value)} />
+          </Field>
+          <Field label="Sluttid" error={!validTime && startTime && endTime ? 'Sluttid måste vara efter starttid.' : null}>
+            <Input type="time" value={endTime} onChange={e => setEndTime(e.target.value)} />
+          </Field>
+        </div>
+        <div className="mt-3">
+          <Field label="Defaultstädare" required>
+            <Select value={cleanerId} onChange={e => setCleanerId(e.target.value)}>
+              <option value="">Välj städare…</option>
+              {cleaners.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </Select>
+          </Field>
+        </div>
+        <div className="grid grid-cols-2 gap-3 mt-3">
+          <Field label="Giltig fr.o.m." hint="Lämna tomt = från idag.">
+            <Input type="date" value={validFrom} onChange={e => setValidFrom(e.target.value)} />
+          </Field>
+          <Field label="Giltig t.o.m." hint="Lämna tomt = tills vidare.">
+            <Input type="date" value={validTo} onChange={e => setValidTo(e.target.value)} />
+          </Field>
+        </div>
+        <div className="mt-4 rounded-lg border border-sky-200 bg-sky-50/50 p-3 text-xs text-sky-900/90">
+          <Icon name="info" className="w-4 h-4 text-sky-700 inline-block mr-1 -mt-0.5" />
+          Mallen genererar pass rullande 12 veckor framåt. Justeringar och borttagningar av enskilda pass påverkar bara den raden, inte mallen.
+        </div>
+      </Modal>
+    );
+  }
+
+  function AdminAccessEditor({ property }) {
+    const [draft, setDraft] = useState(property.access_info || '');
+    const [notes, setNotes] = useState(property.notes || '');
+    useEffect(() => { setDraft(property.access_info || ''); setNotes(property.notes || ''); }, [property.id]);
+    const dirty = draft !== (property.access_info || '') || notes !== (property.notes || '');
+
+    return (
+      <div className="space-y-4">
+        <Card padding="md" className="border-amber-200 bg-amber-50/40">
+          <div className="flex items-start gap-2 mb-1">
+            <Icon name="shield" className="w-4 h-4 text-amber-700 mt-0.5" />
+            <p className="text-xs text-amber-800 font-semibold">
+              Det här fältet visas <span className="underline">aldrig</span> för kund eller kundanställd — endast admin och städare med tilldelade pass på objektet.
+            </p>
+          </div>
+        </Card>
+
+        <Card padding="md">
+          <Field label="Nyckel / larm-info" hint="Hur städaren tar sig in: koder, var nyckel finns, larminstruktioner, m.m.">
+            <Textarea rows={5} value={draft} onChange={e => setDraft(e.target.value)} placeholder="T.ex. Nyckel i kodlåda 1234 vid huvudentrén. Larm av/på-kod: …" />
+          </Field>
+        </Card>
+
+        <Card padding="md">
+          <Field label="Övriga anteckningar (synliga för alla)" hint="T.ex. specialönskemål, produkter att undvika.">
+            <Textarea rows={3} value={notes} onChange={e => setNotes(e.target.value)} placeholder="" />
+          </Field>
+        </Card>
+
+        <div className="flex justify-end gap-2 sticky bottom-4">
+          {dirty && <Button variant="ghost" onClick={() => { setDraft(property.access_info || ''); setNotes(property.notes || ''); }}>Återställ</Button>}
+          <Button variant="primary" icon="check" disabled={!dirty} onClick={() => {
+            db.updateProperty(property.id, { access_info: draft, notes });
+            toast.success('Objektet uppdaterat.');
+          }}>Spara</Button>
+        </div>
+      </div>
+    );
+  }
+
+  /* ============================================================
+   * ADMIN · Dashboard (Kräver din åtgärd)
+   * ============================================================ */
+  function AdminDashboardView({ session, onNavigate }) {
+    const [createShiftOpen, setCreateShiftOpen] = useState(false);
+    useDb();
+    const { sick, openIncidents, todayShifts } = db.adminActionables();
+    const totalCleaners = db.state.users.filter(u => u.role === 'cleaner' && u.active).length;
+    const totalCustomers = db.state.customers.length;
+    const todayAll = db.state.shifts.filter(s => formatDateShort(s.start_at) === formatDateShort(new Date()));
+
+    return (
+      <div>
+        <PageHeader
+          title={`God morgon, ${session.user.name.split(' ')[0]}.`}
+          subtitle="Här är dagens läge och allt som kräver din åtgärd."
+          actions={
+            <>
+              <Button variant="outline" icon="calendar" onClick={() => onNavigate('/admin/schema')}>Schema</Button>
+              <Button variant="primary" icon="plus" onClick={() => setCreateShiftOpen(true)}>Nytt pass</Button>
+            </>
+          }
+        />
+
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-8">
+          <Stat label="Pass idag" value={todayAll.length} hint={`${todayAll.filter(s => s.status === 'Utfört').length} utförda`} icon="calendar" tone="brand" />
+          <Stat label="Sjukanmälda" value={sick.length} hint={sick.length ? 'Kräver åtgärd' : 'Inget just nu'} icon="alert-circle" tone="amber" />
+          <Stat label="Öppna avvikelser" value={openIncidents.length} icon="alert-triangle" tone="rose" />
+          <Stat label="Aktiva städare" value={totalCleaners} hint={`${totalCustomers} kunder`} icon="users" tone="emerald" />
+        </div>
+
+        <h2 className="text-lg font-bold text-slate-900 mb-3 flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-accent-500" />
+          Kräver din åtgärd
+        </h2>
+
+        {sick.length === 0 && openIncidents.length === 0 ? (
+          <Card padding="lg">
+            <EmptyState icon="check-circle" title="Allt är under kontroll" description="Inga sjukanmälda pass eller öppna avvikelser just nu." />
+          </Card>
+        ) : (
+          <div className="space-y-6">
+            {sick.length > 0 && (
+              <section>
+                <h3 className="text-sm font-bold text-slate-700 mb-2 flex items-center gap-2">
+                  <Icon name="alert-circle" className="w-4 h-4 text-amber-600" />
+                  Sjukanmälda pass <Badge variant="amber">{sick.length}</Badge>
+                </h3>
+                <div className="grid md:grid-cols-2 gap-3">
+                  {sick.map(s => (
+                    <ShiftCard key={s.id} shift={s} viewerRole="admin" viewerUserId={session.userId} onClick={() => onNavigate(`/admin/schema/${s.id}`)} />
+                  ))}
+                </div>
+              </section>
+            )}
+            {openIncidents.length > 0 && (
+              <section>
+                <h3 className="text-sm font-bold text-slate-700 mb-2 flex items-center gap-2">
+                  <Icon name="alert-triangle" className="w-4 h-4 text-rose-600" />
+                  Nya avvikelser <Badge variant="rose">{openIncidents.length}</Badge>
+                </h3>
+                <div className="space-y-2">
+                  {openIncidents.map(i => {
+                    const prop = db.propertyById(i.property_id);
+                    return (
+                      <Card key={i.id} padding="md" className="hover:border-brand-300 transition-colors">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              <Badge variant={i.kind === 'customer_complaint' ? 'rose' : 'amber'}>
+                                {i.kind === 'customer_complaint' ? 'Reklamation' : 'Avvikelse'}
+                              </Badge>
+                              <span className="text-xs text-slate-500">{prop?.name}</span>
+                            </div>
+                            <p className="font-semibold text-slate-900">{i.title}</p>
+                            <p className="text-sm text-slate-600 line-clamp-2">{i.description}</p>
+                          </div>
+                          <Button variant="outline" size="sm" onClick={() => onNavigate(`/admin/avvikelser/${i.id}`)}>Öppna</Button>
+                        </div>
+                      </Card>
+                    );
+                  })}
+                </div>
+              </section>
+            )}
+          </div>
+        )}
+
+        <CreateShiftModal open={createShiftOpen} onClose={() => setCreateShiftOpen(false)} session={session} />
+      </div>
+    );
+  }
+
+  /* ============================================================
+   * CLEANER · Idag
+   * ============================================================ */
+  function CleanerTodayView({ session, onNavigate }) {
+    useDb();
+    const today = db.todayForCleaner(session.userId);
+    const upcoming = db.shiftsForCleaner(session.userId, { from: new Date(Date.now() + 24 * 36e5), statuses: ['Godkänt', 'Planerat'] }).slice(0, 5);
+    const myIncidents = db.incidents({ viewerUserId: session.userId, status: 'open' });
+
+    return (
+      <div>
+        <PageHeader
+          title={`Hej ${session.user.name.split(' ')[0]}!`}
+          subtitle={formatDateLong(new Date())}
+        />
+
+        <div className="grid grid-cols-3 gap-3 mb-8">
+          <Stat label="Pass idag" value={today.length} icon="calendar" tone="brand" />
+          <Stat label="Kommande" value={db.shiftsForCleaner(session.userId, { from: new Date(), statuses: ['Godkänt', 'Planerat'] }).length} icon="clock" tone="accent" />
+          <Stat label="Egna ärenden" value={myIncidents.length} icon="alert-triangle" tone="amber" />
+        </div>
+
+        <section className="mb-8">
+          <h2 className="text-lg font-bold text-slate-900 mb-3">Idag</h2>
+          {today.length === 0 ? (
+            <Card padding="lg">
+              <EmptyState icon="calendar" title="Inga pass idag" description="Du har inga schemalagda pass idag. Vila skönt!" />
+            </Card>
+          ) : (
+            <div className="space-y-3">
+              {today.map(s => <ShiftCard key={s.id} shift={s} viewerRole="cleaner" viewerUserId={session.userId} onClick={() => onNavigate(`/stadare/pass/${s.id}`)} />)}
+            </div>
+          )}
+        </section>
+
+        <section>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-lg font-bold text-slate-900">Kommande pass</h2>
+            <button onClick={() => onNavigate('/stadare/pass')} className="text-sm font-semibold text-brand-700 hover:text-brand-800 flex items-center gap-1">
+              Se alla <Icon name="arrow-right" className="w-4 h-4" />
+            </button>
+          </div>
+          {upcoming.length === 0 ? (
+            <Card padding="md"><EmptyState icon="inbox" title="Inga kommande pass" /></Card>
+          ) : (
+            <div className="grid md:grid-cols-2 gap-3">
+              {upcoming.map(s => <ShiftCard key={s.id} shift={s} viewerRole="cleaner" viewerUserId={session.userId} onClick={() => onNavigate(`/stadare/pass/${s.id}`)} />)}
+            </div>
+          )}
+        </section>
+      </div>
+    );
+  }
+
+  /* ============================================================
+   * CUSTOMER · Översikt
+   * ============================================================ */
+  function CustomerOverviewView({ session, onNavigate }) {
+    useDb();
+    const customer = db.customerForUser(session.userId);
+    const props = db.propertiesForUser(session.userId);
+    const upcoming = db.shiftsForCustomerUser(session.userId, { from: new Date(), statuses: ['Godkänt', 'Planerat', 'Sjukanmäld', 'Pausat (kundledighet)'] }).slice(0, 8);
+    const openIncidents = db.incidents({ viewerUserId: session.userId, status: 'open' });
+    const isReadOnly = session.user.role === 'customer_employee';
+
+    return (
+      <div>
+        <PageHeader
+          title={customer ? customer.name : 'Översikt'}
+          subtitle={isReadOnly ? 'Du har läsbehörighet på utvalda objekt.' : `${props.length} objekt · ${session.user.name}`}
+          actions={!isReadOnly && (
+            <Button variant="outline" icon="calendar" onClick={() => onNavigate('/kund/ledighet')}>Ny ledighet</Button>
+          )}
+        />
+
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-8">
+          <Stat label="Objekt" value={props.length} icon="building" tone="brand" />
+          <Stat label="Kommande pass" value={upcoming.length} icon="calendar" tone="accent" />
+          <Stat label="Öppna ärenden" value={openIncidents.length} icon="alert-triangle" tone="amber" />
+          <Stat label="Roll" value={isReadOnly ? 'Läs' : 'Admin'} hint={isReadOnly ? 'Kundanställd' : 'Huvudkontakt'} icon="shield" tone="emerald" />
+        </div>
+
+        <section className="mb-8">
+          <h2 className="text-lg font-bold text-slate-900 mb-3">Dina objekt</h2>
+          {props.length === 0 ? (
+            <Card padding="lg"><EmptyState icon="building" title="Inga objekt kopplade" description="Kontakta admin om du saknar åtkomst." /></Card>
+          ) : (
+            <div className="grid md:grid-cols-2 gap-3">
+              {props.map(p => {
+                const next = db.shiftsForProperty(p.id, { from: new Date() })[0];
+                return (
+                  <Card key={p.id} padding="md" className="hover:border-brand-300 transition-colors">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="font-semibold text-slate-900">{p.name}</p>
+                        <p className="text-xs text-slate-500 mt-0.5 truncate">{p.address}</p>
+                      </div>
+                      <Icon name="building" className="w-5 h-5 text-slate-300 flex-shrink-0" />
+                    </div>
+                    {next && (
+                      <div className="mt-3 pt-3 border-t border-slate-100 text-xs text-slate-600 flex items-center gap-2">
+                        <Icon name="calendar" className="w-3.5 h-3.5 text-slate-400" />
+                        Nästa pass: <span className="font-medium text-slate-800">{relativeDay(next.start_at)} {formatRange(next.start_at, next.end_at)}</span>
+                      </div>
+                    )}
+                  </Card>
+                );
+              })}
+            </div>
+          )}
+        </section>
+
+        <section>
+          <h2 className="text-lg font-bold text-slate-900 mb-3">Kommande pass</h2>
+          {upcoming.length === 0 ? (
+            <Card padding="md"><EmptyState icon="inbox" title="Inga kommande pass" /></Card>
+          ) : (
+            <div className="grid md:grid-cols-2 gap-3">
+              {upcoming.map(s => <ShiftCard key={s.id} shift={s} viewerRole={session.user.role} viewerUserId={session.userId} onClick={() => onNavigate(`/kund/pass/${s.id}`)} />)}
+            </div>
+          )}
+        </section>
+      </div>
+    );
+  }
+
+  /* ============================================================
+   * Placeholder för icke-byggda sidor
+   * ============================================================ */
+  function ComingSoonView({ title, section, description }) {
+    return (
+      <div>
+        <PageHeader title={title} subtitle={description || 'Den här vyn byggs härnäst.'} />
+        <Card padding="lg">
+          <EmptyState
+            icon="sparkles"
+            title="Bygger ut härnäst"
+            description={
+              <>
+                Den här vyn motsvarar <span className="font-mono font-semibold text-slate-700">{section}</span> i <span className="font-mono">mvpfinal.md</span>.
+                <br />Vi bygger sidorna stegvis enligt specen.
+              </>
+            }
+          />
+        </Card>
+      </div>
+    );
+  }
+
+  window.LoginView = LoginView;
+  window.AdminDashboardView = AdminDashboardView;
+  window.CleanerTodayView = CleanerTodayView;
+  window.CleanerShiftsListView = CleanerShiftsListView;
+  window.CleanerShiftDetailView = CleanerShiftDetailView;
+  window.CustomerOverviewView = CustomerOverviewView;
+  window.CustomerShiftDetailView = CustomerShiftDetailView;
+  window.AdminCustomersListView = AdminCustomersListView;
+  window.AdminCustomerView = AdminCustomerView;
+  window.AdminPropertyView = AdminPropertyView;
+  window.AdminShiftDetailView = AdminShiftDetailView;
+  window.ComingSoonView = ComingSoonView;
+  window.ShiftCard = ShiftCard;
+  window.ShiftDetail = ShiftDetail;
+  window.SickReportModal = SickReportModal;
+  window.CustomerShiftActions = CustomerShiftActions;
+  window.CancelShiftModal = CancelShiftModal;
+  window.CustomerHolidayView = CustomerHolidayView;
+  window.HolidayCard = HolidayCard;
+  window.AdminSchemaView = AdminSchemaView;
+  window.CreateShiftModal = CreateShiftModal;
+  window.AdminRecurringEditor = AdminRecurringEditor;
+  window.CreateRecurringModal = CreateRecurringModal;
+  // §7.6
+  window.CleanerIncidentReportModal = CleanerIncidentReportModal;
+  window.CustomerComplaintModal = CustomerComplaintModal;
+  window.ResolveIncidentModal = ResolveIncidentModal;
+  window.AdminIncidentsView = AdminIncidentsView;
+  window.CleanerIncidentsView = CleanerIncidentsView;
+  window.CustomerIncidentsView = CustomerIncidentsView;
+  window.IncidentDetailView = IncidentDetailView;
+  // §7.7
+  window.AddCustomerEmployeeModal = AddCustomerEmployeeModal;
+  window.AdminCustomerEmployeesCard = AdminCustomerEmployeesCard;
+  window.AdminPropertyContactsTab = AdminPropertyContactsTab;
+  window.CustomerSettingsView = CustomerSettingsView;
+})();
