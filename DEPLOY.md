@@ -36,25 +36,28 @@ I Vercel **Settings → Domains**:
 
 ### 4. Deploy
 - Första deploy startar automatiskt vid import
-- `vercel.json` kör `node scripts/generate-config.js` automatiskt
-- Root `/` pekar på `CleanUp.html`
+- `vercel.json` kör **`npm run build`** (Tailwind + JSX-bundle + prod-HTML → `dist/`)
+- Root `/` pekar på `CleanUp.html` (via rewrite)
 
 ## 🔧 Konfiguration
 
-### vercel.json
+### vercel.json (ska matcha Vercel Dashboard)
 ```json
 {
-  "buildCommand": "node scripts/generate-config.js",
-  "outputDirectory": ".",
-  "rewrites": [{ "source": "/", "destination": "/CleanUp.html" }],
-  "headers": [/* säkerhetsheaders redan konfigurerade */]
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "rewrites": [{ "source": "/", "destination": "/CleanUp.html" }]
 }
 ```
 
+**Viktigt i Vercel → Settings → Build and Deployment:** stäng av *Override* för Output Directory (eller sätt den till `dist`). Om Output Directory är `.` serveras **dev-versionen** av `CleanUp.html` (CDN Tailwind + Babel i webbläsaren) – då saknas ofta CSS och appen ser ut som ett tidigt utkast.
+
 ### Buildprocess
-1. Vercel läser miljövariabler
-2. `scripts/generate-config.js` skriver `src/config.js`
-3. Statiska filer serveras direkt
+1. `npm install` (Tailwind + Babel som devDependencies)
+2. `npm run build` → `dist/` med `styles.css`, `app.bundle.js`, `config.js`, prod-`CleanUp.html`
+3. Vercel publicerar **endast** innehållet i `dist/`
+
+Ett lyckat bygge tar flera sekunder (inte ~300 ms). I loggen ska du se t.ex. `Wrote .../dist/src/styles.css` och `Bygge klart -> dist/`.
 
 ## 📋 Verifiering efter deploy
 
@@ -72,6 +75,11 @@ I Vercel **Settings → Domains**:
 - Testa att RLS fungerar (kunder ser bara sina objekt)
 
 ## 🛠️ Troubleshooting
+
+### Sidan ser ostylad ut / gammalt utkast på produktion
+- Build-loggen visar bara `Wrote .../src/config.js` och bygget tar ~300 ms → **hela bygget körs inte**
+- Åtgärd: Build Command = `npm run build`, Output Directory = `dist`, trigga **Redeploy**
+- Lokalt: `npm run build` och öppna `dist/CleanUp.html` – det ska matcha produktion
 
 ### "Config missing" fel
 - Verifiera `SUPABASE_ANON_KEY` är satt i Vercel env vars

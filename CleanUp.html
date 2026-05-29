@@ -14,6 +14,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
 
+  <!-- build:dev:head:start -->
   <script src="https://cdn.tailwindcss.com" crossorigin="anonymous"></script>
   <script>
     tailwind.config = {
@@ -62,10 +63,12 @@
     ::-webkit-scrollbar { width: 10px; height: 10px; }
     ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 99px; border: 3px solid transparent; background-clip: content-box; }
   </style>
+  <!-- build:dev:head:end -->
 </head>
 <body>
   <div id="root"></div>
 
+  <!-- build:dev:body:start -->
   <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin="anonymous"></script>
   <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin="anonymous"></script>
   <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
@@ -82,5 +85,6 @@
   <script type="text/babel" src="src/tweaks-panel.jsx"></script>
   <script type="text/babel" src="src/views.jsx"></script>
   <script type="text/babel" src="src/app.jsx"></script>
+  <!-- build:dev:body:end -->
 </body>
 </html>

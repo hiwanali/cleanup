@@ -1,0 +1,28 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --a50: 255 242 238; --a100: 255 225 214;
+    --a500: 242 96 60; --a600: 224 74 38; --a700: 187 58 29;
+  }
+  html, body {
+    font-family: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+    -webkit-text-size-adjust: 100%;
+  }
+  body { margin: 0; }
+  * { -webkit-tap-highlight-color: transparent; }
+}
+
+/* Tweak: hörnradie – skala om de vanligaste containrarna live */
+body[data-round="Skarp"] .rounded-3xl { border-radius: .75rem !important; }
+body[data-round="Skarp"] .rounded-2xl { border-radius: .5rem !important; }
+body[data-round="Skarp"] .rounded-xl  { border-radius: .375rem !important; }
+body[data-round="Rundad"] .rounded-2xl { border-radius: 1.75rem !important; }
+body[data-round="Rundad"] .rounded-xl  { border-radius: 1rem !important; }
+body[data-round="Rundad"] .rounded-lg  { border-radius: .875rem !important; }
+
+/* finputsa scrollbars */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 99px; border: 3px solid transparent; background-clip: content-box; }

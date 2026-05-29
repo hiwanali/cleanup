@@ -1,3 +1,6 @@
-.cursor/
+node_modules/
+dist/
+src/config.js
 .env
 .env.local
+.DS_Store

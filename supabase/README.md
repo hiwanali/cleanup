@@ -50,7 +50,7 @@ supabase db push
 2. Lägg till miljövariabler (Production + Preview):
    - `SUPABASE_URL` = `https://bkmnlcdsbvpucpqmaycx.supabase.co`
    - `SUPABASE_ANON_KEY` = publishable key från Supabase Dashboard → API
-3. Build command körs automatiskt via `vercel.json` (`node scripts/generate-config.js`).
+3. Build command körs automatiskt via `vercel.json` (`npm run build` → output `dist/`).
 4. Rot-URL `/` pekar på `CleanUp.html`.
 
 Lokal utveckling:
