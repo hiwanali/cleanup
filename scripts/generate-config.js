@@ -17,6 +17,8 @@ function writeConfig(outFile) {
   const anonKey =
     process.env.SUPABASE_ANON_KEY ||
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+    process.env.SUPABASE_PUBLISHABLE_KEY ||
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
     '';
 
   const body = `/* Auto-genererad – redigera inte för hand. Värden kommer från miljövariabler. */
