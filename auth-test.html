@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Auth Test - CleanUp</title>
+</head>
+<body>
+  <h1>CleanUp Auth Test</h1>
+  <div id="status">Laddar...</div>
+  <br>
+  <button onclick="testLogin()">Testa Login: concito@cleanup.nu</button>
+  <br><br>
+  <div id="result"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script>
+    const { createClient } = supabase;
+    const sb = createClient(
+      'https://bkmnlcdsbvpucpqmaycx.supabase.co',
+      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJrbW5sY2RzYnZwdWNwcW1heWN4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAwMzIxNTMsImV4cCI6MjA5NTYwODE1M30.KI30f-J4OFjUTyGGlLKEX51XamjbuYRspMzvWZwFTcQ'
+    );
+
+    document.getElementById('status').textContent = 'Supabase client redo!';
+
+    async function testLogin() {
+      const result = document.getElementById('result');
+      result.innerHTML = 'Testar inloggning...';
+      
+      try {
+        const { data, error } = await sb.auth.signInWithPassword({
+          email: 'concito@cleanup.nu',
+          password: 'Work123!'
+        });
+        
+        if (error) {
+          result.innerHTML = `❌ FEL: ${error.message}`;
+          console.error('Auth error:', error);
+        } else {
+          result.innerHTML = `✅ LYCKADES! User: ${data.user.email}`;
+          console.log('Success:', data);
+        }
+      } catch (e) {
+        result.innerHTML = `❌ EXCEPTION: ${e.message}`;
+        console.error('Exception:', e);
+      }
+    }
+  </script>
+</body>
+</html>
