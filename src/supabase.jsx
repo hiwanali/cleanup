@@ -8,9 +8,10 @@
  * Skrivningar speglas stegvis till Supabase i db-mutatorerna (se mock.jsx).
  */
 (function () {
-  // Publishable key är säker att exponera i frontend (RLS skyddar datan).
-  const SUPABASE_URL = 'https://bkmnlcdsbvpucpqmaycx.supabase.co';
-  const SUPABASE_ANON_KEY = 'sb_publishable_9aBjY9t3Xax797XuFINPNA_9aElZZgu';
+  // URL/nyckel från src/config.js (Vercel build) eller fallback för lokal dev.
+  const cfg = window.__CLEANUP_CONFIG__ || {};
+  const SUPABASE_URL = cfg.url || 'https://bkmnlcdsbvpucpqmaycx.supabase.co';
+  const SUPABASE_ANON_KEY = cfg.anonKey || '';
 
   const lib = window.supabase;
   const enabled = !!(lib && lib.createClient && SUPABASE_URL && SUPABASE_ANON_KEY);
@@ -67,7 +68,8 @@
     const from = source || table;
     const { data, error } = await sb.from(from).select('*');
     if (error) {
-      console.error(`[hydrate] ${from}:`, error.message);
+      // Log utan känslig info för debugging
+      console.error(`[hydrate] ${from}: Database error`);
       return [];
     }
     return (data || []).map(r => convertRow(table, r));

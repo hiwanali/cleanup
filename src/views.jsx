@@ -24,13 +24,6 @@
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
 
-    const demos = [
-      { email: 'sara@cleanup.se', label: 'Admin' },
-      { email: 'anna@cleanup.se', label: 'Städare' },
-      { email: 'erik@acme.se', label: 'Kund' },
-      { email: 'lisa@acme.se', label: 'Kundanställd' },
-    ];
-
     async function submit(e) {
       e.preventDefault();
       if (!email.trim() || !password) return;
@@ -52,7 +45,7 @@
             <p className="text-slate-600">Logga in för att fortsätta.</p>
           </div>
 
-          <Card padding="lg" className="mb-4">
+          <Card padding="lg">
             <form onSubmit={submit} className="space-y-4">
               <Field label="Mejl">
                 <Input type="email" value={email} autoComplete="username" placeholder="namn@foretag.se" onChange={e => setEmail(e.target.value)} />
@@ -65,22 +58,6 @@
                 {loading ? 'Loggar in …' : 'Logga in'}
               </Button>
             </form>
-          </Card>
-
-          <Card padding="md" className="bg-slate-50/70 border-slate-200">
-            <p className="text-xs font-semibold text-slate-500 mb-2">Demokonton (lösenord: demo1234)</p>
-            <div className="flex flex-wrap gap-1.5">
-              {demos.map(d => (
-                <button
-                  key={d.email}
-                  type="button"
-                  onClick={() => { setEmail(d.email); setPassword('demo1234'); }}
-                  className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-xs text-slate-600 hover:border-brand-300"
-                >
-                  {d.label} · {d.email}
-                </button>
-              ))}
-            </div>
           </Card>
         </div>
       </div>

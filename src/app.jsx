@@ -450,7 +450,12 @@
 
   async function handlePasswordLogin(email, password) {
     const { data, error } = await sb.auth.signInWithPassword({ email: email.trim(), password });
-    if (error) return error.message;
+    if (error) {
+      // Generiskt felmeddelande för säkerhet
+      return error.message === 'Invalid login credentials' 
+        ? 'Felaktigt användarnamn eller lösenord.' 
+        : 'Inloggning misslyckades. Försök igen.';
+    }
     await window.hydrateFromSupabase(data.user.id);
     const user = db.userById(data.user.id);
     if (!user) return 'Inget konto kopplat till den här inloggningen.';
