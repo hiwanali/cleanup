@@ -86,17 +86,16 @@ Allt i `src/mock.jsx` är skrivet så att vi 1:1 kan ersätta det med Supabase-a
 
 ---
 
+## Supabase (databas)
+
+Schema och RLS är migrerade till projektet **CleanUp** på Supabase. Se [`supabase/README.md`](./supabase/README.md) för demokonton, migreringsfiler och verifiering.
+
+Kopiera [`.env.example`](./.env.example) till `.env` och sätt `SUPABASE_URL` + `SUPABASE_ANON_KEY` från [Dashboard → API](https://supabase.com/dashboard/project/bkmnlcdsbvpucpqmaycx/settings/api).
+
+Prototypen använder fortfarande **`src/mock.jsx`** i webbläsaren; nästa steg är att koppla in `@supabase/supabase-js` och ersätta selektorerna stegvis.
+
 ## Nästa steg
 
-Vi följer `mvpfinal.md` i denna ordning. Markera klart efter varje:
-
-1. **§7.5 Städschema per objekt + pass-detalj för städare** – mest värdefulla vertikala skivan, lär oss flödet checka in → bocka checklist → checka ut.
-2. **§7.1 Sjukanmälan + admins ombokningsmodal** – vi har redan datan; bygg interaktionen.
-3. **§7.2 48h-avbokning** – knapp/kontaktinfo i kundens pass-detalj.
-4. **§7.3 Kundledighet** – flik med formulär + live-förhandsvisning.
-5. **§7.4 Admin-justering** – justera tid, byta städare, ta bort.
-6. **§7.6 Avvikelse/reklamation** – båda flödena + admins Avvikelser-flik med bildbilagor.
-7. **§7.7 Kundanställda** – inställningsvy + flow vid kundskapande.
-8. **Schema-vy + kundvy-detaljer** – polering.
-9. **Supabase-anslutning** – Auth, RLS-policys, migrera mock → riktig data.
-10. **Säkerhetsgenomgång + Vercel-publicering**.
+1. **Koppla frontend till Supabase** – auth + läs/skriv via RLS.
+2. **Schema-vy + kundvy-detaljer** – polering.
+3. **Säkerhetsgenomgång + Vercel-publicering** (Next.js enligt `mvpfinal.md`).

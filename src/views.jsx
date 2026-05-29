@@ -11,7 +11,83 @@
   /* ============================================================
    * LOGIN (mock — auth kommer via Supabase senare)
    * ============================================================ */
-  function LoginView({ onLogin }) {
+  function LoginView({ onLogin, onPasswordLogin }) {
+    if (window.SUPABASE_ENABLED) {
+      return <PasswordLoginView onPasswordLogin={onPasswordLogin} />;
+    }
+    return <DevLoginView onLogin={onLogin} />;
+  }
+
+  function PasswordLoginView({ onPasswordLogin }) {
+    const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
+    const [error, setError] = useState('');
+    const [loading, setLoading] = useState(false);
+
+    const demos = [
+      { email: 'sara@cleanup.se', label: 'Admin' },
+      { email: 'anna@cleanup.se', label: 'Städare' },
+      { email: 'erik@acme.se', label: 'Kund' },
+      { email: 'lisa@acme.se', label: 'Kundanställd' },
+    ];
+
+    async function submit(e) {
+      e.preventDefault();
+      if (!email.trim() || !password) return;
+      setLoading(true);
+      setError('');
+      const msg = await onPasswordLogin(email, password);
+      if (msg) { setError(msg); setLoading(false); }
+      // vid lyckad inloggning byts vyn ut av App
+    }
+
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-brand-50 via-white to-accent-50 flex items-center justify-center p-4">
+        <div className="w-full max-w-md">
+          <div className="text-center mb-8">
+            <div className="inline-flex items-center gap-3 mb-3">
+              <BrandLogo size="lg" />
+              <h1 className="text-3xl font-extrabold tracking-tight text-slate-900">CleanUp</h1>
+            </div>
+            <p className="text-slate-600">Logga in för att fortsätta.</p>
+          </div>
+
+          <Card padding="lg" className="mb-4">
+            <form onSubmit={submit} className="space-y-4">
+              <Field label="Mejl">
+                <Input type="email" value={email} autoComplete="username" placeholder="namn@foretag.se" onChange={e => setEmail(e.target.value)} />
+              </Field>
+              <Field label="Lösenord">
+                <Input type="password" value={password} autoComplete="current-password" placeholder="••••••••" onChange={e => setPassword(e.target.value)} />
+              </Field>
+              {error && <p className="text-sm text-rose-600">{error}</p>}
+              <Button type="submit" variant="primary" className="w-full" disabled={loading || !email.trim() || !password}>
+                {loading ? 'Loggar in …' : 'Logga in'}
+              </Button>
+            </form>
+          </Card>
+
+          <Card padding="md" className="bg-slate-50/70 border-slate-200">
+            <p className="text-xs font-semibold text-slate-500 mb-2">Demokonton (lösenord: demo1234)</p>
+            <div className="flex flex-wrap gap-1.5">
+              {demos.map(d => (
+                <button
+                  key={d.email}
+                  type="button"
+                  onClick={() => { setEmail(d.email); setPassword('demo1234'); }}
+                  className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-xs text-slate-600 hover:border-brand-300"
+                >
+                  {d.label} · {d.email}
+                </button>
+              ))}
+            </div>
+          </Card>
+        </div>
+      </div>
+    );
+  }
+
+  function DevLoginView({ onLogin }) {
     const profiles = useMemo(() => {
       // Snabb-login som visar separationsregeln tydligt
       const u = db.state.users;
@@ -37,7 +113,7 @@
         <div className="w-full max-w-4xl">
           <div className="text-center mb-8">
             <div className="inline-flex items-center gap-3 mb-3">
-              <div className="w-12 h-12 rounded-2xl bg-brand-600 text-white flex items-center justify-center text-xl font-extrabold">C<span className="text-accent-500">.</span></div>
+              <BrandLogo size="lg" />
               <h1 className="text-3xl font-extrabold tracking-tight text-slate-900">CleanUp</h1>
             </div>
             <p className="text-slate-600">Plattform för städ — admin, städare och kund.</p>

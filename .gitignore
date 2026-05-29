@@ -1,1 +1,3 @@
 .cursor/
+.env
+.env.local

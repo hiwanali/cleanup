@@ -213,6 +213,23 @@
     );
   }
 
+  const BRAND_LOGO_SRC = 'CleanUp%20favicon.png';
+
+  function BrandLogo({ size = 'md', className }) {
+    const sizes = {
+      sm: 'w-8 h-8 rounded-lg',
+      md: 'w-9 h-9 rounded-xl',
+      lg: 'w-12 h-12 rounded-2xl',
+    };
+    return (
+      <img
+        src={BRAND_LOGO_SRC}
+        alt="CleanUp"
+        className={cx(sizes[size] || sizes.md, 'object-contain flex-shrink-0', className)}
+      />
+    );
+  }
+
   /* ============================================================
    * Modal
    * ============================================================ */
@@ -558,7 +575,7 @@
     formatDate, formatDateLong, formatDateShort, formatTime, formatDateTime, formatRange,
     hoursUntil, relativeDay, initials,
     Button, Spinner, Card,
-    Badge, StatusBadge, Avatar,
+    Badge, StatusBadge, Avatar, BrandLogo,
     Modal, ConfirmDialog,
     Tabs, Field, Input, Textarea, Select, Checkbox, Radio,
     EmptyState, Stat, PageHeader, Skeleton,

@@ -129,9 +129,7 @@
     return (
       <aside className="h-full w-64 bg-white border-r border-slate-200 flex flex-col">
         <div className="px-5 py-5 border-b border-slate-100 flex items-center gap-2.5">
-          <div className="w-9 h-9 rounded-xl bg-brand-600 text-white flex items-center justify-center text-base font-extrabold">
-            C<span className="text-accent-500">.</span>
-          </div>
+          <BrandLogo size="md" />
           <div className="min-w-0">
             <p className="font-extrabold text-slate-900 leading-none">CleanUp</p>
             <p className="text-[11px] text-slate-500 mt-0.5 uppercase tracking-wide">{roleLabel(session.role)}</p>
@@ -165,7 +163,11 @@
               <p className="text-[11px] text-slate-500 truncate">{session.user.email}</p>
             </div>
             <button
-              onClick={() => { sessionStore.logout(); router.navigate('/'); }}
+              onClick={async () => {
+                if (window.SUPABASE_ENABLED) { try { await sb.auth.signOut(); } catch (_) {} }
+                else sessionStore.logout();
+                router.navigate('/');
+              }}
               className="text-slate-400 hover:text-rose-600 p-1.5 rounded-lg"
               aria-label="Logga ut"
               title="Logga ut"
@@ -199,22 +201,22 @@
               <Icon name="menu" className="w-5 h-5" />
             </button>
             <div className="lg:hidden flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg bg-brand-600 text-white flex items-center justify-center text-sm font-extrabold">
-                C<span className="text-accent-500">.</span>
-              </div>
+              <BrandLogo size="sm" />
               <span className="font-extrabold text-slate-900">CleanUp</span>
             </div>
           </div>
 
           <div className="flex items-center gap-1.5">
-            <button
-              onClick={() => setSwitchOpen(true)}
-              className="hidden sm:inline-flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-xs font-semibold hover:bg-amber-100 transition-colors"
-              title="Endast under utveckling — försvinner med Supabase Auth"
-            >
-              <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
-              DEV · Byt profil
-            </button>
+            {!window.SUPABASE_ENABLED && (
+              <button
+                onClick={() => setSwitchOpen(true)}
+                className="hidden sm:inline-flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-xs font-semibold hover:bg-amber-100 transition-colors"
+                title="Endast under utveckling — försvinner med Supabase Auth"
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                DEV · Byt profil
+              </button>
+            )}
 
             <button
               onClick={() => { setBellOpen(o => !o); }}
@@ -435,17 +437,69 @@
   /* ============================================================
    * App entry
    * ============================================================ */
+  function BootScreen() {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-brand-50 via-white to-accent-50 flex items-center justify-center">
+        <div className="flex flex-col items-center gap-3 text-slate-500">
+          <BrandLogo size="sm" className="animate-pulse" />
+          <p className="text-sm">Laddar …</p>
+        </div>
+      </div>
+    );
+  }
+
+  async function handlePasswordLogin(email, password) {
+    const { data, error } = await sb.auth.signInWithPassword({ email: email.trim(), password });
+    if (error) return error.message;
+    await window.hydrateFromSupabase(data.user.id);
+    const user = db.userById(data.user.id);
+    if (!user) return 'Inget konto kopplat till den här inloggningen.';
+    sessionStore.login(data.user.id);
+    router.navigate(defaultPathForRole(user.role));
+    return null;
+  }
+
   function App() {
     const session = useSession();
+    const [booting, setBooting] = useState(!!window.SUPABASE_ENABLED);
+
+    useEffect(() => {
+      if (!window.SUPABASE_ENABLED) return;
+      let active = true;
+      (async () => {
+        try {
+          const { data } = await sb.auth.getSession();
+          if (data.session) {
+            await window.hydrateFromSupabase(data.session.user.id);
+            if (active) sessionStore.login(data.session.user.id);
+          } else if (active) {
+            // Rensa ev. gammal mock-session så vi inte auto-loggar in mot seed-data
+            sessionStore.logout();
+          }
+        } catch (e) {
+          console.error('Supabase boot error:', e);
+        }
+        if (active) setBooting(false);
+      })();
+      const { data: sub } = sb.auth.onAuthStateChange((event) => {
+        if (event === 'SIGNED_OUT') sessionStore.logout();
+      });
+      return () => { active = false; sub.subscription.unsubscribe(); };
+    }, []);
+
+    if (booting) return <BootScreen />;
 
     if (!session) {
       return (
         <>
-          <LoginView onLogin={userId => {
-            const user = db.userById(userId);
-            sessionStore.login(userId);
-            router.navigate(defaultPathForRole(user.role));
-          }} />
+          <LoginView
+            onLogin={userId => {
+              const user = db.userById(userId);
+              sessionStore.login(userId);
+              router.navigate(defaultPathForRole(user.role));
+            }}
+            onPasswordLogin={handlePasswordLogin}
+          />
           <TweaksPanel />
           <ToastContainer />
         </>

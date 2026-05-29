@@ -1048,6 +1048,14 @@
       if (u) u.active = false;
       bump();
     },
+
+    /* —— hydrering från Supabase (ersätter hela cachen) —— */
+    replaceAll(next) {
+      Object.keys(state).forEach(table => {
+        if (Array.isArray(next[table])) state[table] = next[table];
+      });
+      bump();
+    },
   };
 
   /* ============================================================
