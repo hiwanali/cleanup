@@ -154,4 +154,304 @@
     }
     return false;
   };
+
+  /* ---------- persist (skrivningar till Supabase) ---------- */
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+  function isUuid(value) {
+    return typeof value === 'string' && UUID_RE.test(value);
+  }
+
+  function toIso(d) {
+    if (d == null) return null;
+    if (d instanceof Date) return d.toISOString();
+    return d;
+  }
+
+  /** §7.4 admin tar bort pass – körs endast när id är UUID (hydrerad Supabase-data). */
+  async function persistAdminDelete({ shiftId, actorUserId, hoursToStart, shift, primaryContactUserId }) {
+    if (!enabled || !sb || !isUuid(shiftId)) {
+      return { ok: true, skipped: true };
+    }
+
+    const { error: shiftErr } = await sb.from('shifts').update({
+      status: 'Borttaget',
+      last_modified_by: actorUserId,
+    }).eq('id', shiftId);
+
+    if (shiftErr) {
+      console.error('[persist] adminDelete shifts:', shiftErr.message);
+      return { ok: false, message: shiftErr.message };
+    }
+
+    const { error: evErr } = await sb.from('shift_events').insert({
+      shift_id: shiftId,
+      actor_user_id: actorUserId,
+      event_type: 'admin_deleted',
+      payload: { hours_to_start: hoursToStart },
+    });
+
+    if (evErr) {
+      console.error('[persist] adminDelete shift_events:', evErr.message);
+      return { ok: false, message: evErr.message };
+    }
+
+    const notifPayload = {
+      shift_id: shiftId,
+      property_id: shift.property_id,
+      start_at: toIso(shift.start_at),
+    };
+
+    const rows = [];
+    if (shift.cleaner_user_id && isUuid(shift.cleaner_user_id)) {
+      rows.push({
+        recipient_user_id: shift.cleaner_user_id,
+        channel: 'in_app',
+        kind: 'admin_deleted',
+        payload: notifPayload,
+      });
+    }
+    if (primaryContactUserId && isUuid(primaryContactUserId)) {
+      rows.push({
+        recipient_user_id: primaryContactUserId,
+        channel: 'in_app',
+        kind: 'admin_deleted',
+        payload: notifPayload,
+      });
+    }
+
+    if (rows.length > 0) {
+      const { error: nErr } = await sb.from('notifications').insert(rows);
+      if (nErr) {
+        console.error('[persist] adminDelete notifications:', nErr.message);
+        return { ok: false, message: nErr.message };
+      }
+    }
+
+    return { ok: true };
+  }
+
+  /** §7.7 admin redigerar kund + huvudkontakt. */
+  async function persistUpdateCustomer({ customerId, customer, contactUserId, contact }) {
+    if (!enabled || !sb || !isUuid(customerId)) {
+      return { ok: true, skipped: true };
+    }
+
+    const { error: custErr } = await sb.from('customers').update({
+      name: customer.name,
+      org_number: customer.org_number || null,
+      notes: customer.notes || '',
+    }).eq('id', customerId);
+
+    if (custErr) {
+      console.error('[persist] updateCustomer customers:', custErr.message);
+      return { ok: false, message: custErr.message };
+    }
+
+    if (isUuid(contactUserId)) {
+      const { error: userErr } = await sb.from('users').update({
+        name: contact.name,
+        email: contact.email,
+        phone: contact.phone || null,
+      }).eq('id', contactUserId);
+
+      if (userErr) {
+        console.error('[persist] updateCustomer users:', userErr.message);
+        return { ok: false, message: userErr.message };
+      }
+    }
+
+    return { ok: true };
+  }
+
+  /** Admin redigerar objekt (partiell uppdatering). */
+  async function persistUpdateProperty({ propertyId, fields }) {
+    if (!enabled || !sb || !isUuid(propertyId)) {
+      return { ok: true, skipped: true };
+    }
+
+    const row = {};
+    if ('name' in fields) row.name = fields.name;
+    if ('address' in fields) row.address = fields.address ?? '';
+    if ('area_sqm' in fields) row.area_sqm = fields.area_sqm;
+    if ('access_info' in fields) row.access_info = fields.access_info ?? '';
+    if ('notes' in fields) row.notes = fields.notes ?? '';
+
+    const { error } = await sb.from('properties').update(row).eq('id', propertyId);
+
+    if (error) {
+      console.error('[persist] updateProperty:', error.message);
+      return { ok: false, message: error.message };
+    }
+
+    return { ok: true };
+  }
+
+  /** Admin tar bort objekt (CASCADE i Postgres tar relaterade rader). */
+  async function persistDeleteProperty({ propertyId }) {
+    if (!enabled || !sb || !isUuid(propertyId)) {
+      return { ok: true, skipped: true };
+    }
+
+    const { error } = await sb.from('properties').delete().eq('id', propertyId);
+
+    if (error) {
+      console.error('[persist] deleteProperty:', error.message);
+      return { ok: false, message: error.message };
+    }
+
+    return { ok: true };
+  }
+
+  /** Admin tar bort kund (CASCADE) och inaktiverar kundkonton. */
+  async function persistDeleteCustomer({ customerId, userIdsToDeactivate = [] }) {
+    if (!enabled || !sb || !isUuid(customerId)) {
+      return { ok: true, skipped: true };
+    }
+
+    const ids = userIdsToDeactivate.filter(isUuid);
+    if (ids.length > 0) {
+      const { error: userErr } = await sb.from('users').update({ active: false }).in('id', ids);
+      if (userErr) {
+        console.error('[persist] deleteCustomer deactivate users:', userErr.message);
+        return { ok: false, message: userErr.message };
+      }
+    }
+
+    const { error } = await sb.from('customers').delete().eq('id', customerId);
+
+    if (error) {
+      console.error('[persist] deleteCustomer:', error.message);
+      return { ok: false, message: error.message };
+    }
+
+    return { ok: true };
+  }
+
+  /** §8 admin-inställningar – organisation + inloggad admins profil. */
+  async function persistUpdateAdminSettings({ orgId, userId, organization, user }) {
+    if (!enabled || !sb) {
+      return { ok: true, skipped: true };
+    }
+
+    if (isUuid(orgId)) {
+      const { error: orgErr } = await sb.from('organizations').update({
+        name: organization.name,
+        theme_round: organization.theme_round,
+        accent_color: organization.accent_color,
+      }).eq('id', orgId);
+
+      if (orgErr) {
+        console.error('[persist] updateAdminSettings organizations:', orgErr.message);
+        return { ok: false, message: orgErr.message };
+      }
+    }
+
+    if (isUuid(userId)) {
+      const { error: userErr } = await sb.from('users').update({
+        name: user.name,
+        email: user.email,
+        phone: user.phone || null,
+      }).eq('id', userId);
+
+      if (userErr) {
+        console.error('[persist] updateAdminSettings users:', userErr.message);
+        return { ok: false, message: userErr.message };
+      }
+    }
+
+    return { ok: true };
+  }
+
+  async function persistCreateCustomer({ orgId, contactUser, customer, property }) {
+    if (!enabled || !sb || !isUuid(orgId)) {
+      return { ok: true, skipped: true };
+    }
+
+    if (!isUuid(contactUser.id) || !isUuid(customer.id)) {
+      return { ok: true, skipped: true };
+    }
+
+    const { error: provErr } = await sb.rpc('admin_provision_user', {
+      p_user_id: contactUser.id,
+      p_org_id: orgId,
+      p_role: 'customer',
+      p_name: contactUser.name,
+      p_email: contactUser.email,
+      p_phone: contactUser.phone || null,
+    });
+
+    if (provErr) {
+      console.error('[persist] createCustomer provision:', provErr.message);
+      return { ok: false, message: provErr.message };
+    }
+
+    const { error: custErr } = await sb.from('customers').insert({
+      id: customer.id,
+      org_id: orgId,
+      name: customer.name,
+      org_number: customer.org_number || null,
+      primary_contact_user_id: contactUser.id,
+      notes: customer.notes || '',
+    });
+
+    if (custErr) {
+      console.error('[persist] createCustomer customers:', custErr.message);
+      return { ok: false, message: custErr.message };
+    }
+
+    if (property && isUuid(property.id)) {
+      const r = await persistCreateProperty({ property, cleanerUserIds: [] });
+      if (!r.ok) {
+        await sb.from('customers').delete().eq('id', customer.id);
+        return r;
+      }
+    }
+
+    return { ok: true };
+  }
+
+  async function persistCreateProperty({ property, cleanerUserIds = [] }) {
+    if (!enabled || !sb || !isUuid(property.id)) {
+      return { ok: true, skipped: true };
+    }
+
+    const { error } = await sb.from('properties').insert({
+      id: property.id,
+      customer_id: property.customer_id,
+      name: property.name,
+      address: property.address || '',
+      area_sqm: property.area_sqm,
+      access_info: property.access_info || '',
+      notes: property.notes || '',
+    });
+
+    if (error) {
+      console.error('[persist] createProperty:', error.message);
+      return { ok: false, message: error.message };
+    }
+
+    const ids = (cleanerUserIds || []).filter(isUuid);
+    if (ids.length > 0) {
+      const rows = ids.map(cleaner_user_id => ({ property_id: property.id, cleaner_user_id }));
+      const { error: pcErr } = await sb.from('property_cleaners').insert(rows);
+      if (pcErr) {
+        console.error('[persist] createProperty cleaners:', pcErr.message);
+        return { ok: false, message: pcErr.message };
+      }
+    }
+
+    return { ok: true };
+  }
+
+  window.dbPersist = {
+    adminDelete: persistAdminDelete,
+    updateCustomer: persistUpdateCustomer,
+    updateProperty: persistUpdateProperty,
+    deleteProperty: persistDeleteProperty,
+    deleteCustomer: persistDeleteCustomer,
+    updateAdminSettings: persistUpdateAdminSettings,
+    createCustomer: persistCreateCustomer,
+    createProperty: persistCreateProperty,
+  };
 })();

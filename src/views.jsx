@@ -412,6 +412,73 @@
   }
 
   /* ============================================================
+   * AdminDeleteShiftSection – §7.4 ta bort pass (alla statusar utom Borttaget)
+   * ============================================================ */
+  function adminDeleteConfirmMessage(status) {
+    if (status === 'Pågående') {
+      return 'Passet är incheckat och pågår. Om du tar bort det markeras det som Borttaget. Kund och städare får besked.';
+    }
+    if (status === 'Utfört') {
+      return 'Passet är redan utfört. Om du tar bort det markeras det som Borttaget och historiken ändras. Kund och städare får besked.';
+    }
+    return 'Passet markeras som Borttaget. Kund och städare får besked.';
+  }
+
+  function AdminDeleteShiftSection({ shift, session, onClose }) {
+    const [deleteOpen, setDeleteOpen] = useState(false);
+    const [deleting, setDeleting] = useState(false);
+
+    if (shift.status === 'Borttaget') return null;
+
+    async function handleDelete() {
+      setDeleting(true);
+      try {
+        const r = await db.adminDelete(shift.id, session.userId);
+        if (r?.ok) {
+          toast.success('Passet borttaget.');
+          setDeleteOpen(false);
+          onClose && onClose();
+        } else if (r?.error === 'ALREADY_DELETED') {
+          toast.info('Passet är redan borttaget.');
+          setDeleteOpen(false);
+        } else if (r?.error === 'PERSIST_FAILED') {
+          toast.error('Kunde inte spara – försök igen.');
+        } else {
+          toast.error('Passet kunde inte hittas.');
+          setDeleteOpen(false);
+        }
+      } finally {
+        setDeleting(false);
+      }
+    }
+
+    return (
+      <Card padding="md" className="border-rose-100 mt-4">
+        <h3 className="font-bold text-slate-900 mb-2">Farlig zon</h3>
+        <p className="text-xs text-slate-500 mb-3">Admin kan alltid ta bort pass, även inom 48 timmar.</p>
+        <Button
+          variant="danger-ghost"
+          icon="trash"
+          className="w-full justify-start"
+          disabled={deleting}
+          onClick={() => setDeleteOpen(true)}
+        >
+          Ta bort pass
+        </Button>
+        <ConfirmDialog
+          open={deleteOpen}
+          onClose={() => { if (!deleting) setDeleteOpen(false); }}
+          title="Ta bort passet?"
+          message={adminDeleteConfirmMessage(shift.status)}
+          confirmLabel={deleting ? 'Tar bort…' : 'Ta bort'}
+          danger
+          onConfirm={handleDelete}
+        />
+      </Card>
+    );
+  }
+
+  /* ============================================================
    * AdminShiftActions – §7.1 + §7.4 åtgärdspanel
    * ============================================================ */
   function AdminShiftActions({ shift, session, onClose }) {
@@ -422,7 +489,17 @@
     const isSick = shift.status === 'Sjukanmäld';
     const isPlanned = ['Godkänt', 'Planerat'].includes(shift.status);
     const isLive = shift.status === 'Pågående';
+    const isBorttaget = shift.status === 'Borttaget';
     const cleaner = db.userById(shift.cleaner_user_id);
+
+    if (isBorttaget) {
+      return (
+        <Card padding="md">
+          <h3 className="font-bold text-slate-900 mb-1">Borttaget pass</h3>
+          <p className="text-xs text-slate-500">Det här passet är markerat som borttaget. Inga ytterligare åtgärder.</p>
+        </Card>
+      );
+    }
 
     if (isSick) {
       return (
@@ -465,6 +542,7 @@
               )}
             </div>
           </Card>
+          <AdminDeleteShiftSection shift={shift} session={session} onClose={onClose} />
           <AssignReplacementModal open={assignOpen} onClose={() => setAssignOpen(false)} shift={shift} session={session} onDone={onClose} />
           <AdjustShiftModal open={adjustOpen} onClose={() => setAdjustOpen(false)} shift={shift} session={session} onDone={onClose} />
         </>
@@ -486,17 +564,9 @@
               <Button variant="danger-ghost" icon="alert-circle" className="w-full justify-start" onClick={() => setSickOpen(true)}>
                 Sjukanmäl åt städaren
               </Button>
-              <Button variant="danger-ghost" icon="trash" className="w-full justify-start" onClick={() => {
-                if (confirm('Ta bort passet helt? Det kommer markeras som "Borttaget".')) {
-                  db.adminDelete(shift.id, session.userId);
-                  toast.success('Passet borttaget.');
-                  onClose && onClose();
-                }
-              }}>
-                Ta bort pass
-              </Button>
             </div>
           </Card>
+          <AdminDeleteShiftSection shift={shift} session={session} onClose={onClose} />
           <AssignReplacementModal open={assignOpen} onClose={() => setAssignOpen(false)} shift={shift} session={session} onDone={onClose} />
           <AdjustShiftModal open={adjustOpen} onClose={() => setAdjustOpen(false)} shift={shift} session={session} onDone={onClose} />
           <SickReportModal open={sickOpen} onClose={() => setSickOpen(false)} shift={shift} session={session} adminActor onDone={onClose} />
@@ -506,19 +576,26 @@
 
     if (isLive) {
       return (
-        <Card padding="md">
-          <h3 className="font-bold text-slate-900 mb-1">Pågående pass</h3>
-          <p className="text-xs text-slate-500">Du kan följa städarens framsteg via checklistan.</p>
-        </Card>
+        <>
+          <Card padding="md">
+            <h3 className="font-bold text-slate-900 mb-1">Pågående pass</h3>
+            <p className="text-xs text-slate-500">Du kan följa städarens framsteg via checklistan.</p>
+          </Card>
+          <AdminDeleteShiftSection shift={shift} session={session} onClose={onClose} />
+        </>
       );
     }
 
-    // Read-only summary för avslutade / borttagna / pausade / utförda
     return (
-      <Card padding="md">
-        <h3 className="font-bold text-slate-900 mb-1">Avslutat pass</h3>
-        <p className="text-xs text-slate-500">Status: <span className="font-medium text-slate-700">{shift.status}</span>. Inga ytterligare åtgärder krävs.</p>
-      </Card>
+      <>
+        <Card padding="md">
+          <h3 className="font-bold text-slate-900 mb-1">Passstatus</h3>
+          <p className="text-xs text-slate-500">
+            Status: <span className="font-medium text-slate-700">{shift.status}</span>
+          </p>
+        </Card>
+        <AdminDeleteShiftSection shift={shift} session={session} onClose={onClose} />
+      </>
     );
   }
 
@@ -2160,6 +2237,106 @@
   /* ============================================================
    * ADMIN · Kunder
    * ============================================================ */
+  function AdminEditCustomerModal({ open, onClose, customer, contactUser }) {
+    const [name, setName] = useState('');
+    const [orgNumber, setOrgNumber] = useState('');
+    const [notes, setNotes] = useState('');
+    const [contactName, setContactName] = useState('');
+    const [contactEmail, setContactEmail] = useState('');
+    const [contactPhone, setContactPhone] = useState('');
+    const [error, setError] = useState('');
+    const [saving, setSaving] = useState(false);
+
+    useEffect(() => {
+      if (!open) return;
+      setError('');
+      setName(customer.name || '');
+      setOrgNumber(customer.org_number || '');
+      setNotes(customer.notes || '');
+      setContactName(contactUser?.name || '');
+      setContactEmail(contactUser?.email || '');
+      setContactPhone(contactUser?.phone || '');
+    }, [open, customer.id, contactUser?.id]);
+
+    const validName = name.trim().length >= 2;
+    const validContactName = contactName.trim().length >= 2;
+    const validEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail.trim());
+    const canSubmit = validName && validContactName && validEmail && !saving;
+
+    async function submit() {
+      setError('');
+      setSaving(true);
+      try {
+        const r = await db.updateCustomer(customer.id, {
+          name,
+          orgNumber,
+          notes,
+          contactName,
+          contactEmail,
+          contactPhone,
+        });
+        if (r?.ok) {
+          toast.success('Kunduppgifter sparade.');
+          onClose();
+        } else if (r?.error === 'EMAIL_EXISTS') {
+          setError('Mejladressen används redan av en annan användare.');
+        } else if (r?.error === 'INVALID_EMAIL') {
+          setError('Ange en giltig mejladress för huvudkontakten.');
+        } else if (r?.error === 'INVALID_NAME') {
+          setError('Företagsnamnet måste vara minst 2 tecken.');
+        } else if (r?.error === 'PERSIST_FAILED') {
+          setError('Kunde inte spara – försök igen.');
+        } else {
+          setError('Kunden kunde inte hittas.');
+        }
+      } finally {
+        setSaving(false);
+      }
+    }
+
+    return (
+      <Modal
+        open={open}
+        onClose={onClose}
+        title="Redigera kund"
+        size="md"
+        footer={
+          <>
+            <Button variant="ghost" onClick={onClose} disabled={saving}>Avbryt</Button>
+            <Button variant="primary" disabled={!canSubmit} onClick={submit}>
+              {saving ? 'Sparar…' : 'Spara'}
+            </Button>
+          </>
+        }
+      >
+        <p className="text-xs text-slate-500 mb-4">
+          Uppdaterar företagsuppgifter och huvudkontakt. Kundanställda redigeras separat nedan.
+        </p>
+        <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Företag</h4>
+        <Field label="Företagsnamn *" className="mb-3">
+          <Input value={name} onChange={e => setName(e.target.value)} placeholder="Acme AB" />
+        </Field>
+        <Field label="Org.nr" className="mb-3">
+          <Input value={orgNumber} onChange={e => setOrgNumber(e.target.value)} placeholder="556677-1122" />
+        </Field>
+        <Field label="Anteckningar (interna)" className="mb-4">
+          <Textarea rows={3} value={notes} onChange={e => setNotes(e.target.value)} placeholder="T.ex. föredrar morgonstädning…" />
+        </Field>
+        <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Huvudkontakt</h4>
+        <Field label="Namn *" className="mb-3">
+          <Input value={contactName} onChange={e => setContactName(e.target.value)} placeholder="För- och efternamn" />
+        </Field>
+        <Field label="Mejl *" className="mb-3">
+          <Input type="email" value={contactEmail} onChange={e => setContactEmail(e.target.value)} placeholder="namn@foretag.se" />
+        </Field>
+        <Field label="Telefon" className="mb-3">
+          <Input type="tel" value={contactPhone} onChange={e => setContactPhone(e.target.value)} placeholder="+46 70 123 45 67" />
+        </Field>
+        {error && <p className="text-xs text-rose-600">{error}</p>}
+      </Modal>
+    );
+  }
+
   /* ============================================================
    * §7.7 Kontakter & kundanställda
    * ============================================================ */
@@ -2409,6 +2586,203 @@
     );
   }
 
+  const ADMIN_ACCENT_PRESETS = [
+    { name: 'Orange', hex: '#f2603c' },
+    { name: 'Korall', hex: '#f45b5b' },
+    { name: 'Grön', hex: '#10b981' },
+    { name: 'Lila', hex: '#8b5cf6' },
+    { name: 'Cyan', hex: '#06b6d4' },
+  ];
+  const ADMIN_ROUND_OPTIONS = ['Skarp', 'Standard', 'Rundad'];
+
+  function accentHexToPresetName(hex) {
+    const p = ADMIN_ACCENT_PRESETS.find(x => x.hex.toLowerCase() === (hex || '').toLowerCase());
+    return p ? p.name : 'Orange';
+  }
+
+  function accentPresetToHex(name) {
+    return ADMIN_ACCENT_PRESETS.find(x => x.name === name)?.hex || '#f2603c';
+  }
+
+  function applyOrgThemeToDocument(themeRound, accentHex) {
+    if (typeof window.applyCleanupTweaks === 'function') {
+      window.applyCleanupTweaks({
+        round: themeRound || 'Standard',
+        accent: accentHexToPresetName(accentHex),
+      });
+      try {
+        localStorage.setItem('cleanup_tweaks_v1', JSON.stringify({
+          round: themeRound || 'Standard',
+          accent: accentHexToPresetName(accentHex),
+        }));
+      } catch (_) {}
+    }
+  }
+
+  function AdminSettingsView({ session }) {
+    useDb();
+    const org = db.organizationForUser(session.userId);
+    const [orgName, setOrgName] = useState('');
+    const [themeRound, setThemeRound] = useState('Standard');
+    const [accentName, setAccentName] = useState('Orange');
+    const [userName, setUserName] = useState('');
+    const [userEmail, setUserEmail] = useState('');
+    const [userPhone, setUserPhone] = useState('');
+    const [error, setError] = useState('');
+    const [saving, setSaving] = useState(false);
+
+    useEffect(() => {
+      if (!org) return;
+      setOrgName(org.name || '');
+      setThemeRound(org.theme_round || 'Standard');
+      setAccentName(accentHexToPresetName(org.accent_color));
+      setUserName(session.user.name || '');
+      setUserEmail(session.user.email || '');
+      setUserPhone(session.user.phone || '');
+      setError('');
+      applyOrgThemeToDocument(org.theme_round, org.accent_color);
+    }, [org?.id, org?.name, org?.theme_round, org?.accent_color, session.user.id, session.user.name, session.user.email, session.user.phone]);
+
+    if (!org) {
+      return <ComingSoonView title="Inställningar" section="§8" description="Ingen organisation kopplad till din profil." />;
+    }
+
+    const dirty = orgName !== (org.name || '')
+      || themeRound !== (org.theme_round || 'Standard')
+      || accentName !== accentHexToPresetName(org.accent_color)
+      || userName !== (session.user.name || '')
+      || userEmail !== (session.user.email || '')
+      || userPhone !== (session.user.phone || '');
+
+    const validOrg = orgName.trim().length >= 2;
+    const validUser = userName.trim().length >= 2 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(userEmail.trim());
+
+    async function save() {
+      setError('');
+      setSaving(true);
+      try {
+        const r = await db.updateAdminSettings(session.userId, {
+          orgName,
+          themeRound,
+          accentColorHex: accentPresetToHex(accentName),
+          userName,
+          userEmail,
+          userPhone,
+        });
+        if (r?.ok) {
+          applyOrgThemeToDocument(themeRound, accentPresetToHex(accentName));
+          toast.success('Inställningarna sparade.');
+        } else if (r?.error === 'EMAIL_EXISTS') {
+          setError('Mejladressen används redan av en annan användare.');
+        } else if (r?.error === 'INVALID_EMAIL') {
+          setError('Ange en giltig mejladress.');
+        } else if (r?.error === 'INVALID_ORG_NAME' || r?.error === 'INVALID_NAME') {
+          setError('Namn måste vara minst 2 tecken.');
+        } else if (r?.error === 'PERSIST_FAILED') {
+          setError('Kunde inte spara – försök igen.');
+        } else {
+          setError('Kunde inte spara inställningarna.');
+        }
+      } finally {
+        setSaving(false);
+      }
+    }
+
+    return (
+      <div>
+        <PageHeader
+          title="Inställningar"
+          subtitle="Företagsuppgifter och din kontaktprofil för kunder (48h-avbokning)."
+        />
+
+        <div className="grid lg:grid-cols-2 gap-6 max-w-4xl">
+          <Card padding="md">
+            <h3 className="font-bold text-slate-900 mb-1">Företag</h3>
+            <p className="text-xs text-slate-500 mb-4">Visas internt och som avsändare i kommunikation.</p>
+            <Field label="Företagsnamn *" className="mb-4">
+              <Input value={orgName} onChange={e => setOrgName(e.target.value)} placeholder="CleanUp" />
+            </Field>
+            <Field label="Hörnradie" className="mb-4">
+              <div className="grid grid-cols-3 gap-1.5">
+                {ADMIN_ROUND_OPTIONS.map(opt => (
+                  <button
+                    key={opt}
+                    type="button"
+                    onClick={() => setThemeRound(opt)}
+                    className={cx(
+                      'h-9 text-xs font-semibold rounded-lg border transition-colors',
+                      themeRound === opt
+                        ? 'bg-brand-600 border-brand-600 text-white'
+                        : 'border-slate-200 text-slate-600 hover:border-brand-300',
+                    )}
+                  >{opt}</button>
+                ))}
+              </div>
+            </Field>
+            <Field label="Accentfärg">
+              <div className="grid grid-cols-5 gap-1.5">
+                {ADMIN_ACCENT_PRESETS.map(opt => (
+                  <button
+                    key={opt.name}
+                    type="button"
+                    title={opt.name}
+                    onClick={() => setAccentName(opt.name)}
+                    className={cx(
+                      'h-9 rounded-lg border-2 transition-transform',
+                      accentName === opt.name ? 'border-slate-900 scale-110' : 'border-transparent hover:scale-105',
+                    )}
+                    style={{ background: opt.hex }}
+                    aria-label={opt.name}
+                  />
+                ))}
+              </div>
+            </Field>
+          </Card>
+
+          <Card padding="md">
+            <h3 className="font-bold text-slate-900 mb-1">Din kontaktprofil</h3>
+            <p className="text-xs text-slate-500 mb-4">
+              Kunder inom 48 timmar ser dessa uppgifter när de inte kan avboka själva.
+            </p>
+            <Field label="Namn *" className="mb-3">
+              <Input value={userName} onChange={e => setUserName(e.target.value)} />
+            </Field>
+            <Field label="Mejl *" className="mb-3">
+              <Input type="email" value={userEmail} onChange={e => setUserEmail(e.target.value)} />
+            </Field>
+            <Field label="Telefon" className="mb-3">
+              <Input type="tel" value={userPhone} onChange={e => setUserPhone(e.target.value)} placeholder="+46 70 123 45 67" />
+            </Field>
+            <Card padding="sm" className="border-brand-100 bg-brand-50/40">
+              <p className="text-xs text-brand-900">
+                Förhandsvisning för kund: {userName || '—'} · {userEmail || '—'} · {userPhone || 'ingen telefon angiven'}
+              </p>
+            </Card>
+          </Card>
+        </div>
+
+        {error && <p className="text-sm text-rose-600 mt-4 max-w-4xl">{error}</p>}
+
+        <div className="flex justify-end gap-2 mt-6 max-w-4xl">
+          {dirty && (
+            <Button variant="ghost" disabled={saving} onClick={() => {
+              setOrgName(org.name || '');
+              setThemeRound(org.theme_round || 'Standard');
+              setAccentName(accentHexToPresetName(org.accent_color));
+              setUserName(session.user.name || '');
+              setUserEmail(session.user.email || '');
+              setUserPhone(session.user.phone || '');
+              setError('');
+            }}>Återställ</Button>
+          )}
+          <Button variant="primary" icon="check" disabled={!dirty || !validOrg || !validUser || saving} onClick={save}>
+            {saving ? 'Sparar…' : 'Spara inställningar'}
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   function CustomerSettingsView({ session }) {
     useDb();
     const customer = db.customerForUser(session.userId);
@@ -2477,15 +2851,231 @@
     );
   }
 
+  function CreateCustomerModal({ open, onClose, session, onCreated }) {
+    const org = db.organizationForUser(session.userId);
+    const [name, setName] = useState('');
+    const [orgNumber, setOrgNumber] = useState('');
+    const [notes, setNotes] = useState('');
+    const [contactName, setContactName] = useState('');
+    const [contactEmail, setContactEmail] = useState('');
+    const [contactPhone, setContactPhone] = useState('');
+    const [addProperty, setAddProperty] = useState(true);
+    const [propName, setPropName] = useState('');
+    const [propAddress, setPropAddress] = useState('');
+    const [error, setError] = useState('');
+    const [saving, setSaving] = useState(false);
+
+    useEffect(() => {
+      if (!open) return;
+      setName('');
+      setOrgNumber('');
+      setNotes('');
+      setContactName('');
+      setContactEmail('');
+      setContactPhone('');
+      setAddProperty(true);
+      setPropName('');
+      setPropAddress('');
+      setError('');
+    }, [open]);
+
+    const valid = name.trim().length >= 2
+      && contactName.trim().length >= 2
+      && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail.trim())
+      && (!addProperty || propName.trim().length >= 2);
+
+    async function submit() {
+      if (!org) {
+        setError('Ingen organisation hittades.');
+        return;
+      }
+      setError('');
+      setSaving(true);
+      try {
+        const r = await db.createCustomer({
+          orgId: org.id,
+          name,
+          orgNumber,
+          notes,
+          contactName,
+          contactEmail,
+          contactPhone,
+          adminUserId: session.userId,
+          firstProperty: addProperty && propName.trim()
+            ? { name: propName, address: propAddress }
+            : null,
+        });
+        if (r?.ok) {
+          toast.success(r.property
+            ? `Kund och objekt "${r.property.name}" skapade.`
+            : 'Kund skapad.');
+          onClose();
+          onCreated && onCreated(r.customer.id);
+        } else if (r?.error === 'EMAIL_EXISTS') {
+          setError('Mejladressen används redan.');
+        } else if (r?.error === 'INVALID_EMAIL') {
+          setError('Ange en giltig mejladress för huvudkontakten.');
+        } else if (r?.error === 'INVALID_NAME' || r?.error === 'INVALID_CONTACT_NAME') {
+          setError('Företags- och kontaktnamn måste vara minst 2 tecken.');
+        } else if (r?.error === 'PERSIST_FAILED') {
+          setError('Kunde inte spara till databasen – försök igen.');
+        } else {
+          setError('Kunde inte skapa kunden.');
+        }
+      } finally {
+        setSaving(false);
+      }
+    }
+
+    return (
+      <Modal
+        open={open}
+        onClose={onClose}
+        title="Ny kund"
+        size="md"
+        footer={
+          <>
+            <Button variant="ghost" onClick={onClose} disabled={saving}>Avbryt</Button>
+            <Button variant="primary" icon="plus" disabled={!valid || saving} onClick={submit}>
+              {saving ? 'Skapar…' : 'Skapa kund'}
+            </Button>
+          </>
+        }
+      >
+        <p className="text-xs text-slate-500 mb-4">
+          Skapar företag och huvudkontakt. Inloggning aktiveras när Supabase Auth-inbjudan är på plats (tillfälligt demo-lösenord i databasen).
+        </p>
+        <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Företag</h4>
+        <Field label="Företagsnamn *" className="mb-3">
+          <Input value={name} onChange={e => setName(e.target.value)} placeholder="Acme AB" />
+        </Field>
+        <Field label="Org.nr" className="mb-3">
+          <Input value={orgNumber} onChange={e => setOrgNumber(e.target.value)} placeholder="556677-1122" />
+        </Field>
+        <Field label="Anteckningar" className="mb-4">
+          <Textarea rows={2} value={notes} onChange={e => setNotes(e.target.value)} />
+        </Field>
+        <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Huvudkontakt</h4>
+        <Field label="Namn *" className="mb-3">
+          <Input value={contactName} onChange={e => setContactName(e.target.value)} />
+        </Field>
+        <Field label="Mejl *" className="mb-3">
+          <Input type="email" value={contactEmail} onChange={e => setContactEmail(e.target.value)} />
+        </Field>
+        <Field label="Telefon" className="mb-4">
+          <Input type="tel" value={contactPhone} onChange={e => setContactPhone(e.target.value)} />
+        </Field>
+        <Checkbox
+          label="Lägg till första objekt nu"
+          checked={addProperty}
+          onChange={setAddProperty}
+        />
+        {addProperty && (
+          <div className="mt-3 pl-1 border-l-2 border-slate-200 ml-1 space-y-3">
+            <Field label="Objektnamn *">
+              <Input value={propName} onChange={e => setPropName(e.target.value)} placeholder="Huvudkontor" />
+            </Field>
+            <Field label="Adress">
+              <Input value={propAddress} onChange={e => setPropAddress(e.target.value)} placeholder="Gatuadress" />
+            </Field>
+          </div>
+        )}
+        {error && <p className="text-xs text-rose-600 mt-3">{error}</p>}
+      </Modal>
+    );
+  }
+
+  function CreatePropertyModal({ open, onClose, customer, session, onCreated }) {
+    const [name, setName] = useState('');
+    const [address, setAddress] = useState('');
+    const [areaSqm, setAreaSqm] = useState('');
+    const [error, setError] = useState('');
+    const [saving, setSaving] = useState(false);
+
+    useEffect(() => {
+      if (!open) return;
+      setName('');
+      setAddress('');
+      setAreaSqm('');
+      setError('');
+    }, [open]);
+
+    async function submit() {
+      setError('');
+      setSaving(true);
+      try {
+        const r = await db.createProperty({
+          customerId: customer.id,
+          name,
+          address,
+          areaSqm: areaSqm.trim() === '' ? null : areaSqm,
+        });
+        if (r?.ok) {
+          toast.success(`Objektet "${r.property.name}" skapat.`);
+          onClose();
+          onCreated && onCreated(r.property.id);
+        } else if (r?.error === 'INVALID_NAME') {
+          setError('Objektnamnet måste vara minst 2 tecken.');
+        } else if (r?.error === 'INVALID_AREA') {
+          setError('Yta måste vara ett positivt tal.');
+        } else if (r?.error === 'PERSIST_FAILED') {
+          setError('Kunde inte spara – försök igen.');
+        } else {
+          setError('Kunden kunde inte hittas.');
+        }
+      } finally {
+        setSaving(false);
+      }
+    }
+
+    const valid = name.trim().length >= 2;
+
+    return (
+      <Modal
+        open={open}
+        onClose={onClose}
+        title="Nytt objekt"
+        size="md"
+        footer={
+          <>
+            <Button variant="ghost" onClick={onClose} disabled={saving}>Avbryt</Button>
+            <Button variant="primary" icon="plus" disabled={!valid || saving} onClick={submit}>
+              {saving ? 'Skapar…' : 'Skapa objekt'}
+            </Button>
+          </>
+        }
+      >
+        <p className="text-xs text-slate-500 mb-4">{customer.name} · du kan lägga till städschema och pass efteråt.</p>
+        <Field label="Objektnamn *" className="mb-3">
+          <Input value={name} onChange={e => setName(e.target.value)} placeholder="T.ex. HQ" />
+        </Field>
+        <Field label="Adress" className="mb-3">
+          <Input value={address} onChange={e => setAddress(e.target.value)} />
+        </Field>
+        <Field label="Yta (kvm)" hint="Valfritt">
+          <Input type="number" min="0" value={areaSqm} onChange={e => setAreaSqm(e.target.value)} />
+        </Field>
+        {error && <p className="text-xs text-rose-600 mt-2">{error}</p>}
+      </Modal>
+    );
+  }
+
   function AdminCustomersListView({ session, onNavigate }) {
     useDb();
+    const [createOpen, setCreateOpen] = useState(false);
     const customers = db.state.customers;
     return (
       <div>
         <PageHeader
           title="Kunder"
           subtitle={`${customers.length} kunder totalt.`}
-          actions={<Button variant="primary" icon="plus" onClick={() => toast.info('Skapa kund byggs i §7.7.')}>Ny kund</Button>}
+          actions={<Button variant="primary" icon="plus" onClick={() => setCreateOpen(true)}>Ny kund</Button>}
+        />
+        <CreateCustomerModal
+          open={createOpen}
+          onClose={() => setCreateOpen(false)}
+          session={session}
+          onCreated={(id) => onNavigate(`/admin/kunder/${id}`)}
         />
         <div className="grid md:grid-cols-2 gap-3">
           {customers.map(c => {
@@ -2527,6 +3117,8 @@
 
   function AdminCustomerView({ session, onNavigate, customerId }) {
     useDb();
+    const [editOpen, setEditOpen] = useState(false);
+    const [createPropertyOpen, setCreatePropertyOpen] = useState(false);
     const cust = db.customerById(customerId);
     if (!cust) return <ComingSoonView title="Kund saknas" section="—" />;
     const props = db.state.properties.filter(p => p.customer_id === cust.id);
@@ -2537,14 +3129,37 @@
         <PageHeader
           breadcrumbs={[{ label: 'Kunder', href: '#/admin/kunder' }, { label: cust.name }]}
           title={cust.name}
-          subtitle={`Org.nr ${cust.org_number} · ${props.length} objekt`}
-          actions={<Button variant="primary" icon="plus" onClick={() => toast.info('Nytt objekt byggs i §7.5.')}>Nytt objekt</Button>}
+          subtitle={`Org.nr ${cust.org_number || '—'} · ${props.length} objekt`}
+          actions={
+            <>
+              <Button variant="outline" icon="edit" onClick={() => setEditOpen(true)}>Redigera</Button>
+              <Button variant="primary" icon="plus" onClick={() => setCreatePropertyOpen(true)}>Nytt objekt</Button>
+            </>
+          }
+        />
+        <AdminEditCustomerModal
+          open={editOpen}
+          onClose={() => setEditOpen(false)}
+          customer={cust}
+          contactUser={main}
+        />
+        <CreatePropertyModal
+          open={createPropertyOpen}
+          onClose={() => setCreatePropertyOpen(false)}
+          customer={cust}
+          session={session}
+          onCreated={(pid) => onNavigate(`/admin/kunder/${cust.id}/objekt/${pid}`)}
         />
 
         <div className="grid lg:grid-cols-3 gap-4">
           <div className="lg:col-span-2">
             <h2 className="text-sm font-bold text-slate-700 mb-3 uppercase tracking-wide">Objekt</h2>
             <div className="space-y-3">
+              {props.length === 0 && (
+                <Card padding="md">
+                  <EmptyState icon="building" title="Inga objekt än" description="Lägg till första objektet för den här kunden." action={<Button icon="plus" onClick={() => setCreatePropertyOpen(true)}>Nytt objekt</Button>} />
+                </Card>
+              )}
               {props.map(p => {
                 const next = db.shiftsForProperty(p.id, { from: new Date() })[0];
                 const checklistCount = db.listChecklistTemplate(p.id).length;
@@ -2574,7 +3189,10 @@
 
           <div className="space-y-4">
             <Card padding="md">
-              <h3 className="font-bold text-slate-900 mb-3">Huvudkontakt</h3>
+              <div className="flex items-center justify-between gap-2 mb-3">
+                <h3 className="font-bold text-slate-900">Huvudkontakt</h3>
+                <Button variant="ghost" size="sm" icon="edit" onClick={() => setEditOpen(true)}>Redigera</Button>
+              </div>
               {main ? (
                 <div className="flex items-center gap-3">
                   <Avatar name={main.name} />
@@ -2589,17 +3207,91 @@
 
             <AdminCustomerEmployeesCard customer={cust} properties={props} session={session} />
 
-            {cust.notes && (
-              <Card padding="md">
-                <h3 className="font-bold text-slate-900 mb-2">Anteckningar</h3>
+            <Card padding="md">
+              <h3 className="font-bold text-slate-900 mb-2">Anteckningar</h3>
+              {cust.notes ? (
                 <p className="text-sm text-slate-600">{cust.notes}</p>
-              </Card>
-            )}
+              ) : (
+                <p className="text-sm text-slate-500">Inga anteckningar.</p>
+              )}
+            </Card>
 
             <AdminCustomerHolidays customer={cust} session={session} />
           </div>
         </div>
+        <AdminDeleteCustomerSection customer={cust} onNavigate={onNavigate} />
       </div>
+    );
+  }
+
+  function AdminDeleteCustomerSection({ customer, onNavigate }) {
+    useDb();
+    const [deleteOpen, setDeleteOpen] = useState(false);
+    const [deleting, setDeleting] = useState(false);
+    const summary = db.customerDeleteSummary(customer.id);
+
+    const confirmMessage = [
+      `${summary.propertyCount} objekt och all kopplad data raderas permanent.`,
+      summary.futureShifts > 0
+        ? `${summary.futureShifts} kommande pass tas bort${summary.totalShifts > summary.futureShifts ? ` (${summary.totalShifts} pass totalt i historiken)` : ''}.`
+        : summary.totalShifts > 0
+          ? `${summary.totalShifts} pass i historiken raderas.`
+          : null,
+      summary.employeeCount > 0
+        ? `${summary.employeeCount} kundanställd${summary.employeeCount === 1 ? '' : 'a'} förlorar åtkomst (konton inaktiveras).`
+        : null,
+      summary.holidayCount > 0
+        ? `${summary.holidayCount} registrerad${summary.holidayCount === 1 ? '' : 'a'} kundledighet${summary.holidayCount === 1 ? '' : 'er'} tas bort.`
+        : null,
+      'Huvudkontaktens konto inaktiveras. Detta går inte att ångra.',
+    ].filter(Boolean).join(' ');
+
+    async function handleDelete() {
+      setDeleting(true);
+      try {
+        const r = await db.deleteCustomer(customer.id);
+        if (r?.ok) {
+          toast.success(`Kunden "${customer.name}" är borttagen.`);
+          setDeleteOpen(false);
+          onNavigate('/admin/kunder');
+        } else if (r?.error === 'PERSIST_FAILED') {
+          toast.error('Kunde inte spara – försök igen.');
+        } else {
+          toast.error('Kunden kunde inte hittas.');
+          setDeleteOpen(false);
+        }
+      } finally {
+        setDeleting(false);
+      }
+    }
+
+    return (
+      <Card padding="md" className="border-rose-100 mt-8">
+        <h3 className="font-bold text-slate-900 mb-2">Farlig zon</h3>
+        <p className="text-xs text-slate-500 mb-3">
+          {summary.propertyCount} objekt
+          {summary.futureShifts > 0 ? ` · ${summary.futureShifts} kommande pass` : ''}
+          {summary.employeeCount > 0 ? ` · ${summary.employeeCount} kundanställda` : ''}
+          . Hela kunden raderas.
+        </p>
+        <Button
+          variant="danger-ghost"
+          icon="trash"
+          disabled={deleting}
+          onClick={() => setDeleteOpen(true)}
+        >
+          Ta bort kund
+        </Button>
+        <ConfirmDialog
+          open={deleteOpen}
+          onClose={() => { if (!deleting) setDeleteOpen(false); }}
+          title={`Ta bort "${customer.name}"?`}
+          message={confirmMessage}
+          confirmLabel={deleting ? 'Tar bort…' : 'Ta bort kund'}
+          danger
+          onConfirm={handleDelete}
+        />
+      </Card>
     );
   }
 
@@ -2629,6 +3321,7 @@
     const upcomingShifts = db.shiftsForProperty(prop.id, { from: new Date() }).filter(s => !['Avbokat', 'Borttaget'].includes(s.status)).slice(0, 8);
 
     const tabs = [
+      { id: 'uppgifter', label: 'Uppgifter', icon: 'building' },
       { id: 'stadschema', label: 'Städschema', icon: 'list', count: db.listChecklistTemplate(prop.id, { includeInactive: false }).length },
       { id: 'recurring', label: 'Återkommande', icon: 'refresh', count: db.listRecurringSchedules(prop.id).length },
       { id: 'access', label: 'Nyckel / larm', icon: 'key' },
@@ -2646,18 +3339,89 @@
             { label: prop.name },
           ]}
           title={prop.name}
-          subtitle={prop.address}
-          actions={<Button variant="ghost" icon="chevron-left" onClick={() => onNavigate(`/admin/kunder/${cust.id}`)}>Tillbaka</Button>}
+          subtitle={prop.address || 'Ingen adress angiven'}
+          actions={
+            <>
+              <Button variant="outline" icon="edit" onClick={() => setTab('uppgifter')}>Redigera</Button>
+              <Button variant="ghost" icon="chevron-left" onClick={() => onNavigate(`/admin/kunder/${cust.id}`)}>Tillbaka</Button>
+            </>
+          }
         />
         <Tabs tabs={tabs} value={tab} onChange={setTab} className="mb-5" />
 
+        {tab === 'uppgifter' && <AdminPropertyDetailsEditor property={prop} />}
         {tab === 'stadschema' && <AdminChecklistEditor propertyId={prop.id} />}
         {tab === 'recurring' && <AdminRecurringEditor property={prop} session={session} />}
         {tab === 'access' && <AdminAccessEditor property={prop} />}
         {tab === 'pass' && <PropertyShiftsList property={prop} session={session} onNavigate={onNavigate} upcomingShifts={upcomingShifts} />}
         {tab === 'ledighet' && <ComingSoonView title="Ledigheter" section="§7.3" description="Lista över registrerade kundledigheter på det här objektet." />}
         {tab === 'kontakter' && <AdminPropertyContactsTab property={prop} customer={cust} session={session} />}
+        <AdminDeletePropertySection property={prop} customerId={cust.id} onNavigate={onNavigate} />
       </div>
+    );
+  }
+
+  function AdminDeletePropertySection({ property, customerId, onNavigate }) {
+    useDb();
+    const [deleteOpen, setDeleteOpen] = useState(false);
+    const [deleting, setDeleting] = useState(false);
+    const futureCount = db.countFutureShiftsForProperty(property.id);
+    const totalShifts = db.state.shifts.filter(s => s.property_id === property.id).length;
+    const checklistCount = db.listChecklistTemplate(property.id).length;
+    const recurringCount = db.listRecurringSchedules(property.id).length;
+
+    const confirmMessage = futureCount > 0
+      ? `${futureCount} kommande pass tas bort permanent. ${totalShifts > futureCount ? `Totalt ${totalShifts} pass i historiken raderas också.` : ''} Städschema (${checklistCount} punkter) och ${recurringCount} återkommande mall${recurringCount === 1 ? '' : 'ar'} försvinner. Detta går inte att ångra.`
+      : totalShifts > 0
+        ? `${totalShifts} pass i historiken och all objektdata raderas permanent. Detta går inte att ångra.`
+        : `Objektet "${property.name}" och all tillhörande data raderas permanent. Detta går inte att ångra.`;
+
+    async function handleDelete() {
+      setDeleting(true);
+      try {
+        const r = await db.deleteProperty(property.id);
+        if (r?.ok) {
+          toast.success(`Objektet "${property.name}" är borttaget.`);
+          setDeleteOpen(false);
+          onNavigate(`/admin/kunder/${customerId}`);
+        } else if (r?.error === 'PERSIST_FAILED') {
+          toast.error('Kunde inte spara – försök igen.');
+        } else {
+          toast.error('Objektet kunde inte hittas.');
+          setDeleteOpen(false);
+        }
+      } finally {
+        setDeleting(false);
+      }
+    }
+
+    return (
+      <Card padding="md" className="border-rose-100 mt-8">
+        <h3 className="font-bold text-slate-900 mb-2">Farlig zon</h3>
+        <p className="text-xs text-slate-500 mb-3">
+          {futureCount > 0
+            ? `${futureCount} kommande pass på det här objektet.`
+            : 'Inga kommande pass.'}
+          {' '}Radering tar bort hela objektet och all kopplad data.
+        </p>
+        <Button
+          variant="danger-ghost"
+          icon="trash"
+          disabled={deleting}
+          onClick={() => setDeleteOpen(true)}
+        >
+          Ta bort objekt
+        </Button>
+        <ConfirmDialog
+          open={deleteOpen}
+          onClose={() => { if (!deleting) setDeleteOpen(false); }}
+          title={`Ta bort "${property.name}"?`}
+          message={confirmMessage}
+          confirmLabel={deleting ? 'Tar bort…' : 'Ta bort objekt'}
+          danger
+          onConfirm={handleDelete}
+        />
+      </Card>
     );
   }
 
@@ -2914,11 +3678,94 @@
     );
   }
 
+  function AdminPropertyDetailsEditor({ property }) {
+    const [name, setName] = useState(property.name || '');
+    const [address, setAddress] = useState(property.address || '');
+    const [areaSqm, setAreaSqm] = useState(property.area_sqm != null ? String(property.area_sqm) : '');
+    const [saving, setSaving] = useState(false);
+
+    useEffect(() => {
+      setName(property.name || '');
+      setAddress(property.address || '');
+      setAreaSqm(property.area_sqm != null ? String(property.area_sqm) : '');
+    }, [property.id]);
+
+    const dirty = name !== (property.name || '')
+      || address !== (property.address || '')
+      || areaSqm !== (property.area_sqm != null ? String(property.area_sqm) : '');
+
+    async function save() {
+      setSaving(true);
+      try {
+        const r = await db.updateProperty(property.id, {
+          name,
+          address,
+          area_sqm: areaSqm.trim() === '' ? null : areaSqm,
+        });
+        if (r?.ok) toast.success('Objektuppgifter sparade.');
+        else if (r?.error === 'INVALID_NAME') toast.error('Namnet måste vara minst 2 tecken.');
+        else if (r?.error === 'INVALID_AREA') toast.error('Yta måste vara ett positivt tal.');
+        else if (r?.error === 'PERSIST_FAILED') toast.error('Kunde inte spara – försök igen.');
+        else toast.error('Objektet kunde inte hittas.');
+      } finally {
+        setSaving(false);
+      }
+    }
+
+    return (
+      <Card padding="md">
+        <h3 className="font-bold text-slate-900 mb-1">Grunduppgifter</h3>
+        <p className="text-xs text-slate-500 mb-4">Namn och adress visas för kund, städare och admin.</p>
+        <Field label="Objektnamn *" className="mb-3">
+          <Input value={name} onChange={e => setName(e.target.value)} placeholder="T.ex. Acme HQ" />
+        </Field>
+        <Field label="Adress" className="mb-3">
+          <Input value={address} onChange={e => setAddress(e.target.value)} placeholder="Gatuadress, postort" />
+        </Field>
+        <Field label="Yta (kvm)" hint="Valfritt, heltal." className="mb-4">
+          <Input
+            type="number"
+            min="0"
+            step="1"
+            value={areaSqm}
+            onChange={e => setAreaSqm(e.target.value)}
+            placeholder="320"
+          />
+        </Field>
+        <div className="flex justify-end gap-2">
+          {dirty && (
+            <Button variant="ghost" disabled={saving} onClick={() => {
+              setName(property.name || '');
+              setAddress(property.address || '');
+              setAreaSqm(property.area_sqm != null ? String(property.area_sqm) : '');
+            }}>Återställ</Button>
+          )}
+          <Button variant="primary" icon="check" disabled={!dirty || saving || name.trim().length < 2} onClick={save}>
+            {saving ? 'Sparar…' : 'Spara'}
+          </Button>
+        </div>
+      </Card>
+    );
+  }
+
   function AdminAccessEditor({ property }) {
     const [draft, setDraft] = useState(property.access_info || '');
     const [notes, setNotes] = useState(property.notes || '');
+    const [saving, setSaving] = useState(false);
     useEffect(() => { setDraft(property.access_info || ''); setNotes(property.notes || ''); }, [property.id]);
     const dirty = draft !== (property.access_info || '') || notes !== (property.notes || '');
+
+    async function save() {
+      setSaving(true);
+      try {
+        const r = await db.updateProperty(property.id, { access_info: draft, notes });
+        if (r?.ok) toast.success('Nyckel och anteckningar sparade.');
+        else if (r?.error === 'PERSIST_FAILED') toast.error('Kunde inte spara – försök igen.');
+        else toast.error('Objektet kunde inte hittas.');
+      } finally {
+        setSaving(false);
+      }
+    }
 
     return (
       <div className="space-y-4">
@@ -2944,11 +3791,10 @@
         </Card>
 
         <div className="flex justify-end gap-2 sticky bottom-4">
-          {dirty && <Button variant="ghost" onClick={() => { setDraft(property.access_info || ''); setNotes(property.notes || ''); }}>Återställ</Button>}
-          <Button variant="primary" icon="check" disabled={!dirty} onClick={() => {
-            db.updateProperty(property.id, { access_info: draft, notes });
-            toast.success('Objektet uppdaterat.');
-          }}>Spara</Button>
+          {dirty && <Button variant="ghost" disabled={saving} onClick={() => { setDraft(property.access_info || ''); setNotes(property.notes || ''); }}>Återställ</Button>}
+          <Button variant="primary" icon="check" disabled={!dirty || saving} onClick={save}>
+            {saving ? 'Sparar…' : 'Spara'}
+          </Button>
         </div>
       </div>
     );
@@ -3232,4 +4078,5 @@
   window.AdminCustomerEmployeesCard = AdminCustomerEmployeesCard;
   window.AdminPropertyContactsTab = AdminPropertyContactsTab;
   window.CustomerSettingsView = CustomerSettingsView;
+  window.AdminSettingsView = AdminSettingsView;
 })();

@@ -370,7 +370,7 @@
     if (matchPath(path, '/admin/stadare')) return <ComingSoonView title="Städare" section="§4 + §7.7" description="Lista över städare, profiler och tilldelningar till objekt." />;
     if ((m = matchPath(path, '/admin/avvikelser/:id'))) return <IncidentDetailView session={session} onNavigate={navigate} incidentId={m.id} />;
     if (matchPath(path, '/admin/avvikelser')) return <AdminIncidentsView session={session} onNavigate={navigate} />;
-    if (matchPath(path, '/admin/installningar')) return <ComingSoonView title="Inställningar" section="§8" description="Företagsuppgifter, tema, notisinställningar." />;
+    if (matchPath(path, '/admin/installningar')) return <AdminSettingsView session={session} />;
 
     // —— CLEANER ——
     if (matchPath(path, '/stadare/idag')) return <CleanerTodayView session={session} onNavigate={navigate} />;

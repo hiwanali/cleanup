@@ -29,6 +29,12 @@
   function uuid() {
     return `${Math.random().toString(36).slice(2, 10)}-${Date.now().toString(36)}`;
   }
+  function newId() {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID();
+    }
+    return uuid();
+  }
 
   /* ============================================================
    * Datum-helpers
@@ -595,8 +601,21 @@
       return { ok: true };
     },
 
-    // §7.2 hämtar supportkontakt (org → första admin)
+    organizationForUser(userId) {
+      const u = db.userById(userId);
+      if (!u) return null;
+      return state.organizations.find(o => o.id === u.org_id) || null;
+    },
+
+    // §7.2 hämtar supportkontakt (vald admin i inställningar, annars första aktiva admin)
     orgSupportContact() {
+      const org = state.organizations[0];
+      if (org?.support_contact_user_id) {
+        const designated = db.userById(org.support_contact_user_id);
+        if (designated?.active && designated.role === 'admin') {
+          return { name: designated.name, email: designated.email, phone: designated.phone || '' };
+        }
+      }
       const admin = state.users.find(u => u.role === 'admin' && u.active);
       if (!admin) return { name: 'CleanUp Support', email: 'support@cleanup.se', phone: '' };
       return { name: admin.name, email: admin.email, phone: admin.phone || '' };
@@ -624,18 +643,60 @@
       bump();
     },
 
-    // §7.4 admin tar bort pass
-    adminDelete(shiftId, actorUserId) {
+    // §7.4 admin tar bort pass (optimistic + Supabase-persist)
+    async adminDelete(shiftId, actorUserId) {
       const s = db.shiftById(shiftId);
-      if (!s) return;
+      if (!s) return { error: 'NOT_FOUND' };
+      if (s.status === 'Borttaget') return { error: 'ALREADY_DELETED' };
+
+      const snapshot = {
+        status: s.status,
+        last_modified_by: s.last_modified_by,
+        shift_eventsLen: state.shift_events.length,
+        notificationsLen: state.notifications.length,
+      };
+
+      const hoursToStart = (new Date(s.start_at) - Date.now()) / 36e5;
       s.status = 'Borttaget';
       s.last_modified_by = actorUserId;
-      state.shift_events.push({ id: id('se'), shift_id: shiftId, actor_user_id: actorUserId, event_type: 'admin_deleted', payload: {}, created_at: new Date() });
-      if (s.cleaner_user_id) pushNotification(s.cleaner_user_id, 'admin_deleted', { shift_id: s.id, property_id: s.property_id, start_at: s.start_at });
+      state.shift_events.push({
+        id: id('se'),
+        shift_id: shiftId,
+        actor_user_id: actorUserId,
+        event_type: 'admin_deleted',
+        payload: { hours_to_start: hoursToStart },
+        created_at: new Date(),
+      });
+      if (s.cleaner_user_id) {
+        pushNotification(s.cleaner_user_id, 'admin_deleted', { shift_id: s.id, property_id: s.property_id, start_at: s.start_at });
+      }
       const prop = db.propertyById(s.property_id);
-      const cust = state.customers.find(c => c.id === prop.customer_id);
-      if (cust) pushNotification(cust.primary_contact_user_id, 'admin_deleted', { shift_id: s.id, property_id: s.property_id, start_at: s.start_at });
+      const cust = prop ? state.customers.find(c => c.id === prop.customer_id) : null;
+      if (cust) {
+        pushNotification(cust.primary_contact_user_id, 'admin_deleted', { shift_id: s.id, property_id: s.property_id, start_at: s.start_at });
+      }
       bump();
+
+      const persist = window.dbPersist && window.dbPersist.adminDelete;
+      if (persist) {
+        const r = await persist({
+          shiftId,
+          actorUserId,
+          hoursToStart,
+          shift: s,
+          primaryContactUserId: cust ? cust.primary_contact_user_id : null,
+        });
+        if (!r.ok) {
+          s.status = snapshot.status;
+          s.last_modified_by = snapshot.last_modified_by;
+          state.shift_events.length = snapshot.shift_eventsLen;
+          state.notifications.length = snapshot.notificationsLen;
+          bump();
+          return { error: 'PERSIST_FAILED', message: r.message };
+        }
+      }
+
+      return { ok: true };
     },
 
     // §7.3 kundledighet – registrera
@@ -961,12 +1022,577 @@
       bump();
     },
 
-    /* —— Objekt-uppdatering (t.ex. nyckel/larm-info) —— */
-    updateProperty(propertyId, fields) {
+    /* —— Objekt-uppdatering (admin) —— */
+    async updateProperty(propertyId, fields) {
       const p = db.propertyById(propertyId);
-      if (!p) return;
-      Object.assign(p, fields);
+      if (!p) return { error: 'NOT_FOUND' };
+
+      const allowed = ['name', 'address', 'area_sqm', 'access_info', 'notes'];
+      const snapshot = {};
+      allowed.forEach(k => {
+        if (Object.prototype.hasOwnProperty.call(fields, k)) snapshot[k] = p[k];
+      });
+
+      const persistFields = {};
+
+      if (Object.prototype.hasOwnProperty.call(fields, 'name')) {
+        const trimmed = (fields.name || '').trim();
+        if (trimmed.length < 2) return { error: 'INVALID_NAME' };
+        p.name = trimmed;
+        persistFields.name = p.name;
+      }
+      if (Object.prototype.hasOwnProperty.call(fields, 'address')) {
+        p.address = (fields.address || '').trim();
+        persistFields.address = p.address;
+      }
+      if (Object.prototype.hasOwnProperty.call(fields, 'area_sqm')) {
+        const v = fields.area_sqm;
+        if (v === '' || v == null) {
+          p.area_sqm = null;
+        } else {
+          const n = Number(v);
+          if (!Number.isFinite(n) || n < 0) return { error: 'INVALID_AREA' };
+          p.area_sqm = Math.round(n);
+        }
+        persistFields.area_sqm = p.area_sqm;
+      }
+      if (Object.prototype.hasOwnProperty.call(fields, 'access_info')) {
+        p.access_info = fields.access_info ?? '';
+        persistFields.access_info = p.access_info;
+      }
+      if (Object.prototype.hasOwnProperty.call(fields, 'notes')) {
+        p.notes = fields.notes ?? '';
+        persistFields.notes = p.notes;
+      }
+
+      if (Object.keys(persistFields).length === 0) return { ok: true };
+
       bump();
+
+      const persist = window.dbPersist && window.dbPersist.updateProperty;
+      if (persist) {
+        const r = await persist({ propertyId, fields: persistFields });
+        if (!r.ok) {
+          Object.assign(p, snapshot);
+          bump();
+          return { error: 'PERSIST_FAILED', message: r.message };
+        }
+      }
+
+      return { ok: true };
+    },
+
+    countFutureShiftsForProperty(propertyId) {
+      const now = Date.now();
+      return state.shifts.filter(s =>
+        s.property_id === propertyId
+        && new Date(s.start_at).getTime() >= now
+        && !['Avbokat', 'Borttaget'].includes(s.status),
+      ).length;
+    },
+
+    _collectPropertySnapshot(propertyId) {
+      const shiftIds = new Set(
+        state.shifts.filter(s => s.property_id === propertyId).map(s => s.id),
+      );
+      const prop = db.propertyById(propertyId);
+      return {
+        property: prop ? { ...prop } : null,
+        property_cleaners: state.property_cleaners
+          .filter(pc => pc.property_id === propertyId)
+          .map(x => ({ ...x })),
+        recurring_schedules: state.recurring_schedules
+          .filter(r => r.property_id === propertyId)
+          .map(x => ({ ...x })),
+        shifts: state.shifts
+          .filter(s => s.property_id === propertyId)
+          .map(x => ({ ...x })),
+        shift_events: state.shift_events
+          .filter(e => shiftIds.has(e.shift_id))
+          .map(x => ({ ...x })),
+        cleaning_checklists: state.cleaning_checklists
+          .filter(c => c.property_id === propertyId)
+          .map(x => ({ ...x })),
+        shift_checklist_items: state.shift_checklist_items
+          .filter(i => shiftIds.has(i.shift_id))
+          .map(x => ({ ...x })),
+        customer_employee_properties: state.customer_employee_properties
+          .filter(x => x.property_id === propertyId)
+          .map(x => ({ ...x })),
+        customer_holiday_properties: state.customer_holiday_properties
+          .filter(x => x.property_id === propertyId)
+          .map(x => ({ ...x })),
+        incidents: state.incidents
+          .filter(i => i.property_id === propertyId)
+          .map(x => ({ ...x })),
+      };
+    },
+
+    _purgePropertyFromState(propertyId) {
+      const shiftIds = new Set(
+        state.shifts.filter(s => s.property_id === propertyId).map(s => s.id),
+      );
+      state.properties = state.properties.filter(p => p.id !== propertyId);
+      state.property_cleaners = state.property_cleaners.filter(pc => pc.property_id !== propertyId);
+      state.recurring_schedules = state.recurring_schedules.filter(r => r.property_id !== propertyId);
+      state.shifts = state.shifts.filter(s => s.property_id !== propertyId);
+      state.shift_events = state.shift_events.filter(e => !shiftIds.has(e.shift_id));
+      state.cleaning_checklists = state.cleaning_checklists.filter(c => c.property_id !== propertyId);
+      state.shift_checklist_items = state.shift_checklist_items.filter(i => !shiftIds.has(i.shift_id));
+      state.customer_employee_properties = state.customer_employee_properties.filter(x => x.property_id !== propertyId);
+      state.customer_holiday_properties = state.customer_holiday_properties.filter(x => x.property_id !== propertyId);
+      state.incidents = state.incidents.filter(i => i.property_id !== propertyId);
+    },
+
+    _restorePropertySnapshot(snapshot) {
+      if (snapshot.property) state.properties.push(snapshot.property);
+      state.property_cleaners.push(...snapshot.property_cleaners);
+      state.recurring_schedules.push(...snapshot.recurring_schedules);
+      state.shifts.push(...snapshot.shifts);
+      state.shift_events.push(...snapshot.shift_events);
+      state.cleaning_checklists.push(...snapshot.cleaning_checklists);
+      state.shift_checklist_items.push(...snapshot.shift_checklist_items);
+      state.customer_employee_properties.push(...snapshot.customer_employee_properties);
+      state.customer_holiday_properties.push(...snapshot.customer_holiday_properties);
+      state.incidents.push(...snapshot.incidents);
+    },
+
+    async deleteProperty(propertyId) {
+      const p = db.propertyById(propertyId);
+      if (!p) return { error: 'NOT_FOUND' };
+
+      const futureCount = db.countFutureShiftsForProperty(propertyId);
+      const totalShifts = state.shifts.filter(s => s.property_id === propertyId).length;
+      const snapshot = db._collectPropertySnapshot(propertyId);
+
+      db._purgePropertyFromState(propertyId);
+      bump();
+
+      const persist = window.dbPersist && window.dbPersist.deleteProperty;
+      if (persist) {
+        const r = await persist({ propertyId });
+        if (!r.ok) {
+          db._restorePropertySnapshot(snapshot);
+          bump();
+          return { error: 'PERSIST_FAILED', message: r.message, futureCount, totalShifts };
+        }
+      }
+
+      return { ok: true, futureCount, totalShifts };
+    },
+
+    countFutureShiftsForCustomer(customerId) {
+      const propertyIds = new Set(
+        state.properties.filter(p => p.customer_id === customerId).map(p => p.id),
+      );
+      const now = Date.now();
+      return state.shifts.filter(s =>
+        propertyIds.has(s.property_id)
+        && new Date(s.start_at).getTime() >= now
+        && !['Avbokat', 'Borttaget'].includes(s.status),
+      ).length;
+    },
+
+    customerDeleteSummary(customerId) {
+      const propertyIds = state.properties.filter(p => p.customer_id === customerId).map(p => p.id);
+      const futureShifts = db.countFutureShiftsForCustomer(customerId);
+      const totalShifts = state.shifts.filter(s => propertyIds.includes(s.property_id)).length;
+      return {
+        propertyCount: propertyIds.length,
+        futureShifts,
+        totalShifts,
+        employeeCount: state.customer_employees.filter(ce => ce.customer_id === customerId).length,
+        holidayCount: state.customer_holidays.filter(h => h.customer_id === customerId).length,
+      };
+    },
+
+    _collectCustomerSnapshot(customerId) {
+      const propertyIds = state.properties
+        .filter(p => p.customer_id === customerId)
+        .map(p => p.id);
+      const propertySnapshots = propertyIds.map(pid => db._collectPropertySnapshot(pid));
+      const ces = state.customer_employees
+        .filter(ce => ce.customer_id === customerId)
+        .map(x => ({ ...x }));
+      const holidayIds = new Set(
+        state.customer_holidays.filter(h => h.customer_id === customerId).map(h => h.id),
+      );
+      const cust = db.customerById(customerId);
+      const userIds = [
+        cust?.primary_contact_user_id,
+        ...ces.map(ce => ce.user_id),
+      ].filter(Boolean);
+      const userActive = userIds.map(uid => {
+        const u = db.userById(uid);
+        return u ? { id: uid, active: u.active } : null;
+      }).filter(Boolean);
+
+      return {
+        customer: cust ? { ...cust } : null,
+        propertySnapshots,
+        customer_employees: ces,
+        customer_employee_properties: state.customer_employee_properties
+          .filter(x => ces.some(ce => ce.id === x.customer_employee_id))
+          .map(x => ({ ...x })),
+        customer_holidays: state.customer_holidays
+          .filter(h => h.customer_id === customerId)
+          .map(x => ({ ...x })),
+        customer_holiday_properties: state.customer_holiday_properties
+          .filter(x => holidayIds.has(x.customer_holiday_id))
+          .map(x => ({ ...x })),
+        userActive,
+      };
+    },
+
+    _purgeCustomerFromState(customerId) {
+      const propertyIds = state.properties
+        .filter(p => p.customer_id === customerId)
+        .map(p => p.id);
+      propertyIds.forEach(pid => db._purgePropertyFromState(pid));
+
+      const ces = state.customer_employees.filter(ce => ce.customer_id === customerId);
+      const ceIds = new Set(ces.map(ce => ce.id));
+      state.customer_employees = state.customer_employees.filter(ce => ce.customer_id !== customerId);
+      state.customer_employee_properties = state.customer_employee_properties.filter(
+        x => !ceIds.has(x.customer_employee_id),
+      );
+
+      const holidayIds = new Set(
+        state.customer_holidays.filter(h => h.customer_id === customerId).map(h => h.id),
+      );
+      state.customer_holidays = state.customer_holidays.filter(h => h.customer_id !== customerId);
+      state.customer_holiday_properties = state.customer_holiday_properties.filter(
+        x => !holidayIds.has(x.customer_holiday_id),
+      );
+
+      const cust = db.customerById(customerId);
+      const userIds = [
+        cust?.primary_contact_user_id,
+        ...ces.map(ce => ce.user_id),
+      ].filter(Boolean);
+      userIds.forEach(uid => {
+        const u = db.userById(uid);
+        if (u && (u.role === 'customer' || u.role === 'customer_employee')) {
+          u.active = false;
+        }
+      });
+
+      state.customers = state.customers.filter(c => c.id !== customerId);
+    },
+
+    _restoreCustomerSnapshot(snapshot) {
+      snapshot.propertySnapshots.forEach(ps => db._restorePropertySnapshot(ps));
+      if (snapshot.customer) state.customers.push(snapshot.customer);
+      state.customer_employees.push(...snapshot.customer_employees);
+      state.customer_employee_properties.push(...snapshot.customer_employee_properties);
+      state.customer_holidays.push(...snapshot.customer_holidays);
+      state.customer_holiday_properties.push(...snapshot.customer_holiday_properties);
+      snapshot.userActive.forEach(({ id, active }) => {
+        const u = db.userById(id);
+        if (u) u.active = active;
+      });
+    },
+
+    async deleteCustomer(customerId) {
+      const cust = db.customerById(customerId);
+      if (!cust) return { error: 'NOT_FOUND' };
+
+      const summary = db.customerDeleteSummary(customerId);
+      const snapshot = db._collectCustomerSnapshot(customerId);
+      const userIdsToDeactivate = snapshot.userActive.map(x => x.id);
+
+      db._purgeCustomerFromState(customerId);
+      bump();
+
+      const persist = window.dbPersist && window.dbPersist.deleteCustomer;
+      if (persist) {
+        const r = await persist({ customerId, userIdsToDeactivate });
+        if (!r.ok) {
+          db._restoreCustomerSnapshot(snapshot);
+          bump();
+          return { error: 'PERSIST_FAILED', message: r.message, ...summary };
+        }
+      }
+
+      return { ok: true, ...summary };
+    },
+
+    // §8 admin-inställningar (företag + egen kontaktprofil)
+    async updateAdminSettings(userId, { orgName, themeRound, accentColorHex, userName, userEmail, userPhone }) {
+      const user = db.userById(userId);
+      if (!user || user.role !== 'admin') return { error: 'FORBIDDEN' };
+      const org = state.organizations.find(o => o.id === user.org_id);
+      if (!org) return { error: 'NOT_FOUND' };
+
+      const trimmedOrgName = (orgName || '').trim();
+      if (trimmedOrgName.length < 2) return { error: 'INVALID_ORG_NAME' };
+      const trimmedUserName = (userName || '').trim();
+      if (trimmedUserName.length < 2) return { error: 'INVALID_NAME' };
+      const trimmedEmail = (userEmail || '').trim().toLowerCase();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+        return { error: 'INVALID_EMAIL' };
+      }
+      if (state.users.some(u => u.org_id === org.id && u.email === trimmedEmail && u.id !== userId)) {
+        return { error: 'EMAIL_EXISTS' };
+      }
+
+      const snapshot = {
+        org: {
+          name: org.name,
+          theme_round: org.theme_round,
+          accent_color: org.accent_color,
+          support_contact_user_id: org.support_contact_user_id,
+        },
+        user: { name: user.name, email: user.email, phone: user.phone },
+      };
+
+      org.name = trimmedOrgName;
+      org.theme_round = themeRound;
+      org.accent_color = accentColorHex;
+      org.support_contact_user_id = userId;
+      user.name = trimmedUserName;
+      user.email = trimmedEmail;
+      user.phone = (userPhone || '').trim();
+      user.updated_at = new Date();
+      bump();
+
+      const persist = window.dbPersist && window.dbPersist.updateAdminSettings;
+      if (persist) {
+        const r = await persist({
+          orgId: org.id,
+          userId,
+          organization: {
+            name: org.name,
+            theme_round: org.theme_round,
+            accent_color: org.accent_color,
+          },
+          user: { name: user.name, email: user.email, phone: user.phone },
+        });
+        if (!r.ok) {
+          org.name = snapshot.org.name;
+          org.theme_round = snapshot.org.theme_round;
+          org.accent_color = snapshot.org.accent_color;
+          org.support_contact_user_id = snapshot.org.support_contact_user_id;
+          user.name = snapshot.user.name;
+          user.email = snapshot.user.email;
+          user.phone = snapshot.user.phone;
+          bump();
+          return { error: 'PERSIST_FAILED', message: r.message };
+        }
+      }
+
+      return { ok: true, organization: org, user };
+    },
+
+    // §7.7 admin redigerar kund + huvudkontakt
+    async updateCustomer(customerId, { name, orgNumber, notes, contactName, contactEmail, contactPhone }) {
+      const cust = db.customerById(customerId);
+      if (!cust) return { error: 'NOT_FOUND' };
+      const contactUser = db.userById(cust.primary_contact_user_id);
+      if (!contactUser) return { error: 'NO_CONTACT' };
+
+      const trimmedName = (name || '').trim();
+      if (trimmedName.length < 2) return { error: 'INVALID_NAME' };
+
+      const trimmedEmail = (contactEmail || '').trim().toLowerCase();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+        return { error: 'INVALID_EMAIL' };
+      }
+      if (state.users.some(u => u.org_id === cust.org_id && u.email === trimmedEmail && u.id !== contactUser.id)) {
+        return { error: 'EMAIL_EXISTS' };
+      }
+
+      const snapshot = {
+        name: cust.name,
+        org_number: cust.org_number,
+        notes: cust.notes,
+        contactName: contactUser.name,
+        contactEmail: contactUser.email,
+        contactPhone: contactUser.phone,
+      };
+
+      cust.name = trimmedName;
+      cust.org_number = (orgNumber || '').trim();
+      cust.notes = (notes || '').trim();
+      contactUser.name = (contactName || '').trim();
+      contactUser.email = trimmedEmail;
+      contactUser.phone = (contactPhone || '').trim();
+      bump();
+
+      const persist = window.dbPersist && window.dbPersist.updateCustomer;
+      if (persist) {
+        const r = await persist({
+          customerId,
+          customer: { name: cust.name, org_number: cust.org_number, notes: cust.notes },
+          contactUserId: contactUser.id,
+          contact: { name: contactUser.name, email: contactUser.email, phone: contactUser.phone },
+        });
+        if (!r.ok) {
+          cust.name = snapshot.name;
+          cust.org_number = snapshot.org_number;
+          cust.notes = snapshot.notes;
+          contactUser.name = snapshot.contactName;
+          contactUser.email = snapshot.contactEmail;
+          contactUser.phone = snapshot.contactPhone;
+          bump();
+          return { error: 'PERSIST_FAILED', message: r.message };
+        }
+      }
+
+      return { ok: true };
+    },
+
+    // §7.7 skapa kund (+ huvudkontakt, valfritt första objekt)
+    async createCustomer({
+      orgId,
+      name,
+      orgNumber = '',
+      notes = '',
+      contactName,
+      contactEmail,
+      contactPhone = '',
+      adminUserId,
+      firstProperty = null,
+    }) {
+      const org = state.organizations.find(o => o.id === orgId) || state.organizations[0];
+      if (!org) return { error: 'NO_ORG' };
+
+      const trimmedName = (name || '').trim();
+      if (trimmedName.length < 2) return { error: 'INVALID_NAME' };
+
+      const trimmedContactName = (contactName || '').trim();
+      if (trimmedContactName.length < 2) return { error: 'INVALID_CONTACT_NAME' };
+
+      const contactEmailLower = (contactEmail || '').trim().toLowerCase();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmailLower)) {
+        return { error: 'INVALID_EMAIL' };
+      }
+      if (state.users.some(u => u.org_id === org.id && u.email === contactEmailLower)) {
+        return { error: 'EMAIL_EXISTS' };
+      }
+
+      const contactUser = {
+        id: newId(),
+        org_id: org.id,
+        role: 'customer',
+        name: trimmedContactName,
+        email: contactEmailLower,
+        phone: (contactPhone || '').trim(),
+        active: true,
+      };
+      const customer = {
+        id: newId(),
+        org_id: org.id,
+        name: trimmedName,
+        org_number: (orgNumber || '').trim(),
+        primary_contact_user_id: contactUser.id,
+        notes: (notes || '').trim(),
+      };
+
+      const snapshot = {
+        usersLen: state.users.length,
+        customersLen: state.customers.length,
+        propertiesLen: state.properties.length,
+      };
+
+      state.users.push(contactUser);
+      state.customers.push(customer);
+      bump();
+
+      let property = null;
+      if (firstProperty && (firstProperty.name || '').trim()) {
+        const pr = await db.createProperty({
+          customerId: customer.id,
+          name: firstProperty.name,
+          address: firstProperty.address,
+          areaSqm: firstProperty.areaSqm,
+          accessInfo: firstProperty.accessInfo,
+          notes: firstProperty.notes,
+          cleanerUserIds: firstProperty.cleanerUserIds || [],
+          skipPersist: true,
+        });
+        if (pr?.error) {
+          state.users.length = snapshot.usersLen;
+          state.customers.length = snapshot.customersLen;
+          state.properties.length = snapshot.propertiesLen;
+          bump();
+          return pr;
+        }
+        property = pr.property;
+      }
+
+      const persist = window.dbPersist && window.dbPersist.createCustomer;
+      if (persist) {
+        const r = await persist({
+          orgId: org.id,
+          contactUser,
+          customer,
+          property,
+        });
+        if (!r.ok) {
+          if (property) db._purgePropertyFromState(property.id);
+          state.users.length = snapshot.usersLen;
+          state.customers.length = snapshot.customersLen;
+          bump();
+          return { error: 'PERSIST_FAILED', message: r.message };
+        }
+      }
+
+      return { ok: true, customer, contactUser, property };
+    },
+
+    async createProperty({
+      customerId,
+      name,
+      address = '',
+      areaSqm = null,
+      accessInfo = '',
+      notes = '',
+      cleanerUserIds = [],
+      skipPersist = false,
+    }) {
+      const cust = db.customerById(customerId);
+      if (!cust) return { error: 'NOT_FOUND' };
+
+      const trimmedName = (name || '').trim();
+      if (trimmedName.length < 2) return { error: 'INVALID_NAME' };
+
+      let area_sqm = null;
+      if (areaSqm !== '' && areaSqm != null) {
+        const n = Number(areaSqm);
+        if (!Number.isFinite(n) || n < 0) return { error: 'INVALID_AREA' };
+        area_sqm = Math.round(n);
+      }
+
+      const property = {
+        id: newId(),
+        customer_id: customerId,
+        name: trimmedName,
+        address: (address || '').trim(),
+        area_sqm,
+        access_info: (accessInfo || '').trim(),
+        notes: (notes || '').trim(),
+      };
+
+      state.properties.push(property);
+      if (cleanerUserIds.length) {
+        db.setPropertyCleaners(property.id, cleanerUserIds);
+      }
+      bump();
+
+      if (!skipPersist) {
+        const persist = window.dbPersist && window.dbPersist.createProperty;
+        if (persist) {
+          const r = await persist({ property, cleanerUserIds });
+          if (!r.ok) {
+            db._purgePropertyFromState(property.id);
+            bump();
+            return { error: 'PERSIST_FAILED', message: r.message };
+          }
+        }
+      }
+
+      return { ok: true, property };
     },
 
     // §7.7 Kundanställda

@@ -112,6 +112,9 @@
   }
 
   window.TweaksPanel = TweaksPanel;
+  window.applyCleanupTweaks = applyTweaks;
+  window.CLEANUP_ACCENT_OPTIONS = ACCENT_OPTIONS;
+  window.CLEANUP_ROUND_OPTIONS = ROUND_OPTIONS;
   // Applicera direkt vid load så vi slipper "blink"
   applyTweaks(loadTweaks());
 })();
