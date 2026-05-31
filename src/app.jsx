@@ -106,6 +106,7 @@
     ],
     customer: [
       { path: '/kund/oversikt', label: 'Översikt', icon: 'home' },
+      { path: '/kund/schema', label: 'Schema', icon: 'calendar' },
       { path: '/kund/objekt', label: 'Objekt', icon: 'building' },
       { path: '/kund/meddelanden', label: 'Meddelanden', icon: 'message-square' },
       { path: '/kund/ledighet', label: 'Ledighet', icon: 'pause' },
@@ -115,6 +116,7 @@
     ],
     customer_employee: [
       { path: '/kund/oversikt', label: 'Översikt', icon: 'home' },
+      { path: '/kund/schema', label: 'Schema', icon: 'calendar' },
       { path: '/kund/objekt', label: 'Objekt', icon: 'building' },
       { path: '/kund/meddelanden', label: 'Meddelanden', icon: 'message-square' },
       { path: '/kund/avvikelser', label: 'Avvikelser', icon: 'alert-triangle' },
@@ -408,6 +410,7 @@
 
     // —— CUSTOMER + customer_employee ——
     if (matchPath(path, '/kund/oversikt')) return <CustomerOverviewView session={session} onNavigate={navigate} />;
+    if (matchPath(path, '/kund/schema')) return <CustomerScheduleView session={session} onNavigate={navigate} />;
     if (matchPath(path, '/kund/objekt')) return <ComingSoonView title="Objekt" section="§8" description="Ett kort per objekt med kommande och senaste utförda pass." />;
     if ((m = matchPath(path, '/kund/pass/:id'))) return <CustomerShiftDetailView session={session} onNavigate={navigate} shiftId={m.id} />;
     if (matchPath(path, '/kund/ledighet')) return <CustomerHolidayView session={session} onNavigate={navigate} />;

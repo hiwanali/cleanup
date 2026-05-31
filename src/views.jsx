@@ -1970,7 +1970,180 @@
    * ADMIN · Pass-detalj
    * ============================================================ */
   /* ============================================================
-   * ADMIN · Schema (§7.4) – listvy med filter
+   * ScheduleCalendar – månadskalender (måndag först) för alla roller
+   * ============================================================ */
+  const CAL_WEEKDAYS = ['Mån', 'Tis', 'Ons', 'Tors', 'Fre', 'Lör', 'Sön'];
+  const CAL_MONTHS = [
+    'januari', 'februari', 'mars', 'april', 'maj', 'juni',
+    'juli', 'augusti', 'september', 'oktober', 'november', 'december',
+  ];
+  const CAL_STATUS_CHIP = {
+    'Godkänt': 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200',
+    'Planerat': 'bg-brand-100 text-brand-800 hover:bg-brand-200',
+    'Pågående': 'bg-accent-100 text-accent-700 hover:bg-accent-200',
+    'Utfört': 'bg-slate-100 text-slate-600 hover:bg-slate-200',
+    'Sjukanmäld': 'bg-amber-100 text-amber-800 hover:bg-amber-200',
+    'Pausat (kundledighet)': 'bg-sky-100 text-sky-800 hover:bg-sky-200',
+    'Avbokat': 'bg-rose-100 text-rose-700 hover:bg-rose-200 line-through',
+    'Borttaget': 'bg-zinc-100 text-zinc-500 hover:bg-zinc-200 line-through',
+  };
+
+  function CalendarListToggle({ view, onChange }) {
+    const opts = [
+      { id: 'calendar', label: 'Kalender', icon: 'calendar' },
+      { id: 'list', label: 'Lista', icon: 'list' },
+    ];
+    return (
+      <div className="inline-flex rounded-xl border border-slate-200 bg-white p-0.5">
+        {opts.map(opt => (
+          <button
+            key={opt.id}
+            type="button"
+            onClick={() => onChange(opt.id)}
+            className={cx(
+              'inline-flex items-center gap-1.5 rounded-lg px-3 h-9 text-sm font-semibold transition-colors',
+              view === opt.id ? 'bg-brand-600 text-white' : 'text-slate-600 hover:bg-slate-100',
+            )}
+          >
+            <Icon name={opt.icon} className="w-4 h-4" />
+            <span className="hidden sm:inline">{opt.label}</span>
+          </button>
+        ))}
+      </div>
+    );
+  }
+
+  function calStartOfMonth(d) { const x = new Date(d); x.setDate(1); x.setHours(0, 0, 0, 0); return x; }
+  function calMondayIndex(d) { return (new Date(d).getDay() + 6) % 7; }
+  function calSameDay(a, b) {
+    const x = new Date(a), y = new Date(b);
+    return x.getFullYear() === y.getFullYear() && x.getMonth() === y.getMonth() && x.getDate() === y.getDate();
+  }
+
+  function ScheduleCalendar({ shifts = [], viewerRole, onSelectShift }) {
+    const [cursor, setCursor] = useState(() => calStartOfMonth(new Date()));
+    const [dayDetail, setDayDetail] = useState(null);
+    const MAX_CHIPS = 3;
+
+    const monthStart = calStartOfMonth(cursor);
+    const gridStart = new Date(monthStart);
+    gridStart.setDate(gridStart.getDate() - calMondayIndex(monthStart));
+
+    const days = [];
+    for (let i = 0; i < 42; i++) {
+      const d = new Date(gridStart);
+      d.setDate(gridStart.getDate() + i);
+      days.push(d);
+    }
+
+    const byDay = {};
+    shifts.forEach(s => {
+      const k = toDateInput(s.start_at);
+      (byDay[k] = byDay[k] || []).push(s);
+    });
+    Object.values(byDay).forEach(list => list.sort((a, b) => new Date(a.start_at) - new Date(b.start_at)));
+
+    const today = new Date();
+
+    function shiftChip(s, full = false) {
+      const prop = db.propertyById(s.property_id);
+      return (
+        <button
+          key={s.id}
+          onClick={() => onSelectShift(s)}
+          className={cx(
+            'w-full text-left rounded-md px-1.5 py-1 text-[11px] font-medium leading-tight truncate transition-colors',
+            CAL_STATUS_CHIP[s.status] || 'bg-slate-100 text-slate-600 hover:bg-slate-200',
+          )}
+          title={`${formatTime(s.start_at)}–${formatTime(s.end_at)} · ${prop?.name || ''}`}
+        >
+          <span className="tabular-nums">{formatTime(s.start_at)}</span> {prop?.name || 'Pass'}
+          {full && <span className="text-slate-500"> · {s.status}</span>}
+        </button>
+      );
+    }
+
+    function gotoMonth(delta) {
+      setCursor(prev => { const x = new Date(prev); x.setMonth(x.getMonth() + delta); return calStartOfMonth(x); });
+    }
+
+    return (
+      <Card padding="sm">
+        <div className="flex items-center justify-between mb-3 px-1">
+          <div className="flex items-center gap-1.5">
+            <Button variant="outline" size="sm" iconOnly icon="chevron-left" aria-label="Föregående månad" onClick={() => gotoMonth(-1)} />
+            <Button variant="outline" size="sm" iconOnly icon="chevron-right" aria-label="Nästa månad" onClick={() => gotoMonth(1)} />
+            <Button variant="ghost" size="sm" onClick={() => setCursor(calStartOfMonth(new Date()))}>Idag</Button>
+          </div>
+          <h3 className="text-base font-bold text-slate-900 capitalize">
+            {CAL_MONTHS[monthStart.getMonth()]} {monthStart.getFullYear()}
+          </h3>
+        </div>
+
+        <div className="overflow-x-auto">
+          <div className="min-w-[680px]">
+            <div className="grid grid-cols-7 border-t border-l border-slate-100 rounded-t-lg overflow-hidden">
+              {CAL_WEEKDAYS.map(w => (
+                <div key={w} className="border-b border-r border-slate-100 bg-slate-50 px-2 py-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-500 text-center">
+                  {w}
+                </div>
+              ))}
+            </div>
+            <div className="grid grid-cols-7 border-l border-slate-100">
+              {days.map((d, i) => {
+                const key = toDateInput(d);
+                const list = byDay[key] || [];
+                const inMonth = d.getMonth() === monthStart.getMonth();
+                const isToday = calSameDay(d, today);
+                return (
+                  <div
+                    key={i}
+                    className={cx(
+                      'min-h-[96px] border-b border-r border-slate-100 p-1.5 flex flex-col gap-1',
+                      !inMonth && 'bg-slate-50/60',
+                    )}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className={cx(
+                        'inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-semibold',
+                        isToday ? 'bg-brand-600 text-white' : inMonth ? 'text-slate-700' : 'text-slate-400',
+                      )}>{d.getDate()}</span>
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      {list.slice(0, MAX_CHIPS).map(s => shiftChip(s))}
+                      {list.length > MAX_CHIPS && (
+                        <button
+                          onClick={() => setDayDetail({ date: new Date(d), list })}
+                          className="text-[11px] font-semibold text-brand-700 hover:underline text-left px-1.5"
+                        >
+                          +{list.length - MAX_CHIPS} fler
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        <Modal
+          open={!!dayDetail}
+          onClose={() => setDayDetail(null)}
+          title={dayDetail ? formatDateLong(dayDetail.date) : ''}
+          size="sm"
+          footer={<Button variant="ghost" onClick={() => setDayDetail(null)}>Stäng</Button>}
+        >
+          <div className="flex flex-col gap-1.5">
+            {dayDetail?.list.map(s => shiftChip(s, true))}
+          </div>
+        </Modal>
+      </Card>
+    );
+  }
+
+  /* ============================================================
+   * ADMIN · Schema (§7.4) – kalender + listvy med filter
    * ============================================================ */
   function AdminSchemaView({ session, onNavigate }) {
     useDb();
@@ -1979,12 +2152,27 @@
     const [customerFilter, setCustomerFilter] = useState('all');
     const [dateRange, setDateRange] = useState('upcoming');
     const [createOpen, setCreateOpen] = useState(false);
+    const [view, setView] = useState('calendar');
 
     const cleaners = db.state.users.filter(u => u.role === 'cleaner' && u.active);
     const customers = db.state.customers;
 
     const allShifts = db.state.shifts.slice();
     const now = Date.now();
+
+    function applyEntityFilters(list) {
+      let out = list;
+      if (statusFilter !== 'all') out = out.filter(s => s.status === statusFilter);
+      if (cleanerFilter !== 'all') out = out.filter(s => s.cleaner_user_id === cleanerFilter);
+      if (customerFilter !== 'all') {
+        const propIds = new Set(db.state.properties.filter(p => p.customer_id === customerFilter).map(p => p.id));
+        out = out.filter(s => propIds.has(s.property_id));
+      }
+      return out;
+    }
+
+    const calShifts = applyEntityFilters(allShifts);
+
     let filtered = allShifts;
 
     if (dateRange === 'today') {
@@ -2016,21 +2204,28 @@
       <div>
         <PageHeader
           title="Schema"
-          subtitle="Alla pass – filtrera på datum, status, städare och kund."
-          actions={<Button icon="plus" onClick={() => setCreateOpen(true)}>Nytt pass</Button>}
+          subtitle="Alla pass – kalender eller lista, filtrera på status, städare och kund."
+          actions={
+            <div className="flex items-center gap-2">
+              <CalendarListToggle view={view} onChange={setView} />
+              <Button icon="plus" onClick={() => setCreateOpen(true)}>Nytt pass</Button>
+            </div>
+          }
         />
 
         <Card padding="md" className="mb-4">
           <div className="grid md:grid-cols-4 gap-3">
-            <Field label="Period">
-              <Select value={dateRange} onChange={e => setDateRange(e.target.value)}>
-                <option value="upcoming">Kommande</option>
-                <option value="today">Idag</option>
-                <option value="week">7 dagar</option>
-                <option value="past">Historik</option>
-                <option value="all">Alla</option>
-              </Select>
-            </Field>
+            {view === 'list' && (
+              <Field label="Period">
+                <Select value={dateRange} onChange={e => setDateRange(e.target.value)}>
+                  <option value="upcoming">Kommande</option>
+                  <option value="today">Idag</option>
+                  <option value="week">7 dagar</option>
+                  <option value="past">Historik</option>
+                  <option value="all">Alla</option>
+                </Select>
+              </Field>
+            )}
             <Field label="Status">
               <Select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
                 <option value="all">Alla</option>
@@ -2058,22 +2253,32 @@
             </Field>
           </div>
           <div className="mt-3 flex items-center justify-between">
-            <p className="text-sm text-slate-600"><strong className="text-slate-900">{filtered.length}</strong> {filtered.length === 1 ? 'pass' : 'pass'} matchar filtret.</p>
+            <p className="text-sm text-slate-600">
+              <strong className="text-slate-900">{view === 'calendar' ? calShifts.length : filtered.length}</strong> pass {view === 'calendar' ? 'i urvalet' : 'matchar filtret'}.
+            </p>
             <Button variant="ghost" size="sm" icon="refresh" onClick={resetFilters}>Återställ filter</Button>
           </div>
         </Card>
 
-        {filtered.length === 0 ? (
+        {view === 'calendar' ? (
+          <ScheduleCalendar
+            shifts={calShifts}
+            viewerRole="admin"
+            onSelectShift={s => onNavigate(`/admin/schema/${s.id}`)}
+          />
+        ) : filtered.length === 0 ? (
           <Card padding="lg"><EmptyState icon="calendar" title="Inga pass matchar" description="Justera filtret eller skapa ett nytt pass." /></Card>
         ) : (
-          <div className="grid md:grid-cols-2 gap-3">
-            {filtered.slice(0, 100).map(s => (
-              <ShiftCard key={s.id} shift={s} viewerRole="admin" viewerUserId={session.userId} onClick={() => onNavigate(`/admin/schema/${s.id}`)} />
-            ))}
-          </div>
-        )}
-        {filtered.length > 100 && (
-          <p className="text-xs text-slate-500 mt-3 text-center">Visar de första 100 passen. Förfina filtret för att se färre.</p>
+          <>
+            <div className="grid md:grid-cols-2 gap-3">
+              {filtered.slice(0, 100).map(s => (
+                <ShiftCard key={s.id} shift={s} viewerRole="admin" viewerUserId={session.userId} onClick={() => onNavigate(`/admin/schema/${s.id}`)} />
+              ))}
+            </div>
+            {filtered.length > 100 && (
+              <p className="text-xs text-slate-500 mt-3 text-center">Visar de första 100 passen. Förfina filtret för att se färre.</p>
+            )}
+          </>
         )}
 
         <CreateShiftModal open={createOpen} onClose={() => setCreateOpen(false)} session={session} />
@@ -2217,6 +2422,7 @@
   function CleanerShiftsListView({ session, onNavigate }) {
     useDb();
     const [tab, setTab] = useState('upcoming');
+    const [view, setView] = useState('calendar');
     const all = db.shiftsForCleaner(session.userId);
     const now = Date.now();
     const upcoming = all.filter(s => new Date(s.end_at).getTime() >= now && !['Avbokat', 'Borttaget', 'Pausat (kundledighet)'].includes(s.status));
@@ -2233,17 +2439,31 @@
 
     return (
       <div>
-        <PageHeader title="Mina pass" subtitle={`Totalt ${all.length} pass tilldelade dig.`} />
-        <Tabs tabs={tabs} value={tab} onChange={setTab} className="mb-5" />
-        {items.length === 0 ? (
-          <Card padding="lg"><EmptyState icon="inbox" title="Inga pass här" /></Card>
+        <PageHeader
+          title="Mina pass"
+          subtitle={`Totalt ${all.length} pass tilldelade dig.`}
+          actions={<CalendarListToggle view={view} onChange={setView} />}
+        />
+        {view === 'calendar' ? (
+          <ScheduleCalendar
+            shifts={all}
+            viewerRole="cleaner"
+            onSelectShift={s => onNavigate(shiftDetailPath('cleaner', s.id))}
+          />
         ) : (
-          <div className="grid md:grid-cols-2 gap-3">
-            {items.map(s => (
-              <ShiftCard key={s.id} shift={s} viewerRole="cleaner" viewerUserId={session.userId}
-                onClick={() => onNavigate(shiftDetailPath('cleaner', s.id))} />
-            ))}
-          </div>
+          <>
+            <Tabs tabs={tabs} value={tab} onChange={setTab} className="mb-5" />
+            {items.length === 0 ? (
+              <Card padding="lg"><EmptyState icon="inbox" title="Inga pass här" /></Card>
+            ) : (
+              <div className="grid md:grid-cols-2 gap-3">
+                {items.map(s => (
+                  <ShiftCard key={s.id} shift={s} viewerRole="cleaner" viewerUserId={session.userId}
+                    onClick={() => onNavigate(shiftDetailPath('cleaner', s.id))} />
+                ))}
+              </div>
+            )}
+          </>
         )}
       </div>
     );
@@ -5213,7 +5433,26 @@
     return <CustomerReportsMain session={session} />;
   }
 
+  function CustomerScheduleView({ session, onNavigate }) {
+    useDb();
+    const shifts = db.shiftsForCustomerUser(session.userId);
+    return (
+      <div>
+        <PageHeader
+          title="Schema"
+          subtitle="Kalenderöversikt över alla pass på dina objekt."
+        />
+        <ScheduleCalendar
+          shifts={shifts}
+          viewerRole={session.user.role}
+          onSelectShift={s => onNavigate(`/kund/pass/${s.id}`)}
+        />
+      </div>
+    );
+  }
+
   window.AdminReportsView = AdminReportsView;
   window.CustomerReportsView = CustomerReportsView;
+  window.CustomerScheduleView = CustomerScheduleView;
   window.MessagesView = MessagesView;
 })();
