@@ -572,9 +572,10 @@
           const myShifts = new Set(state.shifts.filter(s => s.cleaner_user_id === opts.viewerUserId).map(s => s.id));
           list = list.filter(i => i.reported_by_user_id === opts.viewerUserId || myShifts.has(i.shift_id));
         } else if (u.role === 'customer' || u.role === 'customer_employee') {
-          // Kund/kundanställd ser endast reklamationer på sina objekt – inte städarens interna avvikelser
+          // Kund/kundanställd ser alla ärenden på sina objekt: egna reklamationer
+          // och städar-rapporterade avvikelser. Städar-PII döljs som "Städare" i UI.
           const props = new Set(db.propertiesForUser(opts.viewerUserId).map(p => p.id));
-          list = list.filter(i => props.has(i.property_id) && i.kind === 'customer_complaint');
+          list = list.filter(i => props.has(i.property_id));
         }
       }
       if (opts.status) list = list.filter(i => i.status === opts.status);

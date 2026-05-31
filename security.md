@@ -41,11 +41,42 @@
 2. **Console.error leakage** → Fixad: Generiska felmeddelanden
 3. **Missing security headers** → Fixad: Full header suite
 
+## 🔐 Säkerhetsgenomgång efter lansering (2026-05-31)
+
+Migration `20260531230000_security_access_review.sql` (applicerad live):
+
+1. **shift_events_select (åtkomstlucka)** → Fixad: kundroller var begränsade till
+   `shift_in_org()` (hela organisationen) och kunde därmed se in-/utcheckningshändelser
+   för andra kunders pass. Nu begränsat till `accessible_property_ids()` (egna objekt).
+2. **incidents_select (krav)** → Kund/kundanställd ser nu både egna reklamationer
+   (`customer_complaint`) och städar-rapporterade avvikelser (`cleaner_issue`) på sina
+   egna objekt. Städar-PII döljs fortsatt som "Städare" i klienten.
+3. **properties_customer (advisor ERROR)** → Fixad: vyn satt till `security_invoker = true`
+   (RLS på `properties` gäller nu anroparen, inte vyägaren).
+4. **anon-EXECUTE (advisor WARN)** → Fixad: `REVOKE EXECUTE ... FROM anon, PUBLIC` på
+   `admin_provision_user`, `generate_shifts_from_recurring`, `snapshot_checklist_for_shift`.
+5. **Mutabel search_path (advisor WARN)** → Fixad: `search_path = public` satt på
+   `is_last_weekday_of_month` och `recurring_matches_date`.
+
+Frontend: `db.incidents()` i `src/mock.jsx` visar nu båda ärendetyperna för kundroller
+(server-side RLS är den faktiska gränsen).
+
+### Bekräftad åtkomstmodell
+- **Admin**: endast egen organisations data (kunder, anställda, städare, rapporter) via `org_id = current_org_id()`.
+- **Städare**: egna pass (`cleaner_user_id = auth.uid()`), incheckning/utcheckning, egna avvikelser.
+- **Kund + kundanställd**: egna kontor, deras städningar (planerade + historiska) och avvikelser via `accessible_property_ids()` (kundanställd respekterar `scope`).
+
 ## 🚧 Kvarvarande åtgärder (rekommenderas)
 
-### Supabase Dashboard
-1. **Auth → Settings → Password Protection**: Aktivera HaveIBeenPwned check
-2. **Auth → Rate Limiting**: Konfigurera login attempts (standard är ofta tillräckligt)
+### Supabase Dashboard (manuellt)
+1. **Auth → Leaked Password Protection**: aktivera HaveIBeenPwned-kontroll (kan ej sättas via SQL/MCP).
+
+### Valfri härdning (fas 2)
+1. **Helper-funktioner exponerade som RPC för `authenticated`** (`is_admin()`, `current_org_id()` m.fl.):
+   låg risk eftersom de internt filtrerar på `auth.uid()` och endast returnerar anroparens egen
+   org/roll. RLS-policyerna kräver `EXECUTE`, så de kan inte enbart revokeras — full åtgärd kräver
+   att de flyttas till ett icke-exponerat schema och att alla policyer skrivs om. Skjuts upp för
+   att inte riskera live-driften nu.
 
 ### Production monitoring
 1. **Error tracking**: Överväg Sentry/LogRocket för produktionsfel
