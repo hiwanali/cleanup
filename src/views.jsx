@@ -3301,6 +3301,56 @@
     }
   }
 
+  function ChangePasswordCard({ className = '' }) {
+    const [pw1, setPw1] = useState('');
+    const [pw2, setPw2] = useState('');
+    const [saving, setSaving] = useState(false);
+    const [error, setError] = useState('');
+
+    if (!window.SUPABASE_ENABLED || !window.dbAuth) return null;
+
+    const valid = pw1.length >= 8 && pw1 === pw2;
+
+    async function submit() {
+      setError('');
+      if (pw1.length < 8) { setError('Lösenordet måste vara minst 8 tecken.'); return; }
+      if (pw1 !== pw2) { setError('Lösenorden matchar inte.'); return; }
+      setSaving(true);
+      try {
+        const r = await window.dbAuth.changeOwnPassword({ password: pw1 });
+        if (r?.ok) {
+          toast.success('Lösenordet uppdaterat.');
+          setPw1(''); setPw2('');
+        } else if (r?.code === 'WEAK_PASSWORD') {
+          setError('Lösenordet måste vara minst 8 tecken.');
+        } else if (r?.code === 'SAME_PASSWORD') {
+          setError('Välj ett lösenord som skiljer sig från det nuvarande.');
+        } else {
+          setError('Kunde inte uppdatera lösenordet. Försök igen.');
+        }
+      } finally {
+        setSaving(false);
+      }
+    }
+
+    return (
+      <Card padding="md" className={className}>
+        <h3 className="font-bold text-slate-900 mb-1">Byt lösenord</h3>
+        <p className="text-xs text-slate-500 mb-4">Uppdatera ditt inloggningslösenord. Minst 8 tecken.</p>
+        <Field label="Nytt lösenord *" className="mb-3">
+          <PasswordInput value={pw1} onChange={e => { setPw1(e.target.value); setError(''); }} placeholder="Minst 8 tecken" />
+        </Field>
+        <Field label="Bekräfta lösenord *" className="mb-3">
+          <PasswordInput value={pw2} onChange={e => { setPw2(e.target.value); setError(''); }} placeholder="Upprepa lösenord" />
+        </Field>
+        {error && <p className="text-xs text-rose-600 mb-3">{error}</p>}
+        <Button variant="primary" icon="key" disabled={!valid || saving} loading={saving} onClick={submit}>
+          {saving ? 'Uppdaterar…' : 'Uppdatera lösenord'}
+        </Button>
+      </Card>
+    );
+  }
+
   function AdminSettingsView({ session }) {
     useDb();
     const org = db.organizationForUser(session.userId);
@@ -3461,6 +3511,8 @@
             {saving ? 'Sparar…' : 'Spara inställningar'}
           </Button>
         </div>
+
+        <ChangePasswordCard className="mt-6 max-w-md" />
       </div>
     );
   }
@@ -3492,9 +3544,10 @@
               <div><dt className="text-xs text-slate-500">Åtkomst</dt><dd className="font-medium">{ce?.scope === 'all_properties' ? 'Alla objekt' : `${myProps.length} valda objekt`}</dd></div>
             </dl>
           </Card>
-          <Card padding="md" className="border-slate-200 bg-slate-50/60">
+          <Card padding="md" className="border-slate-200 bg-slate-50/60 mb-4">
             <p className="text-sm text-slate-600">Som kundanställd har du läsbehörighet. Be huvudkontakten ({main?.name}) om du behöver fler objekt eller vill lägga till kollegor.</p>
           </Card>
+          <ChangePasswordCard />
         </div>
       );
     }
@@ -3521,6 +3574,7 @@
               </div>
               <p className="text-xs text-slate-500">Org.nr {customer.org_number}. Ändring av företagsuppgifter görs via admin på CleanUp.</p>
             </Card>
+            <ChangePasswordCard className="mt-4" />
             {customer.notes && (
               <Card padding="md" className="mt-4">
                 <h3 className="font-bold text-slate-900 mb-2">Anteckningar från admin</h3>
