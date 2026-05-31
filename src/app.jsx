@@ -94,6 +94,7 @@
       { path: '/admin/schema', label: 'Schema', icon: 'calendar' },
       { path: '/admin/kunder', label: 'Kunder', icon: 'briefcase' },
       { path: '/admin/stadare', label: 'Städare', icon: 'users' },
+      { path: '/admin/meddelanden', label: 'Meddelanden', icon: 'message-square' },
       { path: '/admin/avvikelser', label: 'Avvikelser', icon: 'alert-triangle' },
       { path: '/admin/rapporter', label: 'Rapporter', icon: 'file-text' },
       { path: '/admin/installningar', label: 'Inställningar', icon: 'settings' },
@@ -106,6 +107,7 @@
     customer: [
       { path: '/kund/oversikt', label: 'Översikt', icon: 'home' },
       { path: '/kund/objekt', label: 'Objekt', icon: 'building' },
+      { path: '/kund/meddelanden', label: 'Meddelanden', icon: 'message-square' },
       { path: '/kund/ledighet', label: 'Ledighet', icon: 'pause' },
       { path: '/kund/avvikelser', label: 'Avvikelser', icon: 'alert-triangle' },
       { path: '/kund/rapporter', label: 'Rapporter', icon: 'file-text' },
@@ -114,6 +116,7 @@
     customer_employee: [
       { path: '/kund/oversikt', label: 'Översikt', icon: 'home' },
       { path: '/kund/objekt', label: 'Objekt', icon: 'building' },
+      { path: '/kund/meddelanden', label: 'Meddelanden', icon: 'message-square' },
       { path: '/kund/avvikelser', label: 'Avvikelser', icon: 'alert-triangle' },
       { path: '/kund/installningar', label: 'Inställningar', icon: 'settings' },
     ],
@@ -127,7 +130,9 @@
    * Layout: Sidebar
    * ============================================================ */
   function Sidebar({ session, currentPath, onNavigate, onClose }) {
+    useDb();
     const nav = NAV[session.role] || [];
+    const unreadMessages = db.unreadMessageCount(session.userId);
     return (
       <aside className="h-full w-64 bg-white border-r border-slate-200 flex flex-col">
         <div className="px-5 py-5 border-b border-slate-100 flex items-center gap-2.5">
@@ -141,6 +146,7 @@
         <nav className="flex-1 overflow-y-auto py-3 px-3 space-y-0.5">
           {nav.map(item => {
             const active = currentPath.startsWith(item.path);
+            const badge = item.path.endsWith('/meddelanden') ? unreadMessages : 0;
             return (
               <button
                 key={item.path}
@@ -152,6 +158,11 @@
               >
                 <Icon name={item.icon} className="w-5 h-5" />
                 <span className="flex-1 text-left">{item.label}</span>
+                {badge > 0 && (
+                  <span className="min-w-[20px] h-5 px-1.5 rounded-full bg-brand-600 text-white text-[11px] font-bold flex items-center justify-center">
+                    {badge > 9 ? '9+' : badge}
+                  </span>
+                )}
               </button>
             );
           })}
@@ -279,6 +290,12 @@
           return { title: 'Ditt ärende är åtgärdat', body: '', icon: 'check-circle', tone: 'emerald' };
         case 'incident_in_progress':
           return { title: 'Ditt ärende behandlas', body: '', icon: 'refresh', tone: 'brand' };
+        case 'shift_will_be_missed':
+          return { title: 'Pass kommer inte att utföras', body: prop ? `${prop.name} · ${formatDateTime(n.payload.start_at)}` : '', icon: 'alert-circle', tone: 'amber' };
+        case 'new_message':
+          return { title: 'Nytt meddelande', body: '', icon: 'message-square', tone: 'brand' };
+        case 'shift_request_created':
+          return { title: 'Nytt önskemål från kund', body: prop ? prop.name : '', icon: 'message-square', tone: 'sky' };
         default:
           return { title: n.kind, body: '', icon: 'bell', tone: 'slate' };
       }
@@ -378,6 +395,7 @@
     if (matchPath(path, '/admin/stadare')) return <ComingSoonView title="Städare" section="§4 + §7.7" description="Lista över städare, profiler och tilldelningar till objekt." />;
     if ((m = matchPath(path, '/admin/avvikelser/:id'))) return <IncidentDetailView session={session} onNavigate={navigate} incidentId={m.id} />;
     if (matchPath(path, '/admin/avvikelser')) return <AdminIncidentsView session={session} onNavigate={navigate} />;
+    if (matchPath(path, '/admin/meddelanden')) return <MessagesView session={session} onNavigate={navigate} />;
     if (matchPath(path, '/admin/installningar')) return <AdminSettingsView session={session} />;
 
     // —— CLEANER ——
@@ -394,6 +412,7 @@
     if (matchPath(path, '/kund/ledighet')) return <CustomerHolidayView session={session} onNavigate={navigate} />;
     if ((m = matchPath(path, '/kund/avvikelser/:id'))) return <IncidentDetailView session={session} onNavigate={navigate} incidentId={m.id} />;
     if (matchPath(path, '/kund/avvikelser')) return <CustomerIncidentsView session={session} onNavigate={navigate} />;
+    if (matchPath(path, '/kund/meddelanden')) return <MessagesView session={session} onNavigate={navigate} />;
     if (matchPath(path, '/kund/rapporter')) return <CustomerReportsView session={session} />;
     if (matchPath(path, '/kund/installningar')) return <CustomerSettingsView session={session} />;
 

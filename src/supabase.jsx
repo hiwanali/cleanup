@@ -49,6 +49,10 @@
     customer_holiday_properties: [],
     incidents: ['resolved_at', 'created_at', 'updated_at'],
     notifications: ['read_at', 'created_at'],
+    message_threads: ['created_at', 'last_message_at'],
+    messages: ['created_at'],
+    thread_reads: ['last_read_at'],
+    shift_requests: ['created_at'],
   };
 
   function convertRow(table, row) {
@@ -102,6 +106,10 @@
       customer_holiday_properties,
       incidents,
       notifications,
+      message_threads,
+      messages,
+      thread_reads,
+      shift_requests,
     ] = await Promise.all([
       fetchTable('organizations'),
       fetchTable('customers'),
@@ -119,6 +127,10 @@
       fetchTable('customer_holiday_properties'),
       fetchTable('incidents'),
       fetchTable('notifications'),
+      fetchTable('message_threads'),
+      fetchTable('messages'),
+      fetchTable('thread_reads'),
+      fetchTable('shift_requests'),
     ]);
 
     // Vyn saknar access_info – lägg till tom sträng så vy-koden inte kraschar
@@ -141,6 +153,10 @@
       customer_holiday_properties,
       incidents,
       notifications,
+      message_threads,
+      messages,
+      thread_reads,
+      shift_requests,
     };
   }
 
@@ -166,6 +182,60 @@
     if (d == null) return null;
     if (d instanceof Date) return d.toISOString();
     return d;
+  }
+
+  function serializeNotificationPayload(payload) {
+    if (!payload || typeof payload !== 'object') return {};
+    const out = {};
+    Object.keys(payload).forEach((k) => {
+      const v = payload[k];
+      if (v instanceof Date) out[k] = v.toISOString();
+      else if (v != null && typeof v === 'object' && !Array.isArray(v)) out[k] = serializeNotificationPayload(v);
+      else out[k] = v;
+    });
+    return out;
+  }
+
+  async function invokeNotificationEmail(notificationId) {
+    if (!enabled || !sb || !isUuid(notificationId)) return;
+    try {
+      await sb.functions.invoke('send-notification-email', {
+        body: { record: { id: notificationId } },
+      });
+    } catch (e) {
+      console.warn('[persist] notification email:', e?.message || e);
+    }
+  }
+
+  /** Persisterar notiser via RPC (samma org) och triggar Resend per rad. */
+  async function persistInsertNotifications(rows) {
+    if (!enabled || !sb || !rows?.length) {
+      return { ok: true, skipped: true };
+    }
+
+    const filtered = rows.filter((r) => r.recipient_user_id && isUuid(r.recipient_user_id) && r.kind);
+    if (!filtered.length) {
+      return { ok: true, skipped: true };
+    }
+
+    const p_rows = filtered.map((r) => ({
+      recipient_user_id: r.recipient_user_id,
+      kind: r.kind,
+      payload: serializeNotificationPayload(r.payload),
+    }));
+
+    const { data, error } = await sb.rpc('insert_notifications', { p_rows });
+    if (error) {
+      console.error('[persist] insertNotifications:', error.message);
+      return { ok: false, message: error.message };
+    }
+
+    const ids = Array.isArray(data) ? data : [];
+    ids.forEach((nid) => {
+      invokeNotificationEmail(nid);
+    });
+
+    return { ok: true, ids };
   }
 
   /** §7.4 admin tar bort pass – körs endast när id är UUID (hydrerad Supabase-data). */
@@ -194,38 +264,6 @@
     if (evErr) {
       console.error('[persist] adminDelete shift_events:', evErr.message);
       return { ok: false, message: evErr.message };
-    }
-
-    const notifPayload = {
-      shift_id: shiftId,
-      property_id: shift.property_id,
-      start_at: toIso(shift.start_at),
-    };
-
-    const rows = [];
-    if (shift.cleaner_user_id && isUuid(shift.cleaner_user_id)) {
-      rows.push({
-        recipient_user_id: shift.cleaner_user_id,
-        channel: 'in_app',
-        kind: 'admin_deleted',
-        payload: notifPayload,
-      });
-    }
-    if (primaryContactUserId && isUuid(primaryContactUserId)) {
-      rows.push({
-        recipient_user_id: primaryContactUserId,
-        channel: 'in_app',
-        kind: 'admin_deleted',
-        payload: notifPayload,
-      });
-    }
-
-    if (rows.length > 0) {
-      const { error: nErr } = await sb.from('notifications').insert(rows);
-      if (nErr) {
-        console.error('[persist] adminDelete notifications:', nErr.message);
-        return { ok: false, message: nErr.message };
-      }
     }
 
     return { ok: true };
@@ -493,6 +531,21 @@
         { event: '*', schema: 'public', table: 'incidents' },
         () => scheduleHydrateFromRealtime(userId),
       )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'messages' },
+        () => scheduleHydrateFromRealtime(userId),
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'message_threads' },
+        () => scheduleHydrateFromRealtime(userId),
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'shift_requests' },
+        () => scheduleHydrateFromRealtime(userId),
+      )
       .subscribe((status) => {
         if (status === 'CHANNEL_ERROR') {
           console.error('[realtime] channel error');
@@ -554,35 +607,6 @@
       return { ok: false, message: evErr.message };
     }
 
-    const notifPayload = {
-      shift_id: shiftId,
-      property_id: shift.property_id,
-      start_at: toIso(shift.start_at),
-    };
-
-    const rows = [];
-    if (shift.cleaner_user_id && isUuid(shift.cleaner_user_id)) {
-      rows.push({
-        recipient_user_id: shift.cleaner_user_id,
-        channel: 'in_app',
-        kind: 'assigned_shift',
-        payload: notifPayload,
-      });
-    }
-    if (primaryContactUserId && isUuid(primaryContactUserId)) {
-      rows.push({
-        recipient_user_id: primaryContactUserId,
-        channel: 'in_app',
-        kind: 'assigned_shift',
-        payload: notifPayload,
-      });
-    }
-
-    if (rows.length > 0) {
-      const { error: nErr } = await sb.from('notifications').insert(rows);
-      if (nErr) return { ok: false, message: nErr.message };
-    }
-
     return { ok: true };
   }
 
@@ -606,34 +630,6 @@
       event_type: 'shift_declined',
       payload: { hours_to_start: hoursToStart },
     });
-
-    const notifPayload = {
-      shift_id: shiftId,
-      property_id: shift.property_id,
-      start_at: toIso(shift.start_at),
-    };
-
-    const rows = [];
-    if (shift.cleaner_user_id && isUuid(shift.cleaner_user_id)) {
-      rows.push({
-        recipient_user_id: shift.cleaner_user_id,
-        channel: 'in_app',
-        kind: 'admin_deleted',
-        payload: notifPayload,
-      });
-    }
-    if (primaryContactUserId && isUuid(primaryContactUserId)) {
-      rows.push({
-        recipient_user_id: primaryContactUserId,
-        channel: 'in_app',
-        kind: 'admin_deleted',
-        payload: notifPayload,
-      });
-    }
-
-    if (rows.length > 0) {
-      await sb.from('notifications').insert(rows);
-    }
 
     return { ok: true };
   }
@@ -875,7 +871,126 @@
     return { ok: true };
   }
 
+  /** Skapar tråd vid behov + infogar meddelande och bumpar last_message_at. */
+  async function persistSendMessage({ threadId, customerId, orgId, senderUserId, senderRole, body }) {
+    if (!enabled || !sb || !isUuid(senderUserId) || !isUuid(customerId)) {
+      return { ok: true, skipped: true };
+    }
+
+    let resolvedThreadId = isUuid(threadId) ? threadId : null;
+
+    if (!resolvedThreadId) {
+      // Hämta befintlig tråd för kunden eller skapa en ny (en tråd per kund).
+      const { data: existing } = await sb
+        .from('message_threads')
+        .select('id')
+        .eq('customer_id', customerId)
+        .maybeSingle();
+
+      if (existing) {
+        resolvedThreadId = existing.id;
+      } else {
+        if (!isUuid(orgId)) return { ok: true, skipped: true };
+        const { data: created, error: threadErr } = await sb
+          .from('message_threads')
+          .insert({ org_id: orgId, customer_id: customerId })
+          .select('id')
+          .single();
+        if (threadErr) {
+          console.error('[persist] sendMessage thread:', threadErr.message);
+          return { ok: false, message: threadErr.message };
+        }
+        resolvedThreadId = created.id;
+      }
+    }
+
+    const { data: msg, error: msgErr } = await sb
+      .from('messages')
+      .insert({
+        thread_id: resolvedThreadId,
+        sender_user_id: senderUserId,
+        sender_role: senderRole,
+        body,
+      })
+      .select('id, created_at')
+      .single();
+
+    if (msgErr) {
+      console.error('[persist] sendMessage message:', msgErr.message);
+      return { ok: false, message: msgErr.message };
+    }
+
+    await sb
+      .from('message_threads')
+      .update({ last_message_at: toIso(msg.created_at) })
+      .eq('id', resolvedThreadId);
+
+    return { ok: true, threadId: resolvedThreadId, messageId: msg.id };
+  }
+
+  /** Sätter/uppdaterar användarens läsmarkör för en tråd. */
+  async function persistMarkThreadRead({ threadId, userId }) {
+    if (!enabled || !sb || !isUuid(threadId) || !isUuid(userId)) {
+      return { ok: true, skipped: true };
+    }
+
+    const { error } = await sb
+      .from('thread_reads')
+      .upsert(
+        { thread_id: threadId, user_id: userId, last_read_at: new Date().toISOString() },
+        { onConflict: 'thread_id,user_id' },
+      );
+
+    if (error) {
+      console.error('[persist] markThreadRead:', error.message);
+      return { ok: false, message: error.message };
+    }
+
+    return { ok: true };
+  }
+
+  /** Kundens önskemål per pass (engångs) eller stående (objekt). */
+  async function persistCreateShiftRequest({ request }) {
+    if (!enabled || !sb || !isUuid(request.id) || !isUuid(request.property_id)) {
+      return { ok: true, skipped: true };
+    }
+
+    const { error } = await sb.from('shift_requests').insert({
+      id: request.id,
+      org_id: request.org_id,
+      property_id: request.property_id,
+      shift_id: request.scope === 'single' && isUuid(request.shift_id) ? request.shift_id : null,
+      scope: request.scope,
+      body: request.body,
+      created_by_user_id: request.created_by_user_id,
+      created_by_role: request.created_by_role,
+    });
+
+    if (error) {
+      console.error('[persist] createShiftRequest:', error.message);
+      return { ok: false, message: error.message };
+    }
+
+    return { ok: true };
+  }
+
+  async function persistDeleteShiftRequest({ requestId }) {
+    if (!enabled || !sb || !isUuid(requestId)) {
+      return { ok: true, skipped: true };
+    }
+
+    const { error } = await sb.from('shift_requests').delete().eq('id', requestId);
+
+    if (error) {
+      console.error('[persist] deleteShiftRequest:', error.message);
+      return { ok: false, message: error.message };
+    }
+
+    return { ok: true };
+  }
+
   window.dbPersist = {
+    insertNotifications: persistInsertNotifications,
     adminDelete: persistAdminDelete,
     updateCustomer: persistUpdateCustomer,
     updateProperty: persistUpdateProperty,
@@ -891,5 +1006,9 @@
     checkOut: persistCheckOut,
     createRecurringSchedule: persistCreateRecurringSchedule,
     deleteRecurringSchedule: persistDeleteRecurringSchedule,
+    sendMessage: persistSendMessage,
+    markThreadRead: persistMarkThreadRead,
+    createShiftRequest: persistCreateShiftRequest,
+    deleteShiftRequest: persistDeleteShiftRequest,
   };
 })();

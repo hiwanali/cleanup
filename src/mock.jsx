@@ -101,6 +101,10 @@
     customer_holiday_properties: [],
     incidents: [],
     notifications: [],
+    message_threads: [],
+    messages: [],
+    thread_reads: [],
+    shift_requests: [],
   };
 
   /* ============================================================
@@ -324,11 +328,58 @@
 
     // Seed-kundledighet (4 dagar framåt om 14 dagar) - bara förslag, inte registrerad än
     // (skapas i UI:n istället)
+
+    // Seed-meddelandetråd (Acme <-> admin)
+    const acmeThread = { id: id('mt'), org_id: org.id, customer_id: acme.id, created_at: new Date(Date.now() - 50 * 3600 * 1000), last_message_at: new Date(Date.now() - 26 * 3600 * 1000) };
+    state.message_threads.push(acmeThread);
+    state.messages.push(
+      { id: id('msg'), thread_id: acmeThread.id, sender_user_id: custErik.id, sender_role: 'customer', body: 'Hej! Går det bra att städningen börjar 07:00 istället för 06:30 på torsdag?', created_at: new Date(Date.now() - 49 * 3600 * 1000) },
+      { id: id('msg'), thread_id: acmeThread.id, sender_user_id: admin.id, sender_role: 'admin', body: 'Hej Erik! Absolut, jag noterar det. Trevlig vecka!', created_at: new Date(Date.now() - 26 * 3600 * 1000) },
+    );
+    // Admin har läst, Erik har inte läst admins svar
+    state.thread_reads.push({ thread_id: acmeThread.id, user_id: admin.id, last_read_at: new Date(Date.now() - 25 * 3600 * 1000) });
+
+    // Seed-önskemål: ett stående på Acme HQ + ett engångs på närmaste kommande pass
+    state.shift_requests.push({
+      id: id('sr'), org_id: org.id, property_id: acmeHQ.id, shift_id: null, scope: 'standing',
+      body: 'Vänligen vattna växterna i receptionen vid varje städning.',
+      created_by_user_id: custErik.id, created_by_role: 'customer',
+      created_at: new Date(Date.now() - 40 * 3600 * 1000),
+    });
+    const acmeUpcoming = state.shifts
+      .filter(s => s.property_id === acmeHQ.id && new Date(s.start_at).getTime() > Date.now() && !['Borttaget', 'Avbokat'].includes(s.status))
+      .sort((a, b) => new Date(a.start_at) - new Date(b.start_at))[0];
+    if (acmeUpcoming) {
+      state.shift_requests.push({
+        id: id('sr'), org_id: org.id, property_id: acmeHQ.id, shift_id: acmeUpcoming.id, scope: 'single',
+        body: 'Konferensrummet är bokat hela dagen – hoppa över det vid det här tillfället.',
+        created_by_user_id: custErik.id, created_by_role: 'customer',
+        created_at: new Date(Date.now() - 5 * 3600 * 1000),
+      });
+    }
   }
 
   /* ============================================================
    * Notiser
    * ============================================================ */
+  const NOTIF_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  let notifPersistQueue = [];
+  let notifPersistScheduled = false;
+
+  function scheduleNotificationPersist() {
+    if (notifPersistScheduled) return;
+    notifPersistScheduled = true;
+    setTimeout(() => {
+      notifPersistScheduled = false;
+      const batch = notifPersistQueue.splice(0);
+      if (!batch.length) return;
+      const persist = window.dbPersist && window.dbPersist.insertNotifications;
+      if (persist) {
+        persist(batch).catch(() => {});
+      }
+    }, 0);
+  }
+
   function pushNotification(recipientUserId, kind, payload) {
     state.notifications.push({
       id: id('n'),
@@ -339,6 +390,10 @@
       read_at: null,
       created_at: new Date(),
     });
+    if (NOTIF_UUID_RE.test(String(recipientUserId))) {
+      notifPersistQueue.push({ recipient_user_id: recipientUserId, kind, payload });
+      scheduleNotificationPersist();
+    }
   }
 
   // Snapshot av mall-checklistan till ett pass i state.shifts (index i state.shifts)
@@ -566,6 +621,247 @@
         }
       }
 
+      return { ok: true };
+    },
+
+    /* ============================================================
+     * Meddelanden (kund <-> admin) — en tråd per kund
+     * ============================================================ */
+    threadForCustomer(customerId) {
+      return state.message_threads.find(t => t.customer_id === customerId) || null;
+    },
+    threadById(threadId) {
+      return state.message_threads.find(t => t.id === threadId) || null;
+    },
+    messagesForThread(threadId) {
+      return state.messages
+        .filter(m => m.thread_id === threadId)
+        .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+    },
+    // Tråden för inloggad användare (admin väljer kund separat, kund har en enda)
+    threadForUser(userId) {
+      const cust = db.customerForUser(userId);
+      return cust ? db.threadForCustomer(cust.id) : null;
+    },
+    // Admins trådlista – en rad per kund med senaste meddelande + oläst-flagga
+    threadsForAdmin(adminUserId) {
+      return state.customers
+        .map(c => {
+          const thread = db.threadForCustomer(c.id);
+          const msgs = thread ? db.messagesForThread(thread.id) : [];
+          const last = msgs[msgs.length - 1] || null;
+          return {
+            customer: c,
+            thread,
+            lastMessage: last,
+            lastAt: thread ? thread.last_message_at : null,
+            unread: thread ? db.unreadInThread(thread.id, adminUserId) : 0,
+          };
+        })
+        .sort((a, b) => {
+          if (!a.lastAt && !b.lastAt) return a.customer.name.localeCompare(b.customer.name);
+          if (!a.lastAt) return 1;
+          if (!b.lastAt) return -1;
+          return new Date(b.lastAt) - new Date(a.lastAt);
+        });
+    },
+    // Antal olästa meddelanden i en tråd för en användare (exkl. egna)
+    unreadInThread(threadId, userId) {
+      const read = state.thread_reads.find(r => r.thread_id === threadId && r.user_id === userId);
+      const since = read ? new Date(read.last_read_at).getTime() : 0;
+      return state.messages.filter(m =>
+        m.thread_id === threadId &&
+        m.sender_user_id !== userId &&
+        new Date(m.created_at).getTime() > since,
+      ).length;
+    },
+    // Totalt olästa meddelanden för menybadge
+    unreadMessageCount(userId) {
+      const user = db.userById(userId);
+      if (!user) return 0;
+      if (user.role === 'admin') {
+        return state.message_threads.reduce((sum, t) => sum + db.unreadInThread(t.id, userId), 0);
+      }
+      const thread = db.threadForUser(userId);
+      return thread ? db.unreadInThread(thread.id, userId) : 0;
+    },
+
+    // Skicka meddelande. Skapar tråd vid behov. Notifierar motpart(er).
+    async sendMessage({ customerId, senderUserId, body }) {
+      const text = (body || '').trim();
+      if (!text) return { error: 'EMPTY' };
+      const sender = db.userById(senderUserId);
+      if (!sender) return { error: 'NO_SENDER' };
+      const cust = db.customerById(customerId);
+      if (!cust) return { error: 'NO_CUSTOMER' };
+
+      let thread = db.threadForCustomer(customerId);
+      let createdThread = null;
+      if (!thread) {
+        thread = { id: id('mt'), org_id: cust.org_id, customer_id: customerId, created_at: new Date(), last_message_at: new Date() };
+        state.message_threads.push(thread);
+        createdThread = thread;
+      }
+
+      const msg = {
+        id: id('msg'),
+        thread_id: thread.id,
+        sender_user_id: senderUserId,
+        sender_role: sender.role,
+        body: text,
+        created_at: new Date(),
+      };
+      state.messages.push(msg);
+      const prevLastAt = thread.last_message_at;
+      thread.last_message_at = msg.created_at;
+
+      // Avsändaren räknas som läst fram till nu
+      db._setThreadReadLocal(thread.id, senderUserId, msg.created_at);
+
+      // Notiser till motpart(er)
+      if (sender.role === 'admin') {
+        if (cust.primary_contact_user_id) pushNotification(cust.primary_contact_user_id, 'new_message', { thread_id: thread.id, customer_id: customerId });
+        state.customer_employees.filter(ce => ce.customer_id === customerId).forEach(ce => pushNotification(ce.user_id, 'new_message', { thread_id: thread.id, customer_id: customerId }));
+      } else {
+        state.users.filter(u => u.role === 'admin').forEach(a => pushNotification(a.id, 'new_message', { thread_id: thread.id, customer_id: customerId }));
+      }
+      bump();
+
+      const persist = window.dbPersist && window.dbPersist.sendMessage;
+      if (persist) {
+        const r = await persist({
+          threadId: thread.id,
+          customerId,
+          orgId: cust.org_id,
+          senderUserId,
+          senderRole: sender.role,
+          body: text,
+        });
+        if (!r.ok) {
+          // Rulla tillbaka
+          state.messages = state.messages.filter(m => m.id !== msg.id);
+          if (createdThread) {
+            state.message_threads = state.message_threads.filter(t => t.id !== createdThread.id);
+          } else {
+            thread.last_message_at = prevLastAt;
+          }
+          bump();
+          return { error: 'PERSIST_FAILED', message: r.message };
+        }
+      }
+
+      return { ok: true, message: msg };
+    },
+
+    // Lokal uppdatering av läsmarkör (utan persist)
+    _setThreadReadLocal(threadId, userId, at) {
+      const existing = state.thread_reads.find(r => r.thread_id === threadId && r.user_id === userId);
+      if (existing) existing.last_read_at = at;
+      else state.thread_reads.push({ thread_id: threadId, user_id: userId, last_read_at: at });
+    },
+
+    // Markera tråd som läst för en användare
+    async markThreadRead(threadId, userId) {
+      if (!threadId || !userId) return { ok: true };
+      const existing = state.thread_reads.find(r => r.thread_id === threadId && r.user_id === userId);
+      const snapshot = existing ? existing.last_read_at : null;
+      db._setThreadReadLocal(threadId, userId, new Date());
+      bump();
+
+      const persist = window.dbPersist && window.dbPersist.markThreadRead;
+      if (persist) {
+        const r = await persist({ threadId, userId });
+        if (!r.ok) {
+          const rec = state.thread_reads.find(x => x.thread_id === threadId && x.user_id === userId);
+          if (rec) {
+            if (snapshot) rec.last_read_at = snapshot;
+            else state.thread_reads = state.thread_reads.filter(x => !(x.thread_id === threadId && x.user_id === userId));
+          }
+          bump();
+          return { error: 'PERSIST_FAILED', message: r.message };
+        }
+      }
+      return { ok: true };
+    },
+
+    /* ============================================================
+     * Önskemål per städtillfälle (kund -> städare + admin)
+     * ============================================================ */
+    // Önskemål synliga på ett pass: engångs på passet + stående på objektet
+    requestsForShift(shift) {
+      if (!shift) return [];
+      return state.shift_requests
+        .filter(r =>
+          (r.scope === 'single' && r.shift_id === shift.id) ||
+          (r.scope === 'standing' && r.property_id === shift.property_id),
+        )
+        .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    },
+    standingRequestsForProperty(propertyId) {
+      return state.shift_requests
+        .filter(r => r.scope === 'standing' && r.property_id === propertyId)
+        .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    },
+
+    // Kund skapar önskemål (scope 'single' kräver shiftId, 'standing' gäller objektet)
+    async createShiftRequest({ propertyId, shiftId, scope, body, createdByUserId }) {
+      const text = (body || '').trim();
+      if (!text) return { error: 'EMPTY' };
+      const user = db.userById(createdByUserId);
+      if (!user || (user.role !== 'customer' && user.role !== 'customer_employee')) return { error: 'FORBIDDEN' };
+      const prop = db.propertyById(propertyId);
+      if (!prop) return { error: 'NO_PROPERTY' };
+
+      const request = {
+        id: id('sr'),
+        org_id: state.organizations[0].id,
+        property_id: propertyId,
+        shift_id: scope === 'single' ? shiftId : null,
+        scope,
+        body: text,
+        created_by_user_id: createdByUserId,
+        created_by_role: user.role,
+        created_at: new Date(),
+      };
+      state.shift_requests.push(request);
+
+      // Notis till admin + (för engångsönskemål) tilldelad städare
+      state.users.filter(u => u.role === 'admin').forEach(a => pushNotification(a.id, 'shift_request_created', { request_id: request.id, property_id: propertyId, scope }));
+      if (scope === 'single' && shiftId) {
+        const sh = db.shiftById(shiftId);
+        if (sh && sh.cleaner_user_id) pushNotification(sh.cleaner_user_id, 'shift_request_created', { request_id: request.id, property_id: propertyId, shift_id: shiftId, scope });
+      }
+      bump();
+
+      const persist = window.dbPersist && window.dbPersist.createShiftRequest;
+      if (persist) {
+        const r = await persist({ request });
+        if (!r.ok) {
+          state.shift_requests = state.shift_requests.filter(x => x.id !== request.id);
+          bump();
+          return { error: 'PERSIST_FAILED', message: r.message };
+        }
+      }
+
+      return { ok: true, request };
+    },
+
+    async deleteShiftRequest(requestId) {
+      const idx = state.shift_requests.findIndex(r => r.id === requestId);
+      if (idx === -1) return { ok: true };
+      const removed = state.shift_requests[idx];
+      state.shift_requests.splice(idx, 1);
+      bump();
+
+      const persist = window.dbPersist && window.dbPersist.deleteShiftRequest;
+      if (persist) {
+        const r = await persist({ requestId });
+        if (!r.ok) {
+          state.shift_requests.splice(idx, 0, removed);
+          bump();
+          return { error: 'PERSIST_FAILED', message: r.message };
+        }
+      }
       return { ok: true };
     },
 

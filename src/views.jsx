@@ -205,6 +205,135 @@
   /* ============================================================
    * ShiftDetail – återanvänds av cleaner/customer (admin senare)
    * ============================================================ */
+  /* Önskemål per städtillfälle (kund -> städare + admin) */
+  function ShiftRequestsSection({ shift, session }) {
+    useDb();
+    const role = session.user.role;
+    const isCustomerView = role === 'customer' || role === 'customer_employee';
+    const requests = db.requestsForShift(shift);
+
+    const [body, setBody] = useState('');
+    const [scope, setScope] = useState('single');
+    const [saving, setSaving] = useState(false);
+
+    const terminal = ['Utfört', 'Borttaget', 'Avbokat'].includes(shift.status);
+    const canAdd = isCustomerView && !terminal;
+
+    async function submit() {
+      const text = body.trim();
+      if (text.length < 3 || saving) return;
+      setSaving(true);
+      const r = await db.createShiftRequest({
+        propertyId: shift.property_id,
+        shiftId: shift.id,
+        scope,
+        body: text,
+        createdByUserId: session.userId,
+      });
+      setSaving(false);
+      if (r?.ok) {
+        setBody('');
+        setScope('single');
+        toast.success(scope === 'standing' ? 'Stående önskemål sparat.' : 'Önskemål skickat till städaren.');
+      } else if (r?.error === 'PERSIST_FAILED') {
+        toast.error('Kunde inte spara – försök igen.');
+      }
+    }
+
+    function creatorLabel(r) {
+      if (r.created_by_user_id === session.userId) return 'Du';
+      if (role === 'admin') return db.userById(r.created_by_user_id)?.name || 'Kund';
+      return 'Kund';
+    }
+
+    return (
+      <Card padding="md">
+        <div className="flex items-start justify-between mb-3">
+          <div>
+            <h3 className="font-bold text-slate-900">Önskemål för städningen</h3>
+            <p className="text-xs text-slate-500 mt-0.5">
+              {isCustomerView
+                ? 'Lägg till önskemål som städaren och admin ser inför passet.'
+                : 'Kundens önskemål för det här passet och stående önskemål för objektet.'}
+            </p>
+          </div>
+          <Icon name="message-square" className="w-5 h-5 text-slate-300" />
+        </div>
+
+        {requests.length === 0 ? (
+          <EmptyState icon="info" title="Inga önskemål" description={isCustomerView ? 'Skriv ett önskemål nedan.' : 'Kunden har inte lämnat några önskemål.'} className="py-6" />
+        ) : (
+          <ul className="space-y-2.5 mb-1">
+            {requests.map(r => {
+              const canDelete = role === 'admin' || r.created_by_user_id === session.userId;
+              return (
+                <li key={r.id} className="flex items-start gap-3 p-3 rounded-xl bg-slate-50 border border-slate-100">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1 flex-wrap">
+                      <Badge variant={r.scope === 'standing' ? 'brand' : 'slate'}>
+                        {r.scope === 'standing' ? 'Stående' : 'Detta pass'}
+                      </Badge>
+                      <span className="text-[11px] text-slate-400">{creatorLabel(r)} · {formatDateTime(r.created_at)}</span>
+                    </div>
+                    <p className="text-sm text-slate-800 whitespace-pre-wrap break-words">{r.body}</p>
+                  </div>
+                  {canDelete && (
+                    <button
+                      onClick={async () => {
+                        const res = await db.deleteShiftRequest(r.id);
+                        if (res?.ok) toast.success('Önskemål borttaget.');
+                        else if (res?.error === 'PERSIST_FAILED') toast.error('Kunde inte ta bort – försök igen.');
+                      }}
+                      className="text-slate-400 hover:text-rose-600 p-1 rounded-lg flex-shrink-0"
+                      aria-label="Ta bort önskemål"
+                      title="Ta bort"
+                    >
+                      <Icon name="trash" className="w-4 h-4" />
+                    </button>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+
+        {canAdd && (
+          <div className="mt-4 pt-4 border-t border-slate-100">
+            <Field label="Nytt önskemål" hint="Minst 3 tecken.">
+              <Textarea
+                rows={2}
+                value={body}
+                onChange={e => setBody(e.target.value)}
+                placeholder="T.ex. Vänligen vattna växterna i receptionen."
+              />
+            </Field>
+            <div className="flex flex-col sm:flex-row sm:items-center gap-3 mt-2">
+              <div className="flex rounded-lg border border-slate-200 overflow-hidden text-sm">
+                <button
+                  type="button"
+                  onClick={() => setScope('single')}
+                  className={cx('px-3 py-1.5 font-medium transition-colors', scope === 'single' ? 'bg-brand-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50')}
+                >
+                  Bara detta pass
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setScope('standing')}
+                  className={cx('px-3 py-1.5 font-medium transition-colors border-l border-slate-200', scope === 'standing' ? 'bg-brand-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50')}
+                >
+                  Gäller tills vidare
+                </button>
+              </div>
+              <Button variant="primary" icon="send" disabled={body.trim().length < 3 || saving} onClick={submit} className="sm:ml-auto">
+                Lägg till
+              </Button>
+            </div>
+          </div>
+        )}
+      </Card>
+    );
+  }
+
   function ShiftDetail({ shift, session, onBack, breadcrumbs }) {
     useDb();
     const prop = db.propertyById(shift.property_id);
@@ -330,6 +459,9 @@
                 </ul>
               )}
             </Card>
+
+            {/* Önskemål per städtillfälle — kund skriver, städare + admin ser */}
+            <ShiftRequestsSection shift={shift} session={session} />
 
             {/* §7.6 Avvikelse / reklamation — formulär + lista */}
             {isOwnerCleaner && <CleanerIncidentSection shift={shift} session={session} />}
@@ -2161,6 +2293,187 @@
       onBack={() => onNavigate('/kund/oversikt')}
       breadcrumbs={[{ label: 'Översikt', href: '#/kund/oversikt' }, { label: relativeDay(shift.start_at) }]}
     />;
+  }
+
+  /* ============================================================
+   * MEDDELANDEN · Realtidsdialog kund <-> admin
+   * ============================================================ */
+  function MessageBubble({ message, isMine, senderName }) {
+    return (
+      <div className={cx('flex flex-col max-w-[78%]', isMine ? 'items-end self-end' : 'items-start self-start')}>
+        <div className={cx(
+          'px-3.5 py-2 rounded-2xl text-sm whitespace-pre-wrap break-words',
+          isMine ? 'bg-brand-600 text-white rounded-br-sm' : 'bg-white border border-slate-200 text-slate-800 rounded-bl-sm',
+        )}>
+          {message.body}
+        </div>
+        <span className="text-[11px] text-slate-400 mt-1 px-1">
+          {senderName} · {formatDateTime(message.created_at)}
+        </span>
+      </div>
+    );
+  }
+
+  function ConversationPanel({ customerId, session, heightClass = 'h-[60vh]' }) {
+    useDb();
+    const scrollRef = React.useRef(null);
+    const [draft, setDraft] = useState('');
+    const [sending, setSending] = useState(false);
+
+    const thread = db.threadForCustomer(customerId);
+    const messages = thread ? db.messagesForThread(thread.id) : [];
+    const role = session.user.role;
+    const isAdmin = role === 'admin';
+
+    // Markera tråden som läst när den visas / nya meddelanden kommer
+    useEffect(() => {
+      if (thread && db.unreadInThread(thread.id, session.userId) > 0) {
+        db.markThreadRead(thread.id, session.userId);
+      }
+    }, [thread?.id, messages.length, session.userId]);
+
+    useEffect(() => {
+      const el = scrollRef.current;
+      if (el) el.scrollTop = el.scrollHeight;
+    }, [messages.length, customerId]);
+
+    function senderLabelFor(m) {
+      if (m.sender_user_id === session.userId) return 'Du';
+      if (isAdmin) {
+        const u = db.userById(m.sender_user_id);
+        return u ? u.name : 'Kund';
+      }
+      // Kundvy: alla admins visas som supportteamet
+      return m.sender_role === 'admin' ? 'CleanUp' : (db.userById(m.sender_user_id)?.name || 'Kollega');
+    }
+
+    async function send() {
+      const text = draft.trim();
+      if (!text || sending) return;
+      setSending(true);
+      const r = await db.sendMessage({ customerId, senderUserId: session.userId, body: text });
+      setSending(false);
+      if (r?.ok) setDraft('');
+      else if (r?.error === 'PERSIST_FAILED') toast.error('Kunde inte skicka – försök igen.');
+    }
+
+    return (
+      <div className="flex flex-col min-h-0">
+        <div ref={scrollRef} className={cx('flex flex-col gap-3 overflow-y-auto px-1 py-2', heightClass)}>
+          {messages.length === 0 ? (
+            <EmptyState icon="message-square" title="Inga meddelanden än" description={isAdmin ? 'Skriv ett meddelande för att starta dialogen.' : 'Skriv till oss så svarar vi så snart vi kan.'} className="my-auto" />
+          ) : (
+            messages.map(m => (
+              <MessageBubble key={m.id} message={m} isMine={m.sender_user_id === session.userId} senderName={senderLabelFor(m)} />
+            ))
+          )}
+        </div>
+        <div className="border-t border-slate-100 pt-3 mt-2">
+          <div className="flex items-end gap-2">
+            <Textarea
+              rows={2}
+              value={draft}
+              onChange={e => setDraft(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); send(); } }}
+              placeholder="Skriv ett meddelande…"
+              className="flex-1"
+            />
+            <Button variant="primary" icon="send" disabled={!draft.trim() || sending} onClick={send}>Skicka</Button>
+          </div>
+          <p className="text-[11px] text-slate-400 mt-1.5">Tryck Cmd/Ctrl + Enter för att skicka.</p>
+        </div>
+      </div>
+    );
+  }
+
+  function MessagesView({ session, onNavigate }) {
+    useDb();
+    const role = session.user.role;
+
+    // Kund / kundanställd: en enda tråd
+    if (role === 'customer' || role === 'customer_employee') {
+      const customer = db.customerForUser(session.userId);
+      if (!customer) {
+        return (
+          <div>
+            <PageHeader title="Meddelanden" />
+            <Card padding="lg"><EmptyState icon="message-square" title="Ingen kund kopplad" description="Din profil saknar koppling till en kund." /></Card>
+          </div>
+        );
+      }
+      return (
+        <div>
+          <PageHeader title="Meddelanden" subtitle="Direktdialog med CleanUp-teamet." />
+          <Card padding="md">
+            <ConversationPanel customerId={customer.id} session={session} />
+          </Card>
+        </div>
+      );
+    }
+
+    // Admin: trådlista + vald konversation
+    const threads = db.threadsForAdmin(session.userId);
+    const [selectedId, setSelectedId] = useState(threads[0]?.customer.id || null);
+    const selected = threads.find(t => t.customer.id === selectedId) || threads[0] || null;
+
+    return (
+      <div>
+        <PageHeader title="Meddelanden" subtitle="Dialog med kunder i realtid." />
+        <div className="grid lg:grid-cols-3 gap-4">
+          <Card padding="sm" className="lg:col-span-1">
+            <div className="max-h-[64vh] overflow-y-auto -mx-1">
+              {threads.length === 0 ? (
+                <EmptyState icon="message-square" title="Inga kunder" className="py-8" />
+              ) : (
+                <ul className="divide-y divide-slate-100">
+                  {threads.map(t => (
+                    <li key={t.customer.id}>
+                      <button
+                        onClick={() => setSelectedId(t.customer.id)}
+                        className={cx(
+                          'w-full text-left px-3 py-3 flex items-start gap-3 rounded-lg transition-colors',
+                          selected?.customer.id === t.customer.id ? 'bg-brand-50' : 'hover:bg-slate-50',
+                        )}
+                      >
+                        <Avatar name={t.customer.name} size="sm" />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="font-semibold text-sm text-slate-900 truncate">{t.customer.name}</p>
+                            {t.unread > 0 && (
+                              <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-brand-600 text-white text-[10px] font-bold flex items-center justify-center flex-shrink-0">{t.unread}</span>
+                            )}
+                          </div>
+                          <p className="text-xs text-slate-500 truncate mt-0.5">
+                            {t.lastMessage ? t.lastMessage.body : 'Ingen konversation än'}
+                          </p>
+                        </div>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </Card>
+
+          <Card padding="md" className="lg:col-span-2">
+            {selected ? (
+              <>
+                <div className="flex items-center gap-2 pb-3 mb-1 border-b border-slate-100">
+                  <Avatar name={selected.customer.name} size="sm" />
+                  <div>
+                    <p className="font-bold text-slate-900 leading-tight">{selected.customer.name}</p>
+                    <p className="text-xs text-slate-500">Kunddialog</p>
+                  </div>
+                </div>
+                <ConversationPanel customerId={selected.customer.id} session={session} heightClass="h-[52vh]" />
+              </>
+            ) : (
+              <EmptyState icon="message-square" title="Välj en kund" description="Välj en kund i listan för att se konversationen." className="py-12" />
+            )}
+          </Card>
+        </div>
+      </div>
+    );
   }
 
   /* ============================================================
@@ -4617,4 +4930,5 @@
 
   window.AdminReportsView = AdminReportsView;
   window.CustomerReportsView = CustomerReportsView;
+  window.MessagesView = MessagesView;
 })();
