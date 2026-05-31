@@ -95,6 +95,7 @@
       { path: '/admin/kunder', label: 'Kunder', icon: 'briefcase' },
       { path: '/admin/stadare', label: 'Städare', icon: 'users' },
       { path: '/admin/avvikelser', label: 'Avvikelser', icon: 'alert-triangle' },
+      { path: '/admin/rapporter', label: 'Rapporter', icon: 'file-text' },
       { path: '/admin/installningar', label: 'Inställningar', icon: 'settings' },
     ],
     cleaner: [
@@ -107,6 +108,7 @@
       { path: '/kund/objekt', label: 'Objekt', icon: 'building' },
       { path: '/kund/ledighet', label: 'Ledighet', icon: 'pause' },
       { path: '/kund/avvikelser', label: 'Avvikelser', icon: 'alert-triangle' },
+      { path: '/kund/rapporter', label: 'Rapporter', icon: 'file-text' },
       { path: '/kund/installningar', label: 'Inställningar', icon: 'settings' },
     ],
     customer_employee: [
@@ -392,6 +394,7 @@
     if (matchPath(path, '/kund/ledighet')) return <CustomerHolidayView session={session} onNavigate={navigate} />;
     if ((m = matchPath(path, '/kund/avvikelser/:id'))) return <IncidentDetailView session={session} onNavigate={navigate} incidentId={m.id} />;
     if (matchPath(path, '/kund/avvikelser')) return <CustomerIncidentsView session={session} onNavigate={navigate} />;
+    if (matchPath(path, '/kund/rapporter')) return <CustomerReportsView session={session} />;
     if (matchPath(path, '/kund/installningar')) return <CustomerSettingsView session={session} />;
 
     return <ComingSoonView title="Sidan finns inte" section="—" description="Den här vyn matchar inte någon route." />;

@@ -2054,6 +2054,21 @@
       });
       bump();
     },
+
+    buildAdminReport(filters) {
+      if (!window.Reporting) return null;
+      return window.Reporting.buildAdminReport(state, filters, {
+        shiftTimesFn: s => db.shiftTimes(s),
+      });
+    },
+    buildCustomerReport(userId, filters) {
+      if (!window.Reporting) return null;
+      const customer = db.customerForUser(userId);
+      if (!customer) return null;
+      return window.Reporting.buildCustomerReport(state, customer.id, filters, {
+        shiftTimesFn: s => db.shiftTimes(s),
+      });
+    },
   };
 
   /* ============================================================

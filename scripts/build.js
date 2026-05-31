@@ -21,6 +21,12 @@ const ROOT = path.join(__dirname, '..');
 const DIST = path.join(ROOT, 'dist');
 const DIST_SRC = path.join(DIST, 'src');
 
+// JS-filer (ingen JSX) – laddas före mock.
+const JS_FILES = [
+  'reporting.js',
+  'reportExport.js',
+];
+
 // JSX-filer i exakt laddningsordning (senare filer använder globaler från tidigare).
 const JSX_FILES = [
   'icons.jsx',
@@ -60,6 +66,11 @@ function step3_bundle() {
     '/* CleanUp – precompilerad bundle. Genererad av scripts/build.js. Redigera inte. */',
     '"use strict";',
   ];
+  for (const file of JS_FILES) {
+    const srcPath = path.join(ROOT, 'src', file);
+    parts.push(`/* ===== ${file} ===== */`);
+    parts.push(fs.readFileSync(srcPath, 'utf8'));
+  }
   for (const file of JSX_FILES) {
     const srcPath = path.join(ROOT, 'src', file);
     const code = fs.readFileSync(srcPath, 'utf8');
@@ -76,7 +87,7 @@ function step3_bundle() {
   }
   const out = path.join(DIST_SRC, 'app.bundle.js');
   fs.writeFileSync(out, parts.join('\n'), 'utf8');
-  console.log('Wrote', out, `(${JSX_FILES.length} filer)`);
+  console.log('Wrote', out, `(${JS_FILES.length + JSX_FILES.length} filer)`);
 }
 
 function step4_html() {

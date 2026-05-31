@@ -4265,4 +4265,356 @@
   window.AdminPropertyContactsTab = AdminPropertyContactsTab;
   window.CustomerSettingsView = CustomerSettingsView;
   window.AdminSettingsView = AdminSettingsView;
+
+  /* ============================================================
+   * RAPPORTER – periodfilter + export (§ roadmap tidrapportering)
+   * ============================================================ */
+  function ReportPeriodFilters({ preset, onPresetChange, from, to, onFromChange, onToChange }) {
+    return (
+      <Card padding="md" className="mb-4">
+        <div className="grid md:grid-cols-4 gap-3">
+          <Field label="Period">
+            <Select value={preset} onChange={e => onPresetChange(e.target.value)}>
+              <option value="this_week">Denna vecka</option>
+              <option value="this_month">Denna månad</option>
+              <option value="last_month">Föregående månad</option>
+              <option value="custom">Anpassat datumintervall</option>
+            </Select>
+          </Field>
+          <Field label="Från datum" hint={preset !== 'custom' ? 'Aktiveras vid anpassat intervall' : ''}>
+            <Input
+              type="date"
+              value={from}
+              onChange={e => onFromChange(e.target.value)}
+              disabled={preset !== 'custom'}
+            />
+          </Field>
+          <Field label="Till datum">
+            <Input
+              type="date"
+              value={to}
+              onChange={e => onToChange(e.target.value)}
+              disabled={preset !== 'custom'}
+            />
+          </Field>
+        </div>
+      </Card>
+    );
+  }
+
+  function ReportTable({ title, headers, rows, emptyText = 'Inget att visa för vald period.' }) {
+    return (
+      <Card padding="md" className="mb-4">
+        <h3 className="font-bold text-slate-900 mb-3">{title}</h3>
+        {rows.length === 0 ? (
+          <p className="text-sm text-slate-500">{emptyText}</p>
+        ) : (
+          <div className="overflow-x-auto -mx-2">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-100 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                  {headers.map(h => (
+                    <th key={h.key} className="px-2 py-2">{h.label}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {rows.map((row, i) => (
+                  <tr key={row.id || i} className="hover:bg-slate-50/80">
+                    {headers.map(h => (
+                      <td key={h.key} className="px-2 py-2.5 text-slate-800">{row[h.key]}</td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+    );
+  }
+
+  function AdminReportsView({ session }) {
+    useDb();
+    const [preset, setPreset] = useState('this_month');
+    const [from, setFrom] = useState(toDateInput(new Date()));
+    const [to, setTo] = useState(toDateInput(new Date()));
+    const [report, setReport] = useState(null);
+    const [exporting, setExporting] = useState(null);
+
+    function generate() {
+      const data = db.buildAdminReport({ preset, from: preset === 'custom' ? from : null, to: preset === 'custom' ? to : null });
+      setReport(data);
+    }
+
+    async function exportExcel() {
+      if (!report || !window.ReportExport) return;
+      setExporting('xlsx');
+      try {
+        const { sheets, periodLabel } = window.ReportExport.adminReportToExport(report);
+        const safe = periodLabel.replace(/[^\w\d-]+/g, '_').slice(0, 40);
+        await window.ReportExport.exportReportXlsx({ filename: `cleanup-admin-rapport-${safe}.xlsx`, sheets });
+        toast.success('Excel-fil nedladdad.');
+      } catch (e) {
+        console.error(e);
+        toast.error('Kunde inte exportera Excel. Försök igen.');
+      } finally {
+        setExporting(null);
+      }
+    }
+
+    async function exportPdf() {
+      if (!report || !window.ReportExport) return;
+      setExporting('pdf');
+      try {
+        const { pdfSections, periodLabel } = window.ReportExport.adminReportToExport(report);
+        const safe = periodLabel.replace(/[^\w\d-]+/g, '_').slice(0, 40);
+        await window.ReportExport.exportReportPdf({
+          filename: `cleanup-admin-rapport-${safe}.pdf`,
+          title: 'CleanUp – Adminrapport',
+          subtitle: `Period: ${periodLabel} · Genererad ${formatDateLong(new Date())}`,
+          sections: pdfSections,
+        });
+        toast.success('PDF nedladdad.');
+      } catch (e) {
+        console.error(e);
+        toast.error('Kunde inte exportera PDF. Försök igen.');
+      } finally {
+        setExporting(null);
+      }
+    }
+
+    const s = report?.summary;
+
+    return (
+      <div>
+        <PageHeader
+          title="Rapporter"
+          subtitle="Städtimmar, avvikelser och händelser för vald period. Arbetade timmar baseras på utförda pass (faktisk in/utcheckningstid)."
+          actions={
+            <div className="flex flex-wrap gap-2">
+              <Button variant="primary" icon="file-text" onClick={generate}>Generera rapport</Button>
+              {report && (
+                <>
+                  <Button variant="outline" icon="download" disabled={!!exporting} onClick={exportExcel}>
+                    {exporting === 'xlsx' ? 'Exporterar…' : 'Exportera Excel'}
+                  </Button>
+                  <Button variant="outline" icon="download" disabled={!!exporting} onClick={exportPdf}>
+                    {exporting === 'pdf' ? 'Exporterar…' : 'Exportera PDF'}
+                  </Button>
+                </>
+              )}
+            </div>
+          }
+        />
+
+        <ReportPeriodFilters
+          preset={preset}
+          onPresetChange={setPreset}
+          from={from}
+          to={to}
+          onFromChange={setFrom}
+          onToChange={setTo}
+        />
+
+        {!report ? (
+          <Card padding="lg">
+            <EmptyState
+              icon="file-text"
+              title="Ingen rapport genererad"
+              description="Välj period och klicka på Generera rapport."
+            />
+          </Card>
+        ) : (
+          <>
+            <p className="text-sm text-slate-600 mb-4">
+              Period: <span className="font-semibold text-slate-900">{report.meta.label}</span>
+            </p>
+
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+              <Stat label="Städade timmar" value={s.totalHours} hint="Utförda pass" icon="clock" tone="brand" />
+              <Stat label="Avvikelser" value={s.totalIncidents} icon="alert-triangle" tone="rose" />
+              <Stat label="Justerade tider" value={s.totalTimeAdjusted} icon="refresh" tone="amber" />
+              <Stat label="Sjukanmälan" value={s.totalSickReports} icon="alert-circle" tone="amber" />
+            </div>
+
+            <Card padding="md" className="mb-6 border-slate-200 bg-slate-50/50">
+              <p className="text-sm text-slate-700">
+                <span className="font-semibold text-slate-900">Nya tider av kund:</span> {s.customerNewTimes}
+                <span className="text-slate-500"> — {s.customerNewTimesNote}</span>
+              </p>
+            </Card>
+
+            <ReportTable
+              title="Timmar per kund"
+              headers={[
+                { key: 'name', label: 'Kund' },
+                { key: 'hours', label: 'Timmar' },
+                { key: 'shiftCount', label: 'Pass' },
+              ]}
+              rows={report.byCustomer.map(r => ({ ...r, hours: r.hours.toFixed(2) }))}
+            />
+            <ReportTable
+              title="Timmar per objekt (kontor)"
+              headers={[
+                { key: 'customerName', label: 'Kund' },
+                { key: 'name', label: 'Objekt' },
+                { key: 'hours', label: 'Timmar' },
+                { key: 'shiftCount', label: 'Pass' },
+              ]}
+              rows={report.byProperty.map(r => ({ ...r, hours: r.hours.toFixed(2) }))}
+            />
+            <ReportTable
+              title="Timmar per städare"
+              headers={[
+                { key: 'name', label: 'Städare' },
+                { key: 'hours', label: 'Timmar' },
+                { key: 'shiftCount', label: 'Pass' },
+              ]}
+              rows={report.byCleaner.map(r => ({ ...r, hours: r.hours.toFixed(2) }))}
+            />
+            <ReportTable
+              title="Sjukanmälan per städare"
+              headers={[
+                { key: 'name', label: 'Städare' },
+                { key: 'count', label: 'Antal' },
+              ]}
+              rows={report.sickByCleaner}
+            />
+          </>
+        )}
+      </div>
+    );
+  }
+
+  function CustomerReportsEmployeeBlocked() {
+    return (
+      <div>
+        <PageHeader title="Rapporter" subtitle="Sammanfattning av era städpass." />
+        <Card padding="lg">
+          <EmptyState
+            icon="file-text"
+            title="Endast för huvudkontakt"
+            description="Rapporter är tillgängliga för kundens huvudkontakt. Kontakta er administratör om ni behöver en export."
+          />
+        </Card>
+      </div>
+    );
+  }
+
+  function CustomerReportsMain({ session }) {
+    useDb();
+    const [preset, setPreset] = useState('this_month');
+    const [from, setFrom] = useState(toDateInput(new Date()));
+    const [to, setTo] = useState(toDateInput(new Date()));
+    const [report, setReport] = useState(null);
+    const [exporting, setExporting] = useState(null);
+
+    function generate() {
+      const data = db.buildCustomerReport(session.userId, {
+        preset,
+        from: preset === 'custom' ? from : null,
+        to: preset === 'custom' ? to : null,
+      });
+      setReport(data);
+    }
+
+    async function exportExcel() {
+      if (!report || !window.ReportExport) return;
+      setExporting('xlsx');
+      try {
+        const { sheets, periodLabel } = window.ReportExport.customerReportToExport(report);
+        const safe = periodLabel.replace(/[^\w\d-]+/g, '_').slice(0, 40);
+        await window.ReportExport.exportReportXlsx({ filename: `cleanup-kund-rapport-${safe}.xlsx`, sheets });
+        toast.success('Excel-fil nedladdad.');
+      } catch (e) {
+        toast.error('Kunde inte exportera Excel.');
+      } finally {
+        setExporting(null);
+      }
+    }
+
+    async function exportPdf() {
+      if (!report || !window.ReportExport) return;
+      setExporting('pdf');
+      try {
+        const { pdfSections, periodLabel } = window.ReportExport.customerReportToExport(report);
+        const safe = periodLabel.replace(/[^\w\d-]+/g, '_').slice(0, 40);
+        await window.ReportExport.exportReportPdf({
+          filename: `cleanup-kund-rapport-${safe}.pdf`,
+          title: 'CleanUp – Kundrapport',
+          subtitle: `${report.meta.customerName} · ${periodLabel}`,
+          sections: pdfSections,
+        });
+        toast.success('PDF nedladdad.');
+      } catch (e) {
+        toast.error('Kunde inte exportera PDF.');
+      } finally {
+        setExporting(null);
+      }
+    }
+
+    const s = report?.summary;
+
+    return (
+      <div>
+        <PageHeader
+          title="Rapporter"
+          subtitle="Översikt av bokade pass och arbetade timmar. Städare visas som ”Städare” enligt era visningsregler."
+          actions={
+            <div className="flex flex-wrap gap-2">
+              <Button variant="primary" icon="file-text" onClick={generate}>Generera rapport</Button>
+              {report && (
+                <>
+                  <Button variant="outline" icon="download" disabled={!!exporting} onClick={exportExcel}>
+                    {exporting === 'xlsx' ? 'Exporterar…' : 'Exportera Excel'}
+                  </Button>
+                  <Button variant="outline" icon="download" disabled={!!exporting} onClick={exportPdf}>
+                    {exporting === 'pdf' ? 'Exporterar…' : 'Exportera PDF'}
+                  </Button>
+                </>
+              )}
+            </div>
+          }
+        />
+
+        <ReportPeriodFilters
+          preset={preset}
+          onPresetChange={setPreset}
+          from={from}
+          to={to}
+          onFromChange={setFrom}
+          onToChange={setTo}
+        />
+
+        {!report ? (
+          <Card padding="lg">
+            <EmptyState icon="file-text" title="Ingen rapport genererad" description="Välj period och klicka Generera rapport." />
+          </Card>
+        ) : (
+          <>
+            <p className="text-sm text-slate-600 mb-4">
+              Period: <span className="font-semibold text-slate-900">{report.meta.label}</span>
+            </p>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <Stat label="Bokade tider" value={s.bookedCount} icon="calendar" tone="brand" />
+              <Stat label="Arbetade timmar" value={s.workedHours} hint="Utförda pass" icon="clock" tone="emerald" />
+              <Stat label="Antal städare" value={s.cleanerCount} hint="Unika på bokade pass" icon="users" tone="accent" />
+              <Stat label="Reklamationer" value={s.incidentsCount} icon="alert-triangle" tone="rose" />
+            </div>
+          </>
+        )}
+      </div>
+    );
+  }
+
+  function CustomerReportsView({ session }) {
+    if (session.user.role === 'customer_employee') {
+      return <CustomerReportsEmployeeBlocked />;
+    }
+    return <CustomerReportsMain session={session} />;
+  }
+
+  window.AdminReportsView = AdminReportsView;
+  window.CustomerReportsView = CustomerReportsView;
 })();
