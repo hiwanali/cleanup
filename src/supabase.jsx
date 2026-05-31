@@ -482,6 +482,81 @@
     return { ok: true };
   }
 
+  /** §7.7 admin skapar kundanställd med valt lösenord (RPC provisionerar auth-konto). */
+  async function persistCreateCustomerEmployee({ user, ce, password, propertyIds = [] }) {
+    if (!enabled || !sb || !isUuid(user?.id) || !isUuid(ce?.id) || !isUuid(ce?.customer_id)) {
+      return { ok: true, skipped: true };
+    }
+
+    const { error } = await sb.rpc('admin_create_customer_employee', {
+      p_user_id: user.id,
+      p_ce_id: ce.id,
+      p_customer_id: ce.customer_id,
+      p_name: user.name,
+      p_email: user.email,
+      p_password: password,
+      p_phone: user.phone || null,
+      p_scope: ce.scope,
+      p_property_ids: ce.scope === 'selected' ? (propertyIds || []).filter(isUuid) : [],
+    });
+
+    if (error) {
+      console.error('[persist] createCustomerEmployee:', error.message);
+      const msg = error.message || '';
+      if (/email exists/i.test(msg) || error.code === '23505') return { ok: false, code: 'EMAIL_EXISTS', message: msg };
+      if (/weak password/i.test(msg)) return { ok: false, code: 'WEAK_PASSWORD', message: msg };
+      return { ok: false, message: msg };
+    }
+
+    return { ok: true };
+  }
+
+  /** Admin återställer lösenord för en användare i egen org. */
+  async function persistSetUserPassword({ userId, password }) {
+    if (!enabled || !sb || !isUuid(userId)) {
+      return { ok: true, skipped: true };
+    }
+
+    const { error } = await sb.rpc('admin_set_user_password', {
+      p_user_id: userId,
+      p_password: password,
+    });
+
+    if (error) {
+      console.error('[persist] setUserPassword:', error.message);
+      if (/weak password/i.test(error.message || '')) return { ok: false, code: 'WEAK_PASSWORD', message: error.message };
+      return { ok: false, message: error.message };
+    }
+
+    return { ok: true };
+  }
+
+  /** Inloggad användare byter sitt eget lösenord via Supabase Auth. */
+  async function changeOwnPassword({ password }) {
+    if (!enabled || !sb) {
+      return { ok: false, code: 'AUTH_DISABLED' };
+    }
+    if (!password || password.length < 8) {
+      return { ok: false, code: 'WEAK_PASSWORD' };
+    }
+
+    const { error } = await sb.auth.updateUser({ password });
+    if (error) {
+      console.error('[persist] changeOwnPassword:', error.message);
+      const msg = error.message || '';
+      if (/should be different|same.*password/i.test(msg)) return { ok: false, code: 'SAME_PASSWORD', message: msg };
+      if (/weak|at least|characters/i.test(msg)) return { ok: false, code: 'WEAK_PASSWORD', message: msg };
+      return { ok: false, message: msg };
+    }
+
+    return { ok: true };
+  }
+
+  window.dbAuth = {
+    enabled,
+    changeOwnPassword,
+  };
+
   /* ---------- realtime (live-synk mellan användare) ---------- */
   let realtimeChannel = null;
   let hydrateDebounceTimer = null;
@@ -999,6 +1074,8 @@
     updateAdminSettings: persistUpdateAdminSettings,
     createCustomer: persistCreateCustomer,
     createProperty: persistCreateProperty,
+    createCustomerEmployee: persistCreateCustomerEmployee,
+    setUserPassword: persistSetUserPassword,
     markNotificationsRead: persistMarkNotificationsRead,
     approveShift: persistApproveShift,
     declineShift: persistDeclineShift,

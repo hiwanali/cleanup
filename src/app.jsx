@@ -396,6 +396,7 @@
     if ((m = matchPath(path, '/admin/avvikelser/:id'))) return <IncidentDetailView session={session} onNavigate={navigate} incidentId={m.id} />;
     if (matchPath(path, '/admin/avvikelser')) return <AdminIncidentsView session={session} onNavigate={navigate} />;
     if (matchPath(path, '/admin/meddelanden')) return <MessagesView session={session} onNavigate={navigate} />;
+    if (matchPath(path, '/admin/rapporter')) return <AdminReportsView session={session} />;
     if (matchPath(path, '/admin/installningar')) return <AdminSettingsView session={session} />;
 
     // —— CLEANER ——

@@ -2297,23 +2297,70 @@
       cleanerUserIds.forEach(uid => state.property_cleaners.push({ property_id: propertyId, cleaner_user_id: uid }));
       bump();
     },
-    addCustomerEmployee({ customerId, name, email, phone = '', scope = 'all_properties', selectedPropertyIds = [], adminUserId }) {
-      const trimmedEmail = email.trim().toLowerCase();
-      if (state.users.some(u => u.email === trimmedEmail)) {
-        throw new Error('EMAIL_EXISTS');
-      }
+    async addCustomerEmployee({ customerId, name, email, phone = '', password = null, scope = 'all_properties', selectedPropertyIds = [], adminUserId, provision = false }) {
+      const cust = db.customerById(customerId);
+      if (!cust) return { error: 'NOT_FOUND' };
+
+      const trimmedName = (name || '').trim();
+      if (trimmedName.length < 2) return { error: 'INVALID_NAME' };
+
+      const trimmedEmail = (email || '').trim().toLowerCase();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) return { error: 'INVALID_EMAIL' };
+      if (state.users.some(u => u.email === trimmedEmail)) return { error: 'EMAIL_EXISTS' };
+
+      const persist = window.dbPersist && window.dbPersist.createCustomerEmployee;
+      const wantsPersist = !!(persist && window.SUPABASE_ENABLED && provision);
+      if (wantsPersist && (!password || password.length < 8)) return { error: 'WEAK_PASSWORD' };
+
       const u = {
-        id: id('u'), org_id: state.organizations[0].id, role: 'customer_employee',
-        name: name.trim(), email: trimmedEmail, phone: (phone || '').trim(), active: true,
+        id: newId(), org_id: cust.org_id || state.organizations[0].id, role: 'customer_employee',
+        name: trimmedName, email: trimmedEmail, phone: (phone || '').trim(), active: true,
       };
+      const ce = { id: newId(), customer_id: customerId, user_id: u.id, scope, created_by_admin_id: adminUserId };
+
+      const snapshot = {
+        usersLen: state.users.length,
+        ceLen: state.customer_employees.length,
+        cepLen: state.customer_employee_properties.length,
+      };
+
       state.users.push(u);
-      const ce = { id: id('ce'), customer_id: customerId, user_id: u.id, scope, created_by_admin_id: adminUserId };
       state.customer_employees.push(ce);
       if (scope === 'selected') {
         selectedPropertyIds.forEach(pid => state.customer_employee_properties.push({ customer_employee_id: ce.id, property_id: pid }));
       }
       bump();
-      return { user: u, ce };
+
+      if (wantsPersist) {
+        const r = await persist({ user: u, ce, password, propertyIds: selectedPropertyIds });
+        if (!r.ok) {
+          state.users.length = snapshot.usersLen;
+          state.customer_employees.length = snapshot.ceLen;
+          state.customer_employee_properties.length = snapshot.cepLen;
+          bump();
+          if (r.code === 'EMAIL_EXISTS') return { error: 'EMAIL_EXISTS' };
+          if (r.code === 'WEAK_PASSWORD') return { error: 'WEAK_PASSWORD' };
+          return { error: 'PERSIST_FAILED', message: r.message };
+        }
+      }
+
+      return { ok: true, user: u, ce };
+    },
+    // Admin återställer lösenord för en kundanställd
+    async setCustomerEmployeePassword(ceId, password) {
+      const ce = state.customer_employees.find(c => c.id === ceId);
+      if (!ce) return { error: 'NOT_FOUND' };
+      if (!password || password.length < 8) return { error: 'WEAK_PASSWORD' };
+
+      const persist = window.dbPersist && window.dbPersist.setUserPassword;
+      if (persist && window.SUPABASE_ENABLED) {
+        const r = await persist({ userId: ce.user_id, password });
+        if (!r.ok) {
+          if (r.code === 'WEAK_PASSWORD') return { error: 'WEAK_PASSWORD' };
+          return { error: 'PERSIST_FAILED', message: r.message };
+        }
+      }
+      return { ok: true };
     },
     updateCustomerEmployee(ceId, { name, email, phone, scope, selectedPropertyIds }) {
       const ce = state.customer_employees.find(c => c.id === ceId);

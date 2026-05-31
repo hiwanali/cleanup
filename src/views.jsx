@@ -2791,64 +2791,300 @@
   /* ============================================================
    * §7.7 Kontakter & kundanställda
    * ============================================================ */
+  function cleanupRandInt(max) {
+    if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+      const a = new Uint32Array(1);
+      crypto.getRandomValues(a);
+      return a[0] % max;
+    }
+    return Math.floor(Math.random() * max);
+  }
+
+  function cleanupGeneratePassword(len = 14) {
+    const lower = 'abcdefghijkmnpqrstuvwxyz';
+    const upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+    const digits = '23456789';
+    const symbols = '!@#%*?-_';
+    const all = lower + upper + digits + symbols;
+    const pick = set => set[cleanupRandInt(set.length)];
+    const chars = [pick(lower), pick(upper), pick(digits), pick(symbols)];
+    while (chars.length < len) chars.push(pick(all));
+    for (let i = chars.length - 1; i > 0; i--) {
+      const j = cleanupRandInt(i + 1);
+      [chars[i], chars[j]] = [chars[j], chars[i]];
+    }
+    return chars.join('');
+  }
+
+  function PasswordInput({ value, onChange, onGenerate, placeholder = 'Minst 8 tecken', error, className = '' }) {
+    const [show, setShow] = useState(false);
+    return (
+      <div className={cx('flex gap-2', className)}>
+        <div className="relative flex-1">
+          <Input
+            type={show ? 'text' : 'password'}
+            value={value}
+            onChange={onChange}
+            placeholder={placeholder}
+            autoComplete="new-password"
+            error={error}
+            className="pr-10"
+          />
+          <button
+            type="button"
+            onClick={() => setShow(s => !s)}
+            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+            aria-label={show ? 'Dölj lösenord' : 'Visa lösenord'}
+          >
+            <Icon name={show ? 'eye-off' : 'eye'} className="w-4 h-4" />
+          </button>
+        </div>
+        {onGenerate && (
+          <Button variant="outline" icon="sparkles" onClick={onGenerate} aria-label="Generera lösenord">Generera</Button>
+        )}
+      </div>
+    );
+  }
+
   function AddCustomerEmployeeModal({ open, onClose, customer, properties, session, editEmployee = null }) {
     const isEdit = !!editEmployee;
-    const [name, setName] = useState('');
-    const [email, setEmail] = useState('');
-    const [phone, setPhone] = useState('');
-    const [scope, setScope] = useState('all_properties');
-    const [propertyIds, setPropertyIds] = useState([]);
+    const provisioning = !isEdit && session?.user?.role === 'admin' && !!window.SUPABASE_ENABLED;
+
+    const blankEntry = () => ({
+      key: Math.random().toString(36).slice(2),
+      name: '', email: '', phone: '',
+      password: provisioning ? cleanupGeneratePassword() : '',
+      scope: 'all_properties', propertyIds: [],
+      error: '',
+    });
+
+    const [entries, setEntries] = useState([blankEntry()]);
+    const [saving, setSaving] = useState(false);
     const [error, setError] = useState('');
 
     useEffect(() => {
       if (!open) return;
       setError('');
+      setSaving(false);
       if (editEmployee) {
-        setName(editEmployee.user?.name || '');
-        setEmail(editEmployee.user?.email || '');
-        setPhone(editEmployee.user?.phone || '');
-        setScope(editEmployee.scope);
-        setPropertyIds(editEmployee.properties?.map(p => p.id) || []);
+        setEntries([{
+          key: editEmployee.id,
+          name: editEmployee.user?.name || '',
+          email: editEmployee.user?.email || '',
+          phone: editEmployee.user?.phone || '',
+          password: '',
+          scope: editEmployee.scope,
+          propertyIds: editEmployee.properties?.map(p => p.id) || [],
+          error: '',
+        }]);
       } else {
-        setName('');
-        setEmail('');
-        setPhone('');
-        setScope('all_properties');
-        setPropertyIds([]);
+        setEntries([blankEntry()]);
       }
     }, [open, editEmployee?.id]);
 
-    const validName = name.trim().length >= 2;
-    const validEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
-    const validScope = scope === 'all_properties' || propertyIds.length > 0;
-    const canSubmit = validName && validEmail && validScope;
+    function patchEntry(key, patch) {
+      setEntries(prev => prev.map(en => en.key === key ? { ...en, ...patch } : en));
+    }
+    function toggleEntryProperty(key, pid) {
+      setEntries(prev => prev.map(en => en.key === key
+        ? { ...en, propertyIds: en.propertyIds.includes(pid) ? en.propertyIds.filter(x => x !== pid) : [...en.propertyIds, pid] }
+        : en));
+    }
+    function addEntry() { setEntries(prev => [...prev, blankEntry()]); }
+    function removeEntry(key) { setEntries(prev => prev.length > 1 ? prev.filter(en => en.key !== key) : prev); }
 
-    function togglePropertyId(pid) {
-      setPropertyIds(prev => prev.includes(pid) ? prev.filter(x => x !== pid) : [...prev, pid]);
+    function entryValid(en) {
+      const validName = en.name.trim().length >= 2;
+      const validEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(en.email.trim());
+      const validScope = en.scope === 'all_properties' || en.propertyIds.length > 0;
+      const validPwd = !provisioning || (en.password || '').length >= 8;
+      return validName && validEmail && validScope && validPwd;
+    }
+    const canSubmit = entries.length > 0 && entries.every(entryValid);
+
+    function errorLabel(code) {
+      switch (code) {
+        case 'EMAIL_EXISTS': return 'Mejladressen används redan.';
+        case 'INVALID_EMAIL': return 'Ogiltig mejladress.';
+        case 'INVALID_NAME': return 'Namn måste vara minst 2 tecken.';
+        case 'WEAK_PASSWORD': return 'Lösenordet måste vara minst 8 tecken.';
+        case 'PERSIST_FAILED': return 'Kunde inte spara till databasen.';
+        default: return 'Kunde inte spara.';
+      }
     }
 
-    function submit() {
+    async function submit() {
       setError('');
+      setSaving(true);
       try {
         if (isEdit) {
-          db.updateCustomerEmployee(editEmployee.id, {
-            name, email, phone, scope,
-            selectedPropertyIds: scope === 'selected' ? propertyIds : [],
-          });
-          toast.success('Kundanställd uppdaterad.');
-        } else {
-          db.addCustomerEmployee({
-            customerId: customer.id,
-            name, email, phone, scope,
-            selectedPropertyIds: scope === 'selected' ? propertyIds : [],
-            adminUserId: session.userId,
-          });
-          toast.success('Kundanställd tillagd. Inbjudan skickas när auth är på plats.');
+          const en = entries[0];
+          try {
+            db.updateCustomerEmployee(editEmployee.id, {
+              name: en.name, email: en.email, phone: en.phone, scope: en.scope,
+              selectedPropertyIds: en.scope === 'selected' ? en.propertyIds : [],
+            });
+            toast.success('Kundanställd uppdaterad.');
+            onClose();
+          } catch (e) {
+            patchEntry(en.key, { error: e.message === 'EMAIL_EXISTS' ? 'Mejladressen används redan.' : 'Kunde inte spara.' });
+          }
+          return;
         }
-        onClose();
-      } catch (e) {
-        if (e.message === 'EMAIL_EXISTS') setError('Mejladressen används redan av en annan användare.');
-        else setError('Kunde inte spara. Försök igen.');
+
+        let added = 0;
+        const remaining = [];
+        for (const en of entries) {
+          const r = await db.addCustomerEmployee({
+            customerId: customer.id,
+            name: en.name, email: en.email, phone: en.phone,
+            password: en.password,
+            scope: en.scope,
+            selectedPropertyIds: en.scope === 'selected' ? en.propertyIds : [],
+            adminUserId: session.userId,
+            provision: provisioning,
+          });
+          if (r?.ok) {
+            added++;
+          } else {
+            remaining.push({ ...en, error: errorLabel(r?.error) });
+          }
+        }
+
+        if (added > 0) {
+          toast.success(provisioning
+            ? `${added} kundanställd${added === 1 ? '' : 'a'} skapad${added === 1 ? '' : 'a'} med inloggning.`
+            : `${added} kundanställd${added === 1 ? '' : 'a'} tillagd${added === 1 ? '' : 'a'}.`);
+        }
+
+        if (remaining.length > 0) {
+          setEntries(remaining);
+          setError(`${remaining.length} av ${entries.length} kunde inte sparas – se markeringar nedan.`);
+        } else {
+          onClose();
+        }
+      } finally {
+        setSaving(false);
+      }
+    }
+
+    const multiple = !isEdit;
+
+    return (
+      <Modal
+        open={open}
+        onClose={onClose}
+        title={isEdit ? 'Redigera kundanställd' : 'Lägg till kundanställda'}
+        size="lg"
+        footer={
+          <>
+            <Button variant="ghost" onClick={onClose} disabled={saving}>Avbryt</Button>
+            <Button variant="primary" disabled={!canSubmit || saving} loading={saving} onClick={submit}>
+              {isEdit ? 'Spara' : (entries.length > 1 ? `Skapa ${entries.length} konton` : 'Lägg till')}
+            </Button>
+          </>
+        }
+      >
+        <p className="text-xs text-slate-500 mb-4">
+          {customer.name} · kundanställda kan logga in och följa pass (endast läsbehörighet).
+          {provisioning
+            ? ' Ange ett lösenord per person – de kan byta det själva efter första inloggningen.'
+            : ' Inbjudan/inloggning hanteras av admin.'}
+        </p>
+
+        <div className="space-y-4">
+          {entries.map((en, idx) => (
+            <div key={en.key} className={cx('rounded-2xl border p-4', en.error ? 'border-rose-300 bg-rose-50/40' : 'border-slate-200')}>
+              {multiple && (
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="text-xs font-bold uppercase tracking-wide text-slate-500">Kundanställd {idx + 1}</h4>
+                  {entries.length > 1 && (
+                    <Button variant="danger-ghost" size="sm" iconOnly icon="trash" aria-label="Ta bort rad" onClick={() => removeEntry(en.key)} />
+                  )}
+                </div>
+              )}
+              <div className="grid sm:grid-cols-2 gap-3">
+                <Field label="Namn *">
+                  <Input value={en.name} onChange={e => patchEntry(en.key, { name: e.target.value, error: '' })} placeholder="För- och efternamn" />
+                </Field>
+                <Field label="Mejl *">
+                  <Input type="email" value={en.email} onChange={e => patchEntry(en.key, { email: e.target.value, error: '' })} placeholder="namn@foretag.se" />
+                </Field>
+              </div>
+              <div className="grid sm:grid-cols-2 gap-3 mt-3">
+                <Field label="Telefon">
+                  <Input type="tel" value={en.phone} onChange={e => patchEntry(en.key, { phone: e.target.value })} placeholder="+46 70 123 45 67" />
+                </Field>
+                {provisioning && (
+                  <Field label="Lösenord *" hint="Minst 8 tecken">
+                    <PasswordInput
+                      value={en.password}
+                      onChange={e => patchEntry(en.key, { password: e.target.value, error: '' })}
+                      onGenerate={() => patchEntry(en.key, { password: cleanupGeneratePassword(), error: '' })}
+                    />
+                  </Field>
+                )}
+              </div>
+              <Field label="Åtkomst till objekt *" className="mt-3">
+                <div className="space-y-2">
+                  <Radio name={`emp_scope_${en.key}`} value="all_properties" checked={en.scope === 'all_properties'} onChange={v => patchEntry(en.key, { scope: v })} label={`Alla objekt (${properties.length})`} />
+                  <Radio name={`emp_scope_${en.key}`} value="selected" checked={en.scope === 'selected'} onChange={v => patchEntry(en.key, { scope: v })} label="Valda objekt" />
+                  {en.scope === 'selected' && (
+                    <div className="ml-7 mt-2 space-y-1.5 border-l-2 border-slate-200 pl-4">
+                      {properties.length === 0 && <p className="text-xs text-slate-400">Inga objekt ännu.</p>}
+                      {properties.map(p => (
+                        <Checkbox key={p.id} checked={en.propertyIds.includes(p.id)} onChange={() => toggleEntryProperty(en.key, p.id)} label={p.name} />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </Field>
+              {en.error && <p className="text-xs text-rose-600 mt-3">{en.error}</p>}
+            </div>
+          ))}
+        </div>
+
+        {multiple && (
+          <Button variant="ghost" size="sm" icon="plus" className="mt-3" onClick={addEntry}>
+            Lägg till ytterligare en
+          </Button>
+        )}
+
+        {error && <p className="text-sm text-rose-600 mt-4">{error}</p>}
+      </Modal>
+    );
+  }
+
+  function ResetPasswordModal({ open, onClose, employee }) {
+    const [password, setPassword] = useState('');
+    const [saving, setSaving] = useState(false);
+    const [error, setError] = useState('');
+
+    useEffect(() => {
+      if (!open) return;
+      setPassword(cleanupGeneratePassword());
+      setError('');
+      setSaving(false);
+    }, [open, employee?.id]);
+
+    const valid = (password || '').length >= 8;
+
+    async function submit() {
+      if (!employee) return;
+      setSaving(true);
+      setError('');
+      try {
+        const r = await db.setCustomerEmployeePassword(employee.id, password);
+        if (r?.ok) {
+          toast.success(`Nytt lösenord satt för ${employee.user?.name || 'kundanställd'}.`);
+          onClose();
+        } else if (r?.error === 'WEAK_PASSWORD') {
+          setError('Lösenordet måste vara minst 8 tecken.');
+        } else {
+          setError('Kunde inte uppdatera lösenordet. Försök igen.');
+        }
+      } finally {
+        setSaving(false);
       }
     }
 
@@ -2856,41 +3092,25 @@
       <Modal
         open={open}
         onClose={onClose}
-        title={isEdit ? 'Redigera kundanställd' : 'Lägg till kundanställd'}
-        size="md"
+        title="Återställ lösenord"
+        size="sm"
         footer={
           <>
-            <Button variant="ghost" onClick={onClose}>Avbryt</Button>
-            <Button variant="primary" disabled={!canSubmit} onClick={submit}>
-              {isEdit ? 'Spara' : 'Lägg till'}
-            </Button>
+            <Button variant="ghost" onClick={onClose} disabled={saving}>Avbryt</Button>
+            <Button variant="primary" icon="key" disabled={!valid || saving} loading={saving} onClick={submit}>Spara lösenord</Button>
           </>
         }
       >
         <p className="text-xs text-slate-500 mb-4">
-          {customer.name} · kundanställda kan logga in och följa pass (läsbehörighet). Inbjudningsmejl skickas när Supabase Auth är aktivt.
+          Sätter ett nytt lösenord för <span className="font-semibold text-slate-700">{employee?.user?.name}</span> ({employee?.user?.email}).
+          Personen kan byta det själv efteråt.
         </p>
-        <Field label="Namn *" className="mb-3">
-          <Input value={name} onChange={e => setName(e.target.value)} placeholder="För- och efternamn" />
-        </Field>
-        <Field label="Mejl *" className="mb-3">
-          <Input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="namn@foretag.se" />
-        </Field>
-        <Field label="Telefon" className="mb-3">
-          <Input type="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="+46 70 123 45 67" />
-        </Field>
-        <Field label="Åtkomst till objekt *">
-          <div className="space-y-2">
-            <Radio name="emp_scope" value="all_properties" checked={scope === 'all_properties'} onChange={setScope} label={`Alla objekt (${properties.length})`} />
-            <Radio name="emp_scope" value="selected" checked={scope === 'selected'} onChange={setScope} label="Valda objekt" />
-            {scope === 'selected' && (
-              <div className="ml-7 mt-2 space-y-1.5 border-l-2 border-slate-200 pl-4">
-                {properties.map(p => (
-                  <Checkbox key={p.id} checked={propertyIds.includes(p.id)} onChange={() => togglePropertyId(p.id)} label={p.name} />
-                ))}
-              </div>
-            )}
-          </div>
+        <Field label="Nytt lösenord *" hint="Minst 8 tecken">
+          <PasswordInput
+            value={password}
+            onChange={e => { setPassword(e.target.value); setError(''); }}
+            onGenerate={() => { setPassword(cleanupGeneratePassword()); setError(''); }}
+          />
         </Field>
         {error && <p className="text-xs text-rose-600 mt-3">{error}</p>}
       </Modal>
@@ -2902,6 +3122,8 @@
     const [modalOpen, setModalOpen] = useState(false);
     const [editTarget, setEditTarget] = useState(null);
     const [removeTarget, setRemoveTarget] = useState(null);
+    const [pwTarget, setPwTarget] = useState(null);
+    const canManagePasswords = session?.user?.role === 'admin' && !!window.SUPABASE_ENABLED;
     const employees = db.customerEmployeesForCustomer(customer.id);
 
     return (
@@ -2932,6 +3154,9 @@
                     </div>
                   </div>
                   <div className="flex items-center gap-1 flex-shrink-0">
+                    {canManagePasswords && (
+                      <Button variant="ghost" size="sm" iconOnly icon="key" aria-label="Återställ lösenord" onClick={() => setPwTarget(e)} />
+                    )}
                     <Button variant="ghost" size="sm" iconOnly icon="edit" aria-label="Redigera" onClick={() => { setEditTarget(e); setModalOpen(true); }} />
                     <Button variant="danger-ghost" size="sm" iconOnly icon="trash" aria-label="Ta bort" onClick={() => setRemoveTarget(e)} />
                   </div>
@@ -2962,6 +3187,12 @@
             toast.success('Kundanställd borttagen.');
             setRemoveTarget(null);
           }}
+        />
+
+        <ResetPasswordModal
+          open={!!pwTarget}
+          onClose={() => setPwTarget(null)}
+          employee={pwTarget}
         />
       </>
     );
