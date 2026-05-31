@@ -131,6 +131,21 @@
     );
   }
 
+  function ShiftTimeDisplay({ shift, timeClassName = '', plannedClassName = 'block text-[11px] text-slate-400 mt-0.5' }) {
+    useDb();
+    const times = db.shiftTimes(shift);
+    return (
+      <>
+        <span className={timeClassName}>{formatRange(times.effective.start, times.effective.end)}</span>
+        {times.showsPlannedNote && (
+          <span className={plannedClassName}>
+            Planerat: {formatRange(times.planned.start, times.planned.end)}
+          </span>
+        )}
+      </>
+    );
+  }
+
   /* ============================================================
    * Gemensamma kort
    * ============================================================ */
@@ -145,7 +160,9 @@
       >
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{relativeDay(shift.start_at)} · {formatRange(shift.start_at, shift.end_at)}</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              {relativeDay(shift.start_at)} · <ShiftTimeDisplay shift={shift} />
+            </p>
             <p className="mt-1 font-semibold text-slate-900 truncate">{prop?.name}</p>
             <p className="text-xs text-slate-500 truncate">{prop?.address}</p>
           </div>
@@ -214,7 +231,7 @@
         <PageHeader
           breadcrumbs={breadcrumbs}
           title={prop?.name || 'Pass'}
-          subtitle={`${relativeDay(shift.start_at)} · ${formatRange(shift.start_at, shift.end_at)}  ·  ${prop?.address || ''}`}
+          subtitle={<>{relativeDay(shift.start_at)} · <ShiftTimeDisplay shift={shift} /> · {prop?.address || ''}</>}
           actions={
             <div className="flex items-center gap-2">
               {onBack && <Button variant="ghost" icon="chevron-left" onClick={onBack}>Tillbaka</Button>}
@@ -238,15 +255,17 @@
                     </p>
                   </div>
                   {canCheckIn && (
-                    <Button variant="primary" icon="play" onClick={() => {
-                      db.checkIn(shift.id, session.userId);
-                      toast.success('Incheckad. Lycka till med passet!');
+                    <Button variant="primary" icon="play" onClick={async () => {
+                      const r = await db.checkIn(shift.id, session.userId);
+                      if (r?.ok) toast.success('Incheckad. Lycka till med passet!');
+                      else if (r?.error === 'PERSIST_FAILED') toast.error('Kunde inte spara – försök igen.');
                     }}>Checka in</Button>
                   )}
                   {canCheckOut && (
-                    <Button variant="success" icon="check" onClick={() => {
-                      db.checkOut(shift.id, session.userId);
-                      toast.success('Utcheckad. Tack för idag!');
+                    <Button variant="success" icon="check" onClick={async () => {
+                      const r = await db.checkOut(shift.id, session.userId);
+                      if (r?.ok) toast.success('Utcheckad. Tack för idag!');
+                      else if (r?.error === 'PERSIST_FAILED') toast.error('Kunde inte spara – försök igen.');
                     }}>Checka ut</Button>
                   )}
                 </div>
@@ -337,7 +356,9 @@
                   <Icon name="clock" className="w-4 h-4 text-slate-400 mt-0.5" />
                   <div className="flex-1">
                     <dt className="text-xs text-slate-500">Tid</dt>
-                    <dd className="font-medium text-slate-900">{formatRange(shift.start_at, shift.end_at)}</dd>
+                    <dd className="font-medium text-slate-900">
+                      <ShiftTimeDisplay shift={shift} plannedClassName="block text-xs text-slate-500 mt-0.5 font-normal" />
+                    </dd>
                   </div>
                 </div>
                 <div className="flex items-start gap-2">
@@ -486,11 +507,51 @@
     const [assignOpen, setAssignOpen] = useState(false);
     const [adjustOpen, setAdjustOpen] = useState(false);
     const [sickOpen, setSickOpen] = useState(false);
+    const [approveOpen, setApproveOpen] = useState(false);
+    const [declineOpen, setDeclineOpen] = useState(false);
+    const [acting, setActing] = useState(false);
     const isSick = shift.status === 'Sjukanmäld';
-    const isPlanned = ['Godkänt', 'Planerat'].includes(shift.status);
+    const isAwaitingApproval = shift.status === 'Planerat';
+    const isScheduled = shift.status === 'Godkänt';
     const isLive = shift.status === 'Pågående';
     const isBorttaget = shift.status === 'Borttaget';
     const cleaner = db.userById(shift.cleaner_user_id);
+
+    async function handleApprove() {
+      setActing(true);
+      try {
+        const r = await db.approveShift(shift.id, session.userId);
+        if (r?.ok) {
+          toast.success('Passet godkänt. Städare och kund har fått besked.');
+          setApproveOpen(false);
+          onClose && onClose();
+        } else if (r?.error === 'PERSIST_FAILED') {
+          toast.error('Kunde inte spara – försök igen.');
+        } else {
+          toast.error('Passet kunde inte godkännas.');
+        }
+      } finally {
+        setActing(false);
+      }
+    }
+
+    async function handleDecline() {
+      setActing(true);
+      try {
+        const r = await db.declineShift(shift.id, session.userId);
+        if (r?.ok) {
+          toast.success('Förfrågan avslagen. Berörda parter har fått besked.');
+          setDeclineOpen(false);
+          onClose && onClose();
+        } else if (r?.error === 'PERSIST_FAILED') {
+          toast.error('Kunde inte spara – försök igen.');
+        } else {
+          toast.error('Passet kunde inte avslås.');
+        }
+      } finally {
+        setActing(false);
+      }
+    }
 
     if (isBorttaget) {
       return (
@@ -549,7 +610,64 @@
       );
     }
 
-    if (isPlanned) {
+    if (isAwaitingApproval) {
+      return (
+        <>
+          <Card padding="md" className="border-brand-200 bg-brand-50/40">
+            <div className="flex items-start gap-2 mb-3">
+              <Icon name="calendar" className="w-4 h-4 text-brand-700 mt-0.5" />
+              <div>
+                <h3 className="font-bold text-brand-900">Väntar på godkännande</h3>
+                <p className="text-[12px] text-brand-800/90 mt-0.5">
+                  Passet är planerat men inte godkänt. Godkänn för att meddela städare och kund, eller avslå förfrågan.
+                </p>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Button variant="primary" icon="check" className="w-full justify-start" disabled={acting} onClick={() => setApproveOpen(true)}>
+                Godkänn pass
+              </Button>
+              <Button variant="danger-ghost" icon="x" className="w-full justify-start" disabled={acting} onClick={() => setDeclineOpen(true)}>
+                Avslå förfrågan
+              </Button>
+            </div>
+          </Card>
+          <Card padding="md">
+            <h3 className="font-bold text-slate-900 mb-3">Övriga åtgärder</h3>
+            <div className="space-y-2">
+              <Button variant="outline" icon="user-plus" className="w-full justify-start" onClick={() => setAssignOpen(true)}>
+                Byt städare
+              </Button>
+              <Button variant="outline" icon="clock" className="w-full justify-start" onClick={() => setAdjustOpen(true)}>
+                Justera tid
+              </Button>
+            </div>
+          </Card>
+          <AdminDeleteShiftSection shift={shift} session={session} onClose={onClose} />
+          <AssignReplacementModal open={assignOpen} onClose={() => setAssignOpen(false)} shift={shift} session={session} onDone={onClose} />
+          <AdjustShiftModal open={adjustOpen} onClose={() => setAdjustOpen(false)} shift={shift} session={session} onDone={onClose} />
+          <ConfirmDialog
+            open={approveOpen}
+            onClose={() => { if (!acting) setApproveOpen(false); }}
+            title="Godkänn passet?"
+            message="Passet blir Godkänt och städare samt kund får en tilldelningsnotis."
+            confirmLabel={acting ? 'Godkänner…' : 'Godkänn'}
+            onConfirm={handleApprove}
+          />
+          <ConfirmDialog
+            open={declineOpen}
+            onClose={() => { if (!acting) setDeclineOpen(false); }}
+            title="Avslå förfrågan?"
+            message="Passet markeras som Borttaget. Städare och kund får besked att passet inte blir av."
+            confirmLabel={acting ? 'Avslår…' : 'Avslå'}
+            danger
+            onConfirm={handleDecline}
+          />
+        </>
+      );
+    }
+
+    if (isScheduled) {
       return (
         <>
           <Card padding="md">
@@ -775,7 +893,7 @@
     useDb();
     const [cancelOpen, setCancelOpen] = useState(false);
     const status = shift.status;
-    const startMs = new Date(shift.start_at).getTime();
+    const startMs = new Date(db.shiftPlannedStart(shift)).getTime();
     const hoursToStart = (startMs - Date.now()) / 36e5;
 
     if (status === 'Avbokat') {
@@ -890,7 +1008,7 @@
         }
       >
         <p className="text-sm text-slate-700 mb-1">
-          <span className="font-semibold">{prop?.name}</span> · {relativeDay(shift.start_at)} {formatRange(shift.start_at, shift.end_at)}
+          <span className="font-semibold">{prop?.name}</span> · {relativeDay(shift.start_at)} <ShiftTimeDisplay shift={shift} />
         </p>
         <p className="text-xs text-slate-500 mb-4">
           Cirka {Math.floor(hoursToStart)} timmar kvar till passet. Admin och tilldelad städare får besked direkt.
@@ -932,7 +1050,7 @@
         }
       >
         <p className="text-sm text-slate-700 mb-1">
-          <span className="font-semibold">{prop?.name}</span> · {relativeDay(shift.start_at)} {formatRange(shift.start_at, shift.end_at)}
+          <span className="font-semibold">{prop?.name}</span> · {relativeDay(shift.start_at)} <ShiftTimeDisplay shift={shift} />
         </p>
         {adminActor && cleaner && (
           <p className="text-xs text-slate-500 mb-1">Städare: {cleaner.name}</p>
@@ -1123,7 +1241,7 @@
         }
       >
         <p className="text-xs text-slate-500 mb-3">
-          {prop?.name} · {formatRange(shift.start_at, shift.end_at)} · går till admin
+          {prop?.name} · <ShiftTimeDisplay shift={shift} /> · går till admin
         </p>
         <Field label="Kategori *" className="mb-3">
           <Select value={category} onChange={e => setCategory(e.target.value)}>
@@ -1183,7 +1301,7 @@
         }
       >
         <p className="text-xs text-slate-500 mb-3">
-          {prop?.name} · {formatDateLong(shift.start_at)} · {formatRange(shift.start_at, shift.end_at)}
+          {prop?.name} · {formatDateLong(shift.start_at)} · <ShiftTimeDisplay shift={shift} />
         </p>
         <Field label="Kategori *" className="mb-3">
           <Select value={category} onChange={e => setCategory(e.target.value)}>
@@ -1456,7 +1574,7 @@
                         href={`#${role === 'admin' ? '/admin/schema' : role === 'cleaner' ? '/stadare/pass' : '/kund/pass'}/${detail.shift.id}`}
                         className="text-brand-600 hover:underline"
                       >
-                        {formatDateLong(detail.shift.start_at)} · {formatRange(detail.shift.start_at, detail.shift.end_at)}
+                        {formatDateLong(detail.shift.start_at)} · <ShiftTimeDisplay shift={detail.shift} />
                       </a>
                     </dd>
                   </div>
@@ -1841,6 +1959,7 @@
     const [startTime, setStartTime] = useState('08:00');
     const [endTime, setEndTime] = useState('10:00');
     const [notes, setNotes] = useState('');
+    const [requiresApproval, setRequiresApproval] = useState(false);
 
     useEffect(() => {
       if (open) {
@@ -1850,6 +1969,7 @@
         setStartTime('08:00');
         setEndTime('10:00');
         setNotes('');
+        setRequiresApproval(false);
       }
     }, [open, preselectPropertyId]);
 
@@ -1862,13 +1982,19 @@
     function submit() {
       const startAt = combineDateTime(date, startTime);
       const endAt = combineDateTime(date, endTime);
-      const shift = db.createOneOffShift({
+      const status = requiresApproval ? 'Planerat' : 'Godkänt';
+      db.createOneOffShift({
         propertyId, cleanerUserId: cleanerId,
         startAt, endAt,
         actorUserId: session.userId,
         notes: notes.trim(),
+        status,
       });
-      toast.success('Nytt pass skapat. Städare och kund notifieras.');
+      toast.success(
+        requiresApproval
+          ? 'Pass skapat som Planerat – godkänn det i dashboarden innan städare och kund meddelas.'
+          : 'Nytt pass skapat. Städare och kund notifieras.',
+      );
       onClose();
     }
 
@@ -1913,6 +2039,18 @@
             <Input type="time" value={endTime} onChange={e => setEndTime(e.target.value)} />
           </Field>
         </div>
+        <label className="mt-4 flex items-start gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            className="mt-1 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+            checked={requiresApproval}
+            onChange={e => setRequiresApproval(e.target.checked)}
+          />
+          <span className="text-sm text-slate-700">
+            <span className="font-medium text-slate-900">Kräver godkännande (Planerat)</span>
+            <span className="block text-xs text-slate-500 mt-0.5">Städare och kund meddelas först när du godkänner passet.</span>
+          </span>
+        </label>
         <div className="mt-3">
           <Field label="Interna anteckningar" hint="Visas för admin och städare.">
             <Textarea rows={2} value={notes} onChange={e => setNotes(e.target.value)} placeholder="T.ex. extrastädning efter event." />
@@ -2174,7 +2312,7 @@
                 const cleanerLabel = db.displayCleaner(s.cleaner_user_id, session.user.role);
                 return (
                   <div key={s.id} className="flex items-center justify-between gap-2 py-1 px-2 rounded bg-white border border-sky-100">
-                    <span className="text-slate-700">{formatDateShort(s.start_at)} · {formatRange(s.start_at, s.end_at)}</span>
+                    <span className="text-slate-700">{formatDateShort(s.start_at)} · <ShiftTimeDisplay shift={s} /></span>
                     <span className="text-slate-500 truncate">{prop?.name} · {cleanerLabel}</span>
                   </div>
                 );
@@ -3518,6 +3656,12 @@
   const WEEKDAYS = ['Måndag', 'Tisdag', 'Onsdag', 'Torsdag', 'Fredag', 'Lördag', 'Söndag'];
   const WEEKDAYS_SHORT = ['Mån', 'Tis', 'Ons', 'Tors', 'Fre', 'Lör', 'Sön'];
 
+  function recurringScheduleTitle(rs) {
+    const kind = rs.recurrence_kind || 'weekly';
+    if (kind === 'monthly_last') return `Sista ${WEEKDAYS[rs.weekday]} i månaden`;
+    return `Varje ${WEEKDAYS[rs.weekday]}`;
+  }
+
   function PropertyShiftsList({ property, session, onNavigate, upcomingShifts }) {
     const [createOpen, setCreateOpen] = useState(false);
     return (
@@ -3551,7 +3695,9 @@
         <div className="flex items-center justify-between mb-4">
           <div>
             <h3 className="font-bold text-slate-900">Återkommande pass</h3>
-            <p className="text-xs text-slate-500 mt-0.5">Mallar genererar pass rullande 12 veckor framåt. Ändringar på enskilda pass påverkar inte mallen.</p>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Mallar genererar pass rullande 24 veckor framåt. Lägg två mallar om ni har både veckostäd och t.ex. storstäd sista söndagen i månaden.
+            </p>
           </div>
           <Button icon="plus" onClick={() => setCreateOpen(true)}>Ny mall</Button>
         </div>
@@ -3564,7 +3710,10 @@
               <li key={rs.id} className="px-2 py-3 flex items-center gap-3">
                 <span className="w-10 h-10 rounded-xl bg-brand-50 text-brand-700 text-xs font-bold flex items-center justify-center flex-shrink-0">{WEEKDAYS_SHORT[rs.weekday]}</span>
                 <div className="flex-1 min-w-0">
-                  <p className="font-semibold text-slate-900">{WEEKDAYS[rs.weekday]} · {rs.start_time}–{rs.end_time}</p>
+                  <p className="font-semibold text-slate-900">
+                    {recurringScheduleTitle(rs)} · {rs.start_time}–{rs.end_time}
+                    {rs.label ? <span className="text-slate-500 font-normal"> · {rs.label}</span> : null}
+                  </p>
                   <p className="text-xs text-slate-500 mt-0.5">
                     Städare: {rs.cleaner?.name || '—'}
                     {(rs.valid_from || rs.valid_to) && (
@@ -3586,9 +3735,10 @@
           message="Alla framtida pass från den här mallen tas bort. Historiska pass bevaras. Berörda städare notifieras."
           confirmLabel="Ta bort mall"
           danger
-          onConfirm={() => {
-            const r = db.deleteRecurringSchedule(confirmRemoveId, session.userId);
+          onConfirm={async () => {
+            const r = await db.deleteRecurringSchedule(confirmRemoveId, session.userId);
             if (r?.ok) toast.success(`Mall borttagen – ${r.removed} framtida pass rensade.`);
+            else if (r?.error === 'PERSIST_FAILED') toast.error('Kunde inte spara – försök igen.');
             setConfirmRemoveId(null);
           }}
         />
@@ -3598,6 +3748,8 @@
 
   function CreateRecurringModal({ open, onClose, property, session }) {
     const [weekday, setWeekday] = useState('0');
+    const [recurrenceKind, setRecurrenceKind] = useState('weekly');
+    const [label, setLabel] = useState('');
     const [startTime, setStartTime] = useState('08:00');
     const [endTime, setEndTime] = useState('10:00');
     const [cleanerId, setCleanerId] = useState('');
@@ -3606,7 +3758,8 @@
 
     useEffect(() => {
       if (open) {
-        setWeekday('0'); setStartTime('08:00'); setEndTime('10:00');
+        setWeekday('0'); setRecurrenceKind('weekly'); setLabel('');
+        setStartTime('08:00'); setEndTime('10:00');
         setCleanerId(''); setValidFrom(''); setValidTo('');
       }
     }, [open]);
@@ -3624,34 +3777,53 @@
         footer={
           <>
             <Button variant="ghost" onClick={onClose}>Avbryt</Button>
-            <Button disabled={!canSubmit} icon="plus" onClick={() => {
-              const r = db.createRecurringSchedule({
+            <Button disabled={!canSubmit} icon="plus" onClick={async () => {
+              const r = await db.createRecurringSchedule({
                 propertyId: property.id,
                 weekday: Number(weekday),
+                recurrenceKind,
+                label,
                 startTime, endTime,
                 defaultCleanerUserId: cleanerId,
                 validFrom: validFrom || null,
                 validTo: validTo || null,
-                generateWeeks: 12,
+                generateWeeks: 24,
                 actorUserId: session.userId,
               });
-              toast.success(`Mall skapad – ${r.generated} pass genererade för 12 veckor framåt.`);
+              if (r?.error === 'PERSIST_FAILED') {
+                toast.error('Kunde inte spara – försök igen.');
+                return;
+              }
+              toast.success(`Mall skapad – ${r.generated} pass genererade för 24 veckor framåt.`);
               onClose();
             }}>Skapa mall</Button>
           </>
         }
       >
-        <Field label="Veckodag">
-          <Select value={weekday} onChange={e => setWeekday(e.target.value)}>
-            {WEEKDAYS.map((d, i) => <option key={i} value={i}>{d}</option>)}
+        <Field label="Upprepning">
+          <Select value={recurrenceKind} onChange={e => setRecurrenceKind(e.target.value)}>
+            <option value="weekly">Varje vecka</option>
+            <option value="monthly_last">Sista veckodagen i månaden</option>
           </Select>
         </Field>
+        <div className="mt-3">
+          <Field label="Veckodag">
+            <Select value={weekday} onChange={e => setWeekday(e.target.value)}>
+              {WEEKDAYS.map((d, i) => <option key={i} value={i}>{d}</option>)}
+            </Select>
+          </Field>
+        </div>
         <div className="grid grid-cols-2 gap-3 mt-3">
           <Field label="Starttid">
             <Input type="time" value={startTime} onChange={e => setStartTime(e.target.value)} />
           </Field>
           <Field label="Sluttid" error={!validTime && startTime && endTime ? 'Sluttid måste vara efter starttid.' : null}>
             <Input type="time" value={endTime} onChange={e => setEndTime(e.target.value)} />
+          </Field>
+        </div>
+        <div className="mt-3">
+          <Field label="Beskrivning" hint="Valfritt, t.ex. Storstädning.">
+            <Input value={label} onChange={e => setLabel(e.target.value)} placeholder="T.ex. Storstädning" />
           </Field>
         </div>
         <div className="mt-3">
@@ -3672,7 +3844,7 @@
         </div>
         <div className="mt-4 rounded-lg border border-sky-200 bg-sky-50/50 p-3 text-xs text-sky-900/90">
           <Icon name="info" className="w-4 h-4 text-sky-700 inline-block mr-1 -mt-0.5" />
-          Mallen genererar pass rullande 12 veckor framåt. Justeringar och borttagningar av enskilda pass påverkar bara den raden, inte mallen.
+          Mallen genererar pass rullande 24 veckor framåt. Justeringar och borttagningar av enskilda pass påverkar bara den raden, inte mallen.
         </div>
       </Modal>
     );
@@ -3806,7 +3978,7 @@
   function AdminDashboardView({ session, onNavigate }) {
     const [createShiftOpen, setCreateShiftOpen] = useState(false);
     useDb();
-    const { sick, openIncidents, todayShifts } = db.adminActionables();
+    const { sick, openIncidents, todayShifts, planned } = db.adminActionables();
     const totalCleaners = db.state.users.filter(u => u.role === 'cleaner' && u.active).length;
     const totalCustomers = db.state.customers.length;
     const todayAll = db.state.shifts.filter(s => formatDateShort(s.start_at) === formatDateShort(new Date()));
@@ -3818,6 +3990,7 @@
           subtitle="Här är dagens läge och allt som kräver din åtgärd."
           actions={
             <>
+              <Button variant="outline" icon="building" onClick={() => onNavigate('/admin/kunder')}>Återkommande på objekt</Button>
               <Button variant="outline" icon="calendar" onClick={() => onNavigate('/admin/schema')}>Schema</Button>
               <Button variant="primary" icon="plus" onClick={() => setCreateShiftOpen(true)}>Nytt pass</Button>
             </>
@@ -3836,12 +4009,25 @@
           Kräver din åtgärd
         </h2>
 
-        {sick.length === 0 && openIncidents.length === 0 ? (
+        {sick.length === 0 && openIncidents.length === 0 && planned.length === 0 ? (
           <Card padding="lg">
-            <EmptyState icon="check-circle" title="Allt är under kontroll" description="Inga sjukanmälda pass eller öppna avvikelser just nu." />
+            <EmptyState icon="check-circle" title="Allt är under kontroll" description="Inga väntande godkännanden, sjukanmälda pass eller öppna avvikelser just nu." />
           </Card>
         ) : (
           <div className="space-y-6">
+            {planned.length > 0 && (
+              <section>
+                <h3 className="text-sm font-bold text-slate-700 mb-2 flex items-center gap-2">
+                  <Icon name="calendar" className="w-4 h-4 text-brand-600" />
+                  Väntar på godkännande <Badge variant="brand">{planned.length}</Badge>
+                </h3>
+                <div className="grid md:grid-cols-2 gap-3">
+                  {planned.map(s => (
+                    <ShiftCard key={s.id} shift={s} viewerRole="admin" viewerUserId={session.userId} onClick={() => onNavigate(`/admin/schema/${s.id}`)} />
+                  ))}
+                </div>
+              </section>
+            )}
             {sick.length > 0 && (
               <section>
                 <h3 className="text-sm font-bold text-slate-700 mb-2 flex items-center gap-2">

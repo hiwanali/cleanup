@@ -444,6 +444,437 @@
     return { ok: true };
   }
 
+  /* ---------- realtime (live-synk mellan användare) ---------- */
+  let realtimeChannel = null;
+  let hydrateDebounceTimer = null;
+  const HYDRATE_DEBOUNCE_MS = 700;
+
+  function scheduleHydrateFromRealtime(userId) {
+    if (!userId || typeof window.hydrateFromSupabase !== 'function') return;
+    clearTimeout(hydrateDebounceTimer);
+    hydrateDebounceTimer = setTimeout(() => {
+      window.hydrateFromSupabase(userId).catch(() => {});
+    }, HYDRATE_DEBOUNCE_MS);
+  }
+
+  /**
+   * Prenumererar på ändringar i shifts, egna notifications och incidents.
+   * Vid event: debouncad full hydrering (RLS säkerställer rätt data per roll).
+   */
+  window.subscribeRealtimeSync = function subscribeRealtimeSync(userId) {
+    if (!enabled || !sb || !userId) {
+      return () => {};
+    }
+
+    if (realtimeChannel) {
+      sb.removeChannel(realtimeChannel);
+      realtimeChannel = null;
+    }
+
+    realtimeChannel = sb
+      .channel(`cleanup-sync-${userId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'shifts' },
+        () => scheduleHydrateFromRealtime(userId),
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'notifications',
+          filter: `recipient_user_id=eq.${userId}`,
+        },
+        () => scheduleHydrateFromRealtime(userId),
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'incidents' },
+        () => scheduleHydrateFromRealtime(userId),
+      )
+      .subscribe((status) => {
+        if (status === 'CHANNEL_ERROR') {
+          console.error('[realtime] channel error');
+        }
+      });
+
+    return () => {
+      clearTimeout(hydrateDebounceTimer);
+      if (realtimeChannel) {
+        sb.removeChannel(realtimeChannel);
+        realtimeChannel = null;
+      }
+    };
+  };
+
+  async function persistMarkNotificationsRead(userId) {
+    if (!enabled || !sb || !isUuid(userId)) {
+      return { ok: true, skipped: true };
+    }
+
+    const now = new Date().toISOString();
+    const { error } = await sb
+      .from('notifications')
+      .update({ read_at: now })
+      .eq('recipient_user_id', userId)
+      .is('read_at', null);
+
+    if (error) {
+      console.error('[persist] markNotificationsRead:', error.message);
+      return { ok: false, message: error.message };
+    }
+
+    return { ok: true };
+  }
+
+  async function persistApproveShift({ shiftId, actorUserId, shift, primaryContactUserId }) {
+    if (!enabled || !sb || !isUuid(shiftId)) {
+      return { ok: true, skipped: true };
+    }
+
+    const { error: shiftErr } = await sb.from('shifts').update({
+      status: 'Godkänt',
+      last_modified_by: actorUserId,
+    }).eq('id', shiftId);
+
+    if (shiftErr) {
+      console.error('[persist] approveShift:', shiftErr.message);
+      return { ok: false, message: shiftErr.message };
+    }
+
+    const { error: evErr } = await sb.from('shift_events').insert({
+      shift_id: shiftId,
+      actor_user_id: actorUserId,
+      event_type: 'shift_approved',
+      payload: {},
+    });
+
+    if (evErr) {
+      return { ok: false, message: evErr.message };
+    }
+
+    const notifPayload = {
+      shift_id: shiftId,
+      property_id: shift.property_id,
+      start_at: toIso(shift.start_at),
+    };
+
+    const rows = [];
+    if (shift.cleaner_user_id && isUuid(shift.cleaner_user_id)) {
+      rows.push({
+        recipient_user_id: shift.cleaner_user_id,
+        channel: 'in_app',
+        kind: 'assigned_shift',
+        payload: notifPayload,
+      });
+    }
+    if (primaryContactUserId && isUuid(primaryContactUserId)) {
+      rows.push({
+        recipient_user_id: primaryContactUserId,
+        channel: 'in_app',
+        kind: 'assigned_shift',
+        payload: notifPayload,
+      });
+    }
+
+    if (rows.length > 0) {
+      const { error: nErr } = await sb.from('notifications').insert(rows);
+      if (nErr) return { ok: false, message: nErr.message };
+    }
+
+    return { ok: true };
+  }
+
+  async function persistDeclineShift({ shiftId, actorUserId, hoursToStart, shift, primaryContactUserId }) {
+    if (!enabled || !sb || !isUuid(shiftId)) {
+      return { ok: true, skipped: true };
+    }
+
+    const { error: shiftErr } = await sb.from('shifts').update({
+      status: 'Borttaget',
+      last_modified_by: actorUserId,
+    }).eq('id', shiftId);
+
+    if (shiftErr) {
+      return { ok: false, message: shiftErr.message };
+    }
+
+    await sb.from('shift_events').insert({
+      shift_id: shiftId,
+      actor_user_id: actorUserId,
+      event_type: 'shift_declined',
+      payload: { hours_to_start: hoursToStart },
+    });
+
+    const notifPayload = {
+      shift_id: shiftId,
+      property_id: shift.property_id,
+      start_at: toIso(shift.start_at),
+    };
+
+    const rows = [];
+    if (shift.cleaner_user_id && isUuid(shift.cleaner_user_id)) {
+      rows.push({
+        recipient_user_id: shift.cleaner_user_id,
+        channel: 'in_app',
+        kind: 'admin_deleted',
+        payload: notifPayload,
+      });
+    }
+    if (primaryContactUserId && isUuid(primaryContactUserId)) {
+      rows.push({
+        recipient_user_id: primaryContactUserId,
+        channel: 'in_app',
+        kind: 'admin_deleted',
+        payload: notifPayload,
+      });
+    }
+
+    if (rows.length > 0) {
+      await sb.from('notifications').insert(rows);
+    }
+
+    return { ok: true };
+  }
+
+  async function persistCheckIn({ shiftId, cleanerUserId, checkedInAt }) {
+    if (!enabled || !sb || !isUuid(shiftId)) {
+      return { ok: true, skipped: true };
+    }
+
+    const { error: shiftErr } = await sb.from('shifts').update({
+      status: 'Pågående',
+      checked_in_at: toIso(checkedInAt),
+      last_modified_by: cleanerUserId,
+    }).eq('id', shiftId);
+
+    if (shiftErr) {
+      console.error('[persist] checkIn:', shiftErr.message);
+      return { ok: false, message: shiftErr.message };
+    }
+
+    const { error: evErr } = await sb.from('shift_events').insert({
+      shift_id: shiftId,
+      actor_user_id: cleanerUserId,
+      event_type: 'check_in',
+      payload: {},
+    });
+
+    if (evErr) return { ok: false, message: evErr.message };
+    return { ok: true };
+  }
+
+  async function persistCheckOut({ shiftId, cleanerUserId, shift, checkedOutAt }) {
+    if (!enabled || !sb || !isUuid(shiftId)) {
+      return { ok: true, skipped: true };
+    }
+
+    const { error: shiftErr } = await sb.from('shifts').update({
+      status: 'Utfört',
+      checked_in_at: toIso(shift.checked_in_at),
+      checked_out_at: toIso(checkedOutAt),
+      start_at: toIso(shift.start_at),
+      end_at: toIso(shift.end_at),
+      original_start_at: toIso(shift.original_start_at),
+      original_end_at: toIso(shift.original_end_at),
+      last_modified_by: cleanerUserId,
+    }).eq('id', shiftId);
+
+    if (shiftErr) {
+      console.error('[persist] checkOut:', shiftErr.message);
+      return { ok: false, message: shiftErr.message };
+    }
+
+    const { error: evErr } = await sb.from('shift_events').insert({
+      shift_id: shiftId,
+      actor_user_id: cleanerUserId,
+      event_type: 'check_out',
+      payload: {
+        planned: {
+          start_at: toIso(shift.original_start_at),
+          end_at: toIso(shift.original_end_at),
+        },
+        actual: { start_at: toIso(shift.start_at), end_at: toIso(shift.end_at) },
+      },
+    });
+
+    if (evErr) return { ok: false, message: evErr.message };
+    return { ok: true };
+  }
+
+  function isoWeekdayFromDate(d) {
+    return (d.getDay() + 6) % 7;
+  }
+
+  function isLastWeekdayOfMonthDate(d, weekday) {
+    if (isoWeekdayFromDate(d) !== weekday) return false;
+    const next = new Date(d);
+    next.setDate(next.getDate() + 7);
+    return next.getMonth() !== d.getMonth();
+  }
+
+  function matchesRecurringDateClient(d, rs) {
+    const wd = isoWeekdayFromDate(d);
+    if (wd !== rs.weekday) return false;
+    const kind = rs.recurrence_kind || 'weekly';
+    if (kind === 'monthly_last') return isLastWeekdayOfMonthDate(d, rs.weekday);
+    return true;
+  }
+
+  async function snapshotChecklistForShiftClient(shiftId, propertyId) {
+    if (!isUuid(shiftId) || !isUuid(propertyId)) return;
+    const { data: items } = await sb
+      .from('cleaning_checklists')
+      .select('title, position')
+      .eq('property_id', propertyId)
+      .eq('active', true)
+      .order('position');
+    if (!items?.length) return;
+    const rows = items.map(c => ({
+      shift_id: shiftId,
+      title: c.title,
+      position: c.position,
+    }));
+    await sb.from('shift_checklist_items').insert(rows);
+  }
+
+  async function persistCreateRecurringSchedule({ rs, generateWeeks, actorUserId }) {
+    if (!enabled || !sb || !isUuid(rs.property_id)) {
+      return { ok: true, skipped: true };
+    }
+
+    const insertRow = {
+      property_id: rs.property_id,
+      weekday: rs.weekday,
+      start_time: rs.start_time.length === 5 ? `${rs.start_time}:00` : rs.start_time,
+      end_time: rs.end_time.length === 5 ? `${rs.end_time}:00` : rs.end_time,
+      default_cleaner_user_id: isUuid(rs.default_cleaner_user_id) ? rs.default_cleaner_user_id : null,
+      valid_from: rs.valid_from ? toIso(rs.valid_from).slice(0, 10) : null,
+      valid_to: rs.valid_to ? toIso(rs.valid_to).slice(0, 10) : null,
+      active: true,
+      recurrence_kind: rs.recurrence_kind || 'weekly',
+      label: rs.label || null,
+    };
+    if (isUuid(rs.id)) insertRow.id = rs.id;
+
+    const { data: inserted, error } = await sb
+      .from('recurring_schedules')
+      .insert(insertRow)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('[persist] createRecurringSchedule:', error.message);
+      return { ok: false, message: error.message };
+    }
+
+    const scheduleRow = inserted;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const rangeEnd = new Date(today);
+    rangeEnd.setDate(rangeEnd.getDate() + generateWeeks * 7);
+
+    for (let cursor = new Date(today); cursor <= rangeEnd; cursor.setDate(cursor.getDate() + 1)) {
+      const day = new Date(cursor);
+      if (!matchesRecurringDateClient(day, scheduleRow)) continue;
+
+      const [sh, sm] = rs.start_time.split(':').map(Number);
+      const [eh, em] = rs.end_time.split(':').map(Number);
+      const startAt = new Date(day);
+      startAt.setHours(sh, sm, 0, 0);
+      const endAt = new Date(day);
+      endAt.setHours(eh, em, 0, 0);
+      if (endAt.getTime() < Date.now()) continue;
+
+      const dayStart = new Date(day);
+      dayStart.setHours(0, 0, 0, 0);
+      const dayEnd = new Date(day);
+      dayEnd.setHours(23, 59, 59, 999);
+
+      const { data: dayShifts } = await sb
+        .from('shifts')
+        .select('id, start_at, end_at, status')
+        .eq('property_id', rs.property_id)
+        .gte('start_at', toIso(dayStart))
+        .lte('start_at', toIso(dayEnd));
+
+      const active = (dayShifts || []).filter(s => !['Borttaget', 'Avbokat'].includes(s.status));
+      const newMins = (endAt - startAt) / 60000;
+      if (active.length > 0) {
+        const longest = active.reduce((a, b) => {
+          const aM = (new Date(a.end_at) - new Date(a.start_at)) / 60000;
+          const bM = (new Date(b.end_at) - new Date(b.start_at)) / 60000;
+          return bM > aM ? b : a;
+        });
+        const oldMins = (new Date(longest.end_at) - new Date(longest.start_at)) / 60000;
+        if (newMins <= oldMins) continue;
+        if (new Date(longest.start_at).getTime() < Date.now()) continue;
+        await sb.from('shifts').delete().eq('id', longest.id);
+      }
+
+      const { data: dup } = await sb
+        .from('shifts')
+        .select('id')
+        .eq('property_id', rs.property_id)
+        .eq('recurring_id', scheduleRow.id)
+        .eq('start_at', toIso(startAt))
+        .maybeSingle();
+
+      if (dup) continue;
+
+      const { data: newShift, error: shiftErr } = await sb
+        .from('shifts')
+        .insert({
+          property_id: rs.property_id,
+          cleaner_user_id: isUuid(rs.default_cleaner_user_id) ? rs.default_cleaner_user_id : null,
+          start_at: toIso(startAt),
+          end_at: toIso(endAt),
+          status: 'Godkänt',
+          source: 'recurring',
+          recurring_id: scheduleRow.id,
+          last_modified_by: isUuid(actorUserId) ? actorUserId : null,
+        })
+        .select('id')
+        .single();
+
+      if (shiftErr) {
+        console.error('[persist] createRecurringSchedule shift:', shiftErr.message);
+        return { ok: false, message: shiftErr.message };
+      }
+
+      await snapshotChecklistForShiftClient(newShift.id, rs.property_id);
+    }
+
+    return { ok: true, rs: { id: scheduleRow.id } };
+  }
+
+  async function persistDeleteRecurringSchedule({ scheduleId }) {
+    if (!enabled || !sb || !isUuid(scheduleId)) {
+      return { ok: true, skipped: true };
+    }
+
+    const now = new Date().toISOString();
+    const { error: shiftErr } = await sb
+      .from('shifts')
+      .delete()
+      .eq('recurring_id', scheduleId)
+      .gte('start_at', now);
+
+    if (shiftErr) {
+      console.error('[persist] deleteRecurringSchedule shifts:', shiftErr.message);
+      return { ok: false, message: shiftErr.message };
+    }
+
+    const { error } = await sb.from('recurring_schedules').delete().eq('id', scheduleId);
+    if (error) {
+      console.error('[persist] deleteRecurringSchedule:', error.message);
+      return { ok: false, message: error.message };
+    }
+
+    return { ok: true };
+  }
+
   window.dbPersist = {
     adminDelete: persistAdminDelete,
     updateCustomer: persistUpdateCustomer,
@@ -453,5 +884,12 @@
     updateAdminSettings: persistUpdateAdminSettings,
     createCustomer: persistCreateCustomer,
     createProperty: persistCreateProperty,
+    markNotificationsRead: persistMarkNotificationsRead,
+    approveShift: persistApproveShift,
+    declineShift: persistDeclineShift,
+    checkIn: persistCheckIn,
+    checkOut: persistCheckOut,
+    createRecurringSchedule: persistCreateRecurringSchedule,
+    deleteRecurringSchedule: persistDeleteRecurringSchedule,
   };
 })();

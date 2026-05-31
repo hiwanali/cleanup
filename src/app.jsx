@@ -295,7 +295,13 @@
       <div data-bell-dd className="absolute right-3 top-12 w-[360px] max-w-[calc(100vw-1.5rem)] bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden">
         <div className="px-4 py-3 flex items-center justify-between border-b border-slate-100">
           <h3 className="font-bold text-slate-900">Notiser</h3>
-          <button onClick={() => { db.markAllRead(session.userId); }} className="text-xs font-semibold text-brand-700 hover:text-brand-800">
+          <button
+            onClick={async () => {
+              const r = await db.markAllRead(session.userId);
+              if (r?.error === 'PERSIST_FAILED') toast.error('Kunde inte spara – försök igen.');
+            }}
+            className="text-xs font-semibold text-brand-700 hover:text-brand-800"
+          >
             Markera som lästa
           </button>
         </div>
@@ -491,6 +497,13 @@
       });
       return () => { active = false; sub.subscription.unsubscribe(); };
     }, []);
+
+    useEffect(() => {
+      if (!window.SUPABASE_ENABLED || !session?.userId || typeof window.subscribeRealtimeSync !== 'function') {
+        return undefined;
+      }
+      return window.subscribeRealtimeSync(session.userId);
+    }, [session?.userId]);
 
     if (booting) return <BootScreen />;
 

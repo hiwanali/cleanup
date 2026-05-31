@@ -63,6 +63,23 @@
     a = new Date(a); b = new Date(b);
     return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
   }
+  /** Sista förekomsten av veckodag weekday (0=mån … 6=sön) i månaden för datum d. */
+  function isLastWeekdayOfMonth(d, weekday) {
+    if (isoDay(d) !== weekday) return false;
+    const next = addDays(d, 7);
+    return next.getMonth() !== new Date(d).getMonth();
+  }
+  function durationMinutes(startTime, endTime) {
+    const [sh, sm] = startTime.split(':').map(Number);
+    const [eh, em] = endTime.split(':').map(Number);
+    return (eh * 60 + em) - (sh * 60 + sm);
+  }
+  function matchesRecurringDate(d, rs) {
+    const kind = rs.recurrence_kind || 'weekly';
+    if (isoDay(d) !== rs.weekday) return false;
+    if (kind === 'monthly_last') return isLastWeekdayOfMonth(d, rs.weekday);
+    return true;
+  }
 
   /* ============================================================
    * Tabeller
@@ -154,6 +171,8 @@
           end_time: `${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`,
           default_cleaner_user_id: cleanerId,
           valid_from: null, valid_to: null, active: true,
+          recurrence_kind: 'weekly',
+          label: null,
         });
       });
     }
@@ -166,10 +185,9 @@
     // Generera pass (4 v bakåt + 12 v framåt)
     const today = startOfDay(new Date());
     const start = addDays(today, -28);
-    const end = addDays(today, 84);
+    const end = addDays(today, 168); // 24 veckor framåt
     for (let d = new Date(start); d <= end; d = addDays(d, 1)) {
-      const wd = isoDay(d);
-      rs.filter(r => r.weekday === wd && r.active).forEach(r => {
+      rs.filter(r => r.active && matchesRecurringDate(d, r)).forEach(r => {
         const [sh, sm] = r.start_time.split(':').map(Number);
         const [eh, em] = r.end_time.split(':').map(Number);
         const start_at = setTime(d, sh, sm);
@@ -210,6 +228,25 @@
         original_start_at: null, original_end_at: null,
         last_modified_by: admin.id,
         notes: '',
+        checked_in_at: null, checked_out_at: null,
+      });
+    }
+
+    // Demo: pass som väntar på admin-godkännande (Planerat → Godkänt)
+    {
+      const t14 = new Date();
+      t14.setDate(t14.getDate() + 3);
+      t14.setHours(14, 0, 0, 0);
+      const t16 = new Date(t14); t16.setHours(16, 0, 0, 0);
+      state.shifts.push({
+        id: id('s'), property_id: acmeHQ.id, cleaner_user_id: cleanerAnna.id,
+        start_at: t14, end_at: t16,
+        status: 'Planerat',
+        source: 'one_off',
+        recurring_id: null,
+        original_start_at: null, original_end_at: null,
+        last_modified_by: admin.id,
+        notes: 'Demo – väntar på godkännande',
         checked_in_at: null, checked_out_at: null,
       });
     }
@@ -439,6 +476,37 @@
         .sort((a, b) => a.position - b.position);
     },
 
+    /**
+     * Planerad vs faktisk tid. Efter utcheckning ligger faktisk tid i start_at/end_at;
+     * planerad i original_* om den skiljer sig. 48h-regler ska använda planned.start.
+     */
+    shiftTimes(shift) {
+      if (!shift) {
+        return {
+          planned: { start: null, end: null },
+          effective: { start: null, end: null },
+          showsPlannedNote: false,
+        };
+      }
+      const hasOriginal = shift.original_start_at != null && shift.original_end_at != null;
+      const plannedStart = hasOriginal ? shift.original_start_at : shift.start_at;
+      const plannedEnd = hasOriginal ? shift.original_end_at : shift.end_at;
+      const effectiveStart = shift.start_at;
+      const effectiveEnd = shift.end_at;
+      const showsPlannedNote = hasOriginal && (
+        new Date(plannedStart).getTime() !== new Date(effectiveStart).getTime()
+        || new Date(plannedEnd).getTime() !== new Date(effectiveEnd).getTime()
+      );
+      return {
+        planned: { start: plannedStart, end: plannedEnd },
+        effective: { start: effectiveStart, end: effectiveEnd },
+        showsPlannedNote,
+      };
+    },
+    shiftPlannedStart(shift) {
+      return db.shiftTimes(shift).planned.start;
+    },
+
     // Avvikelser
     incidents(opts = {}) {
       let list = [...state.incidents];
@@ -474,9 +542,31 @@
     unreadCountForUser(uid) {
       return state.notifications.filter(n => n.recipient_user_id === uid && !n.read_at).length;
     },
-    markAllRead(uid) {
-      state.notifications.forEach(n => { if (n.recipient_user_id === uid) n.read_at = new Date(); });
+    async markAllRead(uid) {
+      const readSnapshots = state.notifications
+        .filter(n => n.recipient_user_id === uid)
+        .map(n => ({ id: n.id, read_at: n.read_at }));
+
+      const now = new Date();
+      state.notifications.forEach(n => {
+        if (n.recipient_user_id === uid) n.read_at = now;
+      });
       bump();
+
+      const persist = window.dbPersist && window.dbPersist.markNotificationsRead;
+      if (persist) {
+        const r = await persist(uid);
+        if (!r.ok) {
+          readSnapshots.forEach(({ id, read_at }) => {
+            const n = state.notifications.find(x => x.id === id);
+            if (n) n.read_at = read_at;
+          });
+          bump();
+          return { error: 'PERSIST_FAILED', message: r.message };
+        }
+      }
+
+      return { ok: true };
     },
 
     /* —— "Kräver din åtgärd" för admin —— */
@@ -484,7 +574,10 @@
       const sick = state.shifts.filter(s => s.status === 'Sjukanmäld' && !s.sick_finalized_at);
       const openIncidents = state.incidents.filter(i => i.status === 'open');
       const todayShifts = state.shifts.filter(s => sameDay(s.start_at, new Date()) && s.status === 'Godkänt' && new Date(s.start_at) < new Date() && !s.checked_in_at);
-      return { sick, openIncidents, todayShifts };
+      const planned = state.shifts
+        .filter(s => s.status === 'Planerat')
+        .sort((a, b) => new Date(a.start_at) - new Date(b.start_at));
+      return { sick, openIncidents, todayShifts, planned };
     },
 
     /* —— Förhandsvisning kundledighet —— */
@@ -585,11 +678,11 @@
       bump();
     },
 
-    // §7.2 kundavbokning
+    // §7.2 kundavbokning (48h räknas från planerad start, inte faktisk utcheckningstid)
     cancelByCustomer(shiftId, actorUserId, reason = '') {
       const s = db.shiftById(shiftId);
       if (!s) return;
-      const hours = (new Date(s.start_at) - Date.now()) / 36e5;
+      const hours = (new Date(db.shiftPlannedStart(s)) - Date.now()) / 36e5;
       if (hours <= 48) return { error: 'INSIDE_48H' };
       s.status = 'Avbokat';
       s.cancel_reason = reason.trim() || null;
@@ -678,6 +771,116 @@
       bump();
 
       const persist = window.dbPersist && window.dbPersist.adminDelete;
+      if (persist) {
+        const r = await persist({
+          shiftId,
+          actorUserId,
+          hoursToStart,
+          shift: s,
+          primaryContactUserId: cust ? cust.primary_contact_user_id : null,
+        });
+        if (!r.ok) {
+          s.status = snapshot.status;
+          s.last_modified_by = snapshot.last_modified_by;
+          state.shift_events.length = snapshot.shift_eventsLen;
+          state.notifications.length = snapshot.notificationsLen;
+          bump();
+          return { error: 'PERSIST_FAILED', message: r.message };
+        }
+      }
+
+      return { ok: true };
+    },
+
+    // Planerat → Godkänt (admin godkänner förfrågan)
+    async approveShift(shiftId, actorUserId) {
+      const s = db.shiftById(shiftId);
+      if (!s) return { error: 'NOT_FOUND' };
+      if (s.status !== 'Planerat') return { error: 'INVALID_STATUS' };
+
+      const snapshot = {
+        status: s.status,
+        last_modified_by: s.last_modified_by,
+        shift_eventsLen: state.shift_events.length,
+        notificationsLen: state.notifications.length,
+      };
+
+      s.status = 'Godkänt';
+      s.last_modified_by = actorUserId;
+      state.shift_events.push({
+        id: id('se'),
+        shift_id: shiftId,
+        actor_user_id: actorUserId,
+        event_type: 'shift_approved',
+        payload: {},
+        created_at: new Date(),
+      });
+      if (s.cleaner_user_id) {
+        pushNotification(s.cleaner_user_id, 'assigned_shift', { shift_id: s.id, property_id: s.property_id, start_at: s.start_at });
+      }
+      const prop = db.propertyById(s.property_id);
+      const cust = prop ? state.customers.find(c => c.id === prop.customer_id) : null;
+      if (cust?.primary_contact_user_id) {
+        pushNotification(cust.primary_contact_user_id, 'assigned_shift', { shift_id: s.id, property_id: s.property_id, start_at: s.start_at });
+      }
+      bump();
+
+      const persist = window.dbPersist && window.dbPersist.approveShift;
+      if (persist) {
+        const r = await persist({
+          shiftId,
+          actorUserId,
+          shift: s,
+          primaryContactUserId: cust ? cust.primary_contact_user_id : null,
+        });
+        if (!r.ok) {
+          s.status = snapshot.status;
+          s.last_modified_by = snapshot.last_modified_by;
+          state.shift_events.length = snapshot.shift_eventsLen;
+          state.notifications.length = snapshot.notificationsLen;
+          bump();
+          return { error: 'PERSIST_FAILED', message: r.message };
+        }
+      }
+
+      return { ok: true };
+    },
+
+    // Planerat → Borttaget (admin avslår förfrågan)
+    async declineShift(shiftId, actorUserId) {
+      const s = db.shiftById(shiftId);
+      if (!s) return { error: 'NOT_FOUND' };
+      if (s.status !== 'Planerat') return { error: 'INVALID_STATUS' };
+
+      const snapshot = {
+        status: s.status,
+        last_modified_by: s.last_modified_by,
+        shift_eventsLen: state.shift_events.length,
+        notificationsLen: state.notifications.length,
+      };
+
+      const hoursToStart = (new Date(s.start_at) - Date.now()) / 36e5;
+      s.status = 'Borttaget';
+      s.last_modified_by = actorUserId;
+      state.shift_events.push({
+        id: id('se'),
+        shift_id: shiftId,
+        actor_user_id: actorUserId,
+        event_type: 'shift_declined',
+        payload: { hours_to_start: hoursToStart },
+        created_at: new Date(),
+      });
+      if (s.cleaner_user_id) {
+        pushNotification(s.cleaner_user_id, 'admin_deleted', { shift_id: s.id, property_id: s.property_id, start_at: s.start_at });
+      }
+      const prop = db.propertyById(s.property_id);
+      const cust = prop ? state.customers.find(c => c.id === prop.customer_id) : null;
+      if (cust?.primary_contact_user_id) {
+        pushNotification(cust.primary_contact_user_id, 'admin_deleted', { shift_id: s.id, property_id: s.property_id, start_at: s.start_at });
+      }
+      bump();
+
+      const persist = window.dbPersist && window.dbPersist.declineShift;
       if (persist) {
         const r = await persist({
           shiftId,
@@ -791,9 +994,76 @@
     },
 
     // §7.4 återkommande scheman – skapa
-    createRecurringSchedule({ propertyId, weekday, startTime, endTime, defaultCleanerUserId, validFrom = null, validTo = null, generateWeeks = 12, actorUserId }) {
+    _tryAddRecurringShift({ propertyId, recurringId, startAt, endAt, cleanerUserId, actorUserId }) {
+      const durMins = (new Date(endAt) - new Date(startAt)) / 60000;
+      const conflict = state.shifts.find(s =>
+        s.property_id === propertyId
+        && sameDay(s.start_at, startAt)
+        && !['Borttaget', 'Avbokat'].includes(s.status),
+      );
+      if (conflict) {
+        const conflictDur = (new Date(conflict.end_at) - new Date(conflict.start_at)) / 60000;
+        if (durMins <= conflictDur) return false;
+        if (new Date(conflict.start_at).getTime() < Date.now()) return false;
+        state.shifts = state.shifts.filter(s => s.id !== conflict.id);
+      }
+      snapshotChecklistToShift(state.shifts.push({
+        id: id('s'),
+        property_id: propertyId,
+        cleaner_user_id: cleanerUserId,
+        start_at: startAt,
+        end_at: endAt,
+        status: 'Godkänt',
+        source: 'recurring',
+        recurring_id: recurringId,
+        original_start_at: null,
+        original_end_at: null,
+        last_modified_by: actorUserId || null,
+        notes: '',
+        checked_in_at: null,
+        checked_out_at: null,
+      }) - 1);
+      return true;
+    },
+    _generateShiftsForRecurring(rs, { generateWeeks, actorUserId }) {
+      const today = startOfDay(new Date());
+      const end = addDays(today, generateWeeks * 7);
+      let generated = 0;
+      for (let d = new Date(today); d <= end; d = addDays(d, 1)) {
+        if (!matchesRecurringDate(d, rs)) continue;
+        if (rs.valid_from && d < startOfDay(rs.valid_from)) continue;
+        if (rs.valid_to && d > startOfDay(rs.valid_to)) continue;
+        const [sh, sm] = rs.start_time.split(':').map(Number);
+        const [eh, em] = rs.end_time.split(':').map(Number);
+        const start_at = setTime(d, sh, sm);
+        const end_at = setTime(d, eh, em);
+        if (end_at.getTime() < Date.now()) continue;
+        if (db._tryAddRecurringShift({
+          propertyId: rs.property_id,
+          recurringId: rs.id,
+          startAt: start_at,
+          endAt: end_at,
+          cleanerUserId: rs.default_cleaner_user_id,
+          actorUserId,
+        })) generated++;
+      }
+      return generated;
+    },
+    async createRecurringSchedule({
+      propertyId,
+      weekday,
+      startTime,
+      endTime,
+      defaultCleanerUserId,
+      validFrom = null,
+      validTo = null,
+      generateWeeks = 24,
+      actorUserId,
+      recurrenceKind = 'weekly',
+      label = '',
+    }) {
       const rs = {
-        id: id('rs'),
+        id: newId(),
         property_id: propertyId,
         weekday,
         start_time: startTime,
@@ -802,54 +1072,49 @@
         valid_from: validFrom ? new Date(validFrom) : null,
         valid_to: validTo ? new Date(validTo) : null,
         active: true,
+        recurrence_kind: recurrenceKind === 'monthly_last' ? 'monthly_last' : 'weekly',
+        label: label.trim() || null,
         created_at: new Date(),
       };
+      const schedulesBefore = state.recurring_schedules.length;
+      const shiftsBefore = state.shifts.length;
       state.recurring_schedules.push(rs);
-      // Generera pass framåt
-      const today = startOfDay(new Date());
-      const end = addDays(today, generateWeeks * 7);
-      let generated = 0;
-      for (let d = new Date(today); d <= end; d = addDays(d, 1)) {
-        if (isoDay(d) !== weekday) continue;
-        if (rs.valid_from && d < rs.valid_from) continue;
-        if (rs.valid_to && d > rs.valid_to) continue;
-        const [sh, sm] = startTime.split(':').map(Number);
-        const [eh, em] = endTime.split(':').map(Number);
-        const start_at = setTime(d, sh, sm);
-        const end_at = setTime(d, eh, em);
-        if (end_at.getTime() < Date.now()) continue; // hoppa över redan passerade tider idag
-        snapshotChecklistToShift(state.shifts.push({
-          id: id('s'),
-          property_id: propertyId,
-          cleaner_user_id: defaultCleanerUserId,
-          start_at, end_at,
-          status: 'Godkänt',
-          source: 'recurring',
-          recurring_id: rs.id,
-          original_start_at: null,
-          original_end_at: null,
-          last_modified_by: actorUserId || null,
-          notes: '',
-          checked_in_at: null,
-          checked_out_at: null,
-        }) - 1);
-        generated++;
-      }
+      const generated = db._generateShiftsForRecurring(rs, { generateWeeks, actorUserId });
       bump();
+
+      const persist = window.dbPersist && window.dbPersist.createRecurringSchedule;
+      if (persist) {
+        const r = await persist({ rs, generateWeeks, actorUserId });
+        if (!r.ok) {
+          state.recurring_schedules.length = schedulesBefore;
+          state.shifts.length = shiftsBefore;
+          bump();
+          return { error: 'PERSIST_FAILED', message: r.message };
+        }
+        if (r.rs) Object.assign(rs, r.rs);
+      }
+
       return { rs, generated };
     },
 
     // §7.4 återkommande scheman – ta bort (+ rensa framtida genererade pass)
-    deleteRecurringSchedule(scheduleId, actorUserId, { removeFutureShifts = true } = {}) {
+    async deleteRecurringSchedule(scheduleId, actorUserId, { removeFutureShifts = true } = {}) {
       const rs = state.recurring_schedules.find(r => r.id === scheduleId);
       if (!rs) return { error: 'NOT_FOUND' };
+
+      const snapshot = {
+        schedulesLen: state.recurring_schedules.length,
+        shiftsLen: state.shifts.length,
+        notificationsLen: state.notifications.length,
+      };
+
       let removed = 0;
       if (removeFutureShifts) {
         const now = Date.now();
         const before = state.shifts.length;
         state.shifts = state.shifts.filter(s => {
           if (s.recurring_id !== scheduleId) return true;
-          if (new Date(s.start_at).getTime() < now) return true; // historiska pass behålls
+          if (new Date(s.start_at).getTime() < now) return true;
           if (s.cleaner_user_id) pushNotification(s.cleaner_user_id, 'admin_deleted', { shift_id: s.id, property_id: s.property_id, start_at: s.start_at });
           return false;
         });
@@ -857,19 +1122,33 @@
       }
       state.recurring_schedules = state.recurring_schedules.filter(r => r.id !== scheduleId);
       bump();
+
+      const persist = window.dbPersist && window.dbPersist.deleteRecurringSchedule;
+      if (persist) {
+        const r = await persist({ scheduleId, actorUserId });
+        if (!r.ok) {
+          state.recurring_schedules.length = snapshot.schedulesLen;
+          state.shifts.length = snapshot.shiftsLen;
+          state.notifications.length = snapshot.notificationsLen;
+          bump();
+          return { error: 'PERSIST_FAILED', message: r.message };
+        }
+      }
+
       return { ok: true, removed };
     },
 
-    // §7.4 nytt one-off pass
-    createOneOffShift({ propertyId, cleanerUserId, startAt, endAt, actorUserId, notes = '' }) {
+    // §7.4 nytt one-off pass (status Planerat = ingen notis förrän godkänt)
+    createOneOffShift({ propertyId, cleanerUserId, startAt, endAt, actorUserId, notes = '', status = 'Godkänt' }) {
       const start_at = new Date(startAt);
       const end_at = new Date(endAt);
+      const shiftStatus = status === 'Planerat' ? 'Planerat' : 'Godkänt';
       const shift = {
         id: id('s'),
         property_id: propertyId,
         cleaner_user_id: cleanerUserId,
         start_at, end_at,
-        status: 'Godkänt',
+        status: shiftStatus,
         source: 'one_off',
         recurring_id: null,
         original_start_at: null,
@@ -882,31 +1161,124 @@
       };
       state.shifts.push(shift);
       snapshotChecklistToShift(state.shifts.length - 1);
-      state.shift_events.push({ id: id('se'), shift_id: shift.id, actor_user_id: actorUserId, event_type: 'shift_created', payload: { source: 'one_off' }, created_at: new Date() });
-      if (cleanerUserId) pushNotification(cleanerUserId, 'assigned_shift', { shift_id: shift.id, property_id: propertyId, start_at });
-      const prop = db.propertyById(propertyId);
-      const cust = state.customers.find(c => c.id === prop?.customer_id);
-      if (cust?.primary_contact_user_id) pushNotification(cust.primary_contact_user_id, 'assigned_shift', { shift_id: shift.id, property_id: propertyId, start_at });
+      state.shift_events.push({ id: id('se'), shift_id: shift.id, actor_user_id: actorUserId, event_type: 'shift_created', payload: { source: 'one_off', status: shiftStatus }, created_at: new Date() });
+      if (shiftStatus === 'Godkänt') {
+        if (cleanerUserId) pushNotification(cleanerUserId, 'assigned_shift', { shift_id: shift.id, property_id: propertyId, start_at });
+        const prop = db.propertyById(propertyId);
+        const cust = state.customers.find(c => c.id === prop?.customer_id);
+        if (cust?.primary_contact_user_id) pushNotification(cust.primary_contact_user_id, 'assigned_shift', { shift_id: shift.id, property_id: propertyId, start_at });
+      }
       bump();
       return shift;
     },
 
     // §7.5 in/utcheckning
-    checkIn(shiftId, cleanerUserId) {
+    async checkIn(shiftId, cleanerUserId) {
       const s = db.shiftById(shiftId);
-      if (!s) return;
-      s.checked_in_at = new Date();
+      if (!s) return { error: 'NOT_FOUND' };
+
+      const snapshot = {
+        checked_in_at: s.checked_in_at,
+        status: s.status,
+        shift_eventsLen: state.shift_events.length,
+      };
+
+      const checkedInAt = new Date();
+      s.checked_in_at = checkedInAt;
       s.status = 'Pågående';
-      state.shift_events.push({ id: id('se'), shift_id: shiftId, actor_user_id: cleanerUserId, event_type: 'check_in', payload: {}, created_at: new Date() });
+      state.shift_events.push({
+        id: id('se'),
+        shift_id: shiftId,
+        actor_user_id: cleanerUserId,
+        event_type: 'check_in',
+        payload: {},
+        created_at: new Date(),
+      });
       bump();
+
+      const persist = window.dbPersist && window.dbPersist.checkIn;
+      if (persist) {
+        const r = await persist({ shiftId, cleanerUserId, checkedInAt });
+        if (!r.ok) {
+          s.checked_in_at = snapshot.checked_in_at;
+          s.status = snapshot.status;
+          state.shift_events.length = snapshot.shift_eventsLen;
+          bump();
+          return { error: 'PERSIST_FAILED', message: r.message };
+        }
+      }
+
+      return { ok: true };
     },
-    checkOut(shiftId, cleanerUserId) {
+    async checkOut(shiftId, cleanerUserId) {
       const s = db.shiftById(shiftId);
-      if (!s) return;
+      if (!s) return { error: 'NOT_FOUND' };
+
+      const snapshot = {
+        checked_out_at: s.checked_out_at,
+        status: s.status,
+        start_at: s.start_at,
+        end_at: s.end_at,
+        original_start_at: s.original_start_at,
+        original_end_at: s.original_end_at,
+        shift_eventsLen: state.shift_events.length,
+      };
+
+      const plannedStart = s.original_start_at || s.start_at;
+      const plannedEnd = s.original_end_at || s.end_at;
       s.checked_out_at = new Date();
       s.status = 'Utfört';
-      state.shift_events.push({ id: id('se'), shift_id: shiftId, actor_user_id: cleanerUserId, event_type: 'check_out', payload: {}, created_at: new Date() });
+
+      if (s.checked_in_at) {
+        const inT = new Date(s.checked_in_at).getTime();
+        const outT = new Date(s.checked_out_at).getTime();
+        const ps = new Date(plannedStart).getTime();
+        const pe = new Date(plannedEnd).getTime();
+        if (inT !== ps || outT !== pe) {
+          if (!s.original_start_at) {
+            s.original_start_at = s.start_at;
+            s.original_end_at = s.end_at;
+          }
+          s.start_at = s.checked_in_at;
+          s.end_at = s.checked_out_at;
+        }
+      }
+
+      state.shift_events.push({
+        id: id('se'),
+        shift_id: shiftId,
+        actor_user_id: cleanerUserId,
+        event_type: 'check_out',
+        payload: {
+          planned: { start_at: snapshot.original_start_at || plannedStart, end_at: snapshot.original_end_at || plannedEnd },
+          actual: { start_at: s.start_at, end_at: s.end_at },
+        },
+        created_at: new Date(),
+      });
       bump();
+
+      const persist = window.dbPersist && window.dbPersist.checkOut;
+      if (persist) {
+        const r = await persist({
+          shiftId,
+          cleanerUserId,
+          shift: s,
+          checkedOutAt: s.checked_out_at,
+        });
+        if (!r.ok) {
+          s.checked_out_at = snapshot.checked_out_at;
+          s.status = snapshot.status;
+          s.start_at = snapshot.start_at;
+          s.end_at = snapshot.end_at;
+          s.original_start_at = snapshot.original_start_at;
+          s.original_end_at = snapshot.original_end_at;
+          state.shift_events.length = snapshot.shift_eventsLen;
+          bump();
+          return { error: 'PERSIST_FAILED', message: r.message };
+        }
+      }
+
+      return { ok: true };
     },
 
     // §7.6 avvikelse / reklamation
