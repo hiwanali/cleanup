@@ -5409,6 +5409,34 @@
     );
   }
 
+  function ReportScopeFilters({ customerId, cleanerId, propertyId, onCustomerChange, onCleanerChange, onPropertyChange, customers, cleaners, properties }) {
+    return (
+      <Card padding="md" className="mb-4">
+        <h3 className="text-sm font-bold text-slate-900 mb-3">Filtrera urval</h3>
+        <div className="grid md:grid-cols-3 gap-3">
+          <Field label="Kund">
+            <Select value={customerId} onChange={e => onCustomerChange(e.target.value)}>
+              <option value="all">Alla kunder</option>
+              {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </Select>
+          </Field>
+          <Field label="Städare">
+            <Select value={cleanerId} onChange={e => onCleanerChange(e.target.value)}>
+              <option value="all">Alla städare</option>
+              {cleaners.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </Select>
+          </Field>
+          <Field label="Objekt">
+            <Select value={propertyId} onChange={e => onPropertyChange(e.target.value)}>
+              <option value="all">Alla objekt</option>
+              {properties.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </Select>
+          </Field>
+        </div>
+      </Card>
+    );
+  }
+
   function ReportTable({ title, headers, rows, emptyText = 'Inget att visa för vald period.' }) {
     return (
       <Card padding="md" className="mb-4">
@@ -5446,12 +5474,34 @@
     const [preset, setPreset] = useState('this_month');
     const [from, setFrom] = useState(toDateInput(new Date()));
     const [to, setTo] = useState(toDateInput(new Date()));
+    const [customerId, setCustomerId] = useState('all');
+    const [cleanerId, setCleanerId] = useState('all');
+    const [propertyId, setPropertyId] = useState('all');
+    const [detailTab, setDetailTab] = useState('all');
     const [report, setReport] = useState(null);
     const [exporting, setExporting] = useState(null);
 
+    const customers = db.state.customers.slice().sort((a, b) => a.name.localeCompare(b.name, 'sv'));
+    const cleaners = db.state.users.filter(u => u.role === 'cleaner' && u.active).sort((a, b) => a.name.localeCompare(b.name, 'sv'));
+    let scopedProperties = db.state.properties;
+    if (customerId !== 'all') scopedProperties = scopedProperties.filter(p => p.customer_id === customerId);
+    scopedProperties = scopedProperties.slice().sort((a, b) => a.name.localeCompare(b.name, 'sv'));
+
     function generate() {
-      const data = db.buildAdminReport({ preset, from: preset === 'custom' ? from : null, to: preset === 'custom' ? to : null });
+      const data = db.buildAdminReport({
+        preset,
+        from: preset === 'custom' ? from : null,
+        to: preset === 'custom' ? to : null,
+        customerId,
+        cleanerId,
+        propertyId,
+      });
       setReport(data);
+    }
+
+    function handleCustomerChange(id) {
+      setCustomerId(id);
+      setPropertyId('all');
     }
 
     async function exportExcel() {
@@ -5492,12 +5542,34 @@
     }
 
     const s = report?.summary;
+    const shiftDetailHeaders = [
+      { key: 'date', label: 'Datum' },
+      { key: 'customerName', label: 'Kund' },
+      { key: 'propertyName', label: 'Objekt' },
+      { key: 'cleanerName', label: 'Städare' },
+      { key: 'status', label: 'Status' },
+      { key: 'plannedStart', label: 'Plan. start' },
+      { key: 'plannedEnd', label: 'Plan. slut' },
+      { key: 'actualStart', label: 'Fakt. start' },
+      { key: 'actualEnd', label: 'Fakt. slut' },
+      { key: 'plannedHours', label: 'Plan. tim' },
+      { key: 'workedHours', label: 'Arb. tim' },
+    ];
+    const detailTabs = [
+      { id: 'all', label: 'Alla pass', rows: report?.shiftDetails || [] },
+      { id: 'worked', label: 'Utförda', rows: (report?.shiftDetails || []).filter(r => r.status === 'Utfört') },
+      { id: 'sick', label: 'Sjuka', rows: report?.sickShifts || [] },
+      { id: 'deleted', label: 'Borttagna', rows: report?.deletedShifts || [] },
+      { id: 'cancelled', label: 'Avbokade', rows: report?.cancelledShifts || [] },
+      { id: 'paused', label: 'Pausade', rows: report?.pausedShifts || [] },
+    ];
+    const activeDetail = detailTabs.find(t => t.id === detailTab) || detailTabs[0];
 
     return (
       <div>
         <PageHeader
           title="Rapporter"
-          subtitle="Städtimmar, avvikelser och händelser för vald period. Arbetade timmar baseras på utförda pass (faktisk in/utcheckningstid)."
+          subtitle="KPI:er och löneunderlag för revisor. Arbetade timmar = utförda pass (faktisk in/utcheckning). Filtrera på kund, städare och period."
           actions={
             <div className="flex flex-wrap gap-2">
               <Button variant="primary" icon="file-text" onClick={generate}>Generera rapport</Button>
@@ -5524,59 +5596,94 @@
           onToChange={setTo}
         />
 
+        <ReportScopeFilters
+          customerId={customerId}
+          cleanerId={cleanerId}
+          propertyId={propertyId}
+          onCustomerChange={handleCustomerChange}
+          onCleanerChange={setCleanerId}
+          onPropertyChange={setPropertyId}
+          customers={customers}
+          cleaners={cleaners}
+          properties={scopedProperties}
+        />
+
         {!report ? (
           <Card padding="lg">
             <EmptyState
               icon="file-text"
               title="Ingen rapport genererad"
-              description="Välj period och klicka på Generera rapport."
+              description="Välj period, filter och klicka på Generera rapport."
             />
           </Card>
         ) : (
           <>
             <p className="text-sm text-slate-600 mb-4">
               Period: <span className="font-semibold text-slate-900">{report.meta.label}</span>
+              {report.meta.filterLabel && report.meta.filterLabel !== 'Alla kunder & städare' && (
+                <span className="text-slate-500"> · Filter: {report.meta.filterLabel}</span>
+              )}
             </p>
 
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
-              <Stat label="Städade timmar" value={s.totalHours} hint="Utförda pass" icon="clock" tone="brand" />
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
+              <Stat label="Arbetade timmar" value={s.totalHours} hint={`${s.shiftCountWorked} utförda pass`} icon="clock" tone="brand" />
+              <Stat label="Planerade timmar" value={s.totalPlannedHours} hint={`${s.shiftCountBooked} bokade pass`} icon="calendar" tone="accent" />
+              <Stat label="Sjuka pass" value={s.shiftCountSick} hint={`${s.sickPlannedHours} planerade timmar`} icon="alert-circle" tone="amber" />
               <Stat label="Avvikelser" value={s.totalIncidents} icon="alert-triangle" tone="rose" />
-              <Stat label="Justerade tider" value={s.totalTimeAdjusted} icon="refresh" tone="amber" />
-              <Stat label="Sjukanmälan" value={s.totalSickReports} icon="alert-circle" tone="amber" />
+            </div>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+              <Stat label="Borttagna pass" value={s.shiftCountDeleted} icon="trash" tone="slate" />
+              <Stat label="Avbokade pass" value={s.shiftCountCancelled} icon="x" tone="slate" />
+              <Stat label="Pausade (ledighet)" value={s.shiftCountPaused} icon="pause" tone="slate" />
+              <Stat label="Justerade tider" value={s.totalTimeAdjusted} hint={`${s.totalSickReports} sjukanmälan`} icon="refresh" tone="amber" />
             </div>
 
-            <Card padding="md" className="mb-6 border-slate-200 bg-slate-50/50">
-              <p className="text-sm text-slate-700">
-                <span className="font-semibold text-slate-900">Nya tider av kund:</span> {s.customerNewTimes}
-                <span className="text-slate-500"> — {s.customerNewTimesNote}</span>
-              </p>
+            <Card padding="md" className="mb-6">
+              <div className="flex flex-wrap gap-2 mb-4">
+                {detailTabs.map(t => (
+                  <Button
+                    key={t.id}
+                    size="sm"
+                    variant={detailTab === t.id ? 'primary' : 'outline'}
+                    onClick={() => setDetailTab(t.id)}
+                  >
+                    {t.label} ({t.rows.length})
+                  </Button>
+                ))}
+              </div>
+              <ReportTable
+                title={`Passdetaljer – ${activeDetail.label} (lämpligt för revisor/löneunderlag)`}
+                headers={shiftDetailHeaders}
+                rows={activeDetail.rows}
+                emptyText="Inga pass i den här kategorin för valt urval."
+              />
             </Card>
 
             <ReportTable
-              title="Timmar per kund"
+              title="Arbetade timmar per kund"
               headers={[
                 { key: 'name', label: 'Kund' },
-                { key: 'hours', label: 'Timmar' },
-                { key: 'shiftCount', label: 'Pass' },
+                { key: 'hours', label: 'Arbetade timmar' },
+                { key: 'shiftCount', label: 'Utförda pass' },
               ]}
               rows={report.byCustomer.map(r => ({ ...r, hours: r.hours.toFixed(2) }))}
             />
             <ReportTable
-              title="Timmar per objekt (kontor)"
+              title="Arbetade timmar per objekt"
               headers={[
                 { key: 'customerName', label: 'Kund' },
                 { key: 'name', label: 'Objekt' },
-                { key: 'hours', label: 'Timmar' },
-                { key: 'shiftCount', label: 'Pass' },
+                { key: 'hours', label: 'Arbetade timmar' },
+                { key: 'shiftCount', label: 'Utförda pass' },
               ]}
               rows={report.byProperty.map(r => ({ ...r, hours: r.hours.toFixed(2) }))}
             />
             <ReportTable
-              title="Timmar per städare"
+              title="Arbetade timmar per städare"
               headers={[
                 { key: 'name', label: 'Städare' },
-                { key: 'hours', label: 'Timmar' },
-                { key: 'shiftCount', label: 'Pass' },
+                { key: 'hours', label: 'Arbetade timmar' },
+                { key: 'shiftCount', label: 'Utförda pass' },
               ]}
               rows={report.byCleaner.map(r => ({ ...r, hours: r.hours.toFixed(2) }))}
             />
@@ -5584,9 +5691,13 @@
               title="Sjukanmälan per städare"
               headers={[
                 { key: 'name', label: 'Städare' },
-                { key: 'count', label: 'Antal' },
+                { key: 'count', label: 'Sjuka pass' },
+                { key: 'plannedHours', label: 'Planerade timmar' },
               ]}
-              rows={report.sickByCleaner}
+              rows={report.sickByCleaner.map(r => ({
+                ...r,
+                plannedHours: (r.plannedHours || 0).toFixed(2),
+              }))}
             />
           </>
         )}
@@ -5694,9 +5805,9 @@
               Period: <span className="font-semibold text-slate-900">{report.meta.label}</span>
             </p>
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-              <Stat label="Bokade tider" value={s.bookedCount} hint="Godkända pass (ej väntande)" icon="calendar" tone="brand" />
+              <Stat label="Bokade pass" value={s.bookedCount} hint={`${s.plannedHours} planerade timmar`} icon="calendar" tone="brand" />
               <Stat label="Arbetade timmar" value={s.workedHours} hint="Utförda pass" icon="clock" tone="emerald" />
-              <Stat label="Antal städare" value={s.cleanerCount} hint="Unika på bokade pass" icon="users" tone="accent" />
+              <Stat label="Sjuka / avbokade" value={`${s.sickCount} / ${s.cancelledCount}`} hint="Pass i perioden" icon="alert-circle" tone="amber" />
               <Stat label="Reklamationer" value={s.incidentsCount} icon="alert-triangle" tone="rose" />
             </div>
           </>

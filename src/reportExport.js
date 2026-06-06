@@ -106,60 +106,124 @@
     doc.save(filename.endsWith('.pdf') ? filename : `${filename}.pdf`);
   }
 
+  function shiftDetailExportRows(rows) {
+    return rows.map(r => ({
+      Datum: r.date,
+      Kund: r.customerName,
+      Objekt: r.propertyName,
+      Städare: r.cleanerName,
+      Status: r.status,
+      'Planerad start': r.plannedStart,
+      'Planerad slut': r.plannedEnd,
+      'Faktisk start': r.actualStart,
+      'Faktisk slut': r.actualEnd,
+      'Planerade timmar': r.plannedHours,
+      'Arbetade timmar': r.workedHours,
+    }));
+  }
+
+  const SHIFT_DETAIL_HEADERS = [
+    'Datum', 'Kund', 'Objekt', 'Städare', 'Status',
+    'Planerad start', 'Planerad slut', 'Faktisk start', 'Faktisk slut',
+    'Planerade timmar', 'Arbetade timmar',
+  ];
+
   function adminReportToExport(adminReport) {
     const { meta, summary } = adminReport;
     const periodLabel = meta.label || '';
+    const filterLabel = meta.filterLabel || '';
+
+    const summaryRows = [
+      { Mätvärde: 'Period', Värde: periodLabel },
+      { Mätvärde: 'Filter', Värde: filterLabel },
+      { Mätvärde: 'Arbetade timmar (utfört)', Värde: summary.totalHours },
+      { Mätvärde: 'Planerade timmar (bokade pass)', Värde: summary.totalPlannedHours },
+      { Mätvärde: 'Utförda pass', Värde: summary.shiftCountWorked },
+      { Mätvärde: 'Bokade pass', Värde: summary.shiftCountBooked },
+      { Mätvärde: 'Kommande godkända', Värde: summary.shiftCountPlanned },
+      { Mätvärde: 'Sjuka pass', Värde: summary.shiftCountSick },
+      { Mätvärde: 'Planerade timmar (sjuka)', Värde: summary.sickPlannedHours },
+      { Mätvärde: 'Avbokade pass', Värde: summary.shiftCountCancelled },
+      { Mätvärde: 'Borttagna pass', Värde: summary.shiftCountDeleted },
+      { Mätvärde: 'Pausade (ledighet)', Värde: summary.shiftCountPaused },
+      { Mätvärde: 'Avvikelser', Värde: summary.totalIncidents },
+      { Mätvärde: 'Justerade tider', Värde: summary.totalTimeAdjusted },
+      { Mätvärde: 'Sjukanmälan (händelser)', Värde: summary.totalSickReports },
+    ];
+
+    const detailRows = shiftDetailExportRows(adminReport.shiftDetails || []);
+    const sickRows = shiftDetailExportRows(adminReport.sickShifts || []);
+    const deletedRows = shiftDetailExportRows(adminReport.deletedShifts || []);
+    const cancelledRows = shiftDetailExportRows(adminReport.cancelledShifts || []);
+
     const sheets = [
+      { name: 'Sammanfattning', headers: ['Mätvärde', 'Värde'], rows: summaryRows },
       {
-        name: 'Sammanfattning',
-        headers: ['Mätvärde', 'Värde'],
-        rows: [
-          { Mätvärde: 'Period', Värde: periodLabel },
-          { Mätvärde: 'Städade timmar totalt', Värde: summary.totalHours },
-          { Mätvärde: 'Avvikelser totalt', Värde: summary.totalIncidents },
-          { Mätvärde: 'Justerade tider', Värde: summary.totalTimeAdjusted },
-          { Mätvärde: 'Sjukanmälan totalt', Värde: summary.totalSickReports },
-          { Mätvärde: 'Nya tider av kund', Värde: summary.customerNewTimes },
-          { Mätvärde: 'Notis', Värde: summary.customerNewTimesNote },
-        ],
+        name: 'Passdetaljer',
+        headers: SHIFT_DETAIL_HEADERS,
+        rows: detailRows,
       },
       {
         name: 'Per kund',
-        headers: ['Kund', 'Timmar', 'Antal pass'],
-        rows: adminReport.byCustomer.map(r => ({ Kund: r.name, Timmar: r.hours, 'Antal pass': r.shiftCount })),
+        headers: ['Kund', 'Arbetade timmar', 'Antal utförda'],
+        rows: adminReport.byCustomer.map(r => ({
+          Kund: r.name,
+          'Arbetade timmar': r.hours,
+          'Antal utförda': r.shiftCount,
+        })),
       },
       {
         name: 'Per objekt',
-        headers: ['Kund', 'Objekt', 'Timmar', 'Antal pass'],
+        headers: ['Kund', 'Objekt', 'Arbetade timmar', 'Antal utförda'],
         rows: adminReport.byProperty.map(r => ({
           Kund: r.customerName,
           Objekt: r.name,
-          Timmar: r.hours,
-          'Antal pass': r.shiftCount,
+          'Arbetade timmar': r.hours,
+          'Antal utförda': r.shiftCount,
         })),
       },
       {
         name: 'Per städare',
-        headers: ['Städare', 'Timmar', 'Antal pass'],
-        rows: adminReport.byCleaner.map(r => ({ Städare: r.name, Timmar: r.hours, 'Antal pass': r.shiftCount })),
+        headers: ['Städare', 'Arbetade timmar', 'Antal utförda'],
+        rows: adminReport.byCleaner.map(r => ({
+          Städare: r.name,
+          'Arbetade timmar': r.hours,
+          'Antal utförda': r.shiftCount,
+        })),
+      },
+      {
+        name: 'Sjuka pass',
+        headers: SHIFT_DETAIL_HEADERS,
+        rows: sickRows,
       },
       {
         name: 'Sjukanmälan',
-        headers: ['Städare', 'Antal sjukanmälan'],
-        rows: adminReport.sickByCleaner.map(r => ({ Städare: r.name, 'Antal sjukanmälan': r.count })),
+        headers: ['Städare', 'Antal pass', 'Planerade timmar'],
+        rows: adminReport.sickByCleaner.map(r => ({
+          Städare: r.name,
+          'Antal pass': r.count,
+          'Planerade timmar': r.plannedHours || 0,
+        })),
+      },
+      {
+        name: 'Borttagna pass',
+        headers: SHIFT_DETAIL_HEADERS,
+        rows: deletedRows,
+      },
+      {
+        name: 'Avbokade pass',
+        headers: SHIFT_DETAIL_HEADERS,
+        rows: cancelledRows,
       },
     ];
 
     const pdfSections = [
-      {
-        title: 'Sammanfattning',
-        headers: ['Mätvärde', 'Värde'],
-        rows: sheets[0].rows,
-      },
-      { title: 'Per kund', headers: ['Kund', 'Timmar', 'Pass'], rows: sheets[1].rows.map(r => ({ Kund: r.Kund, Timmar: r.Timmar, Pass: r['Antal pass'] })) },
-      { title: 'Per objekt', headers: ['Kund', 'Objekt', 'Timmar'], rows: sheets[2].rows.map(r => ({ Kund: r.Kund, Objekt: r.Objekt, Timmar: r.Timmar })) },
-      { title: 'Per städare', headers: ['Städare', 'Timmar', 'Pass'], rows: sheets[3].rows.map(r => ({ Städare: r.Städare, Timmar: r.Timmar, Pass: r['Antal pass'] })) },
-      { title: 'Sjukanmälan', headers: ['Städare', 'Antal'], rows: sheets[4].rows.map(r => ({ Städare: r.Städare, Antal: r['Antal sjukanmälan'] })) },
+      { title: 'Sammanfattning', headers: ['Mätvärde', 'Värde'], rows: summaryRows },
+      { title: 'Per kund', headers: ['Kund', 'Timmar', 'Pass'], rows: sheets[2].rows },
+      { title: 'Per städare', headers: ['Städare', 'Timmar', 'Pass'], rows: sheets[4].rows },
+      { title: 'Sjuka pass', headers: ['Datum', 'Kund', 'Städare', 'Timmar'], rows: sickRows.map(r => ({
+        Datum: r.Datum, Kund: r.Kund, Städare: r.Städare, Timmar: r['Planerade timmar'],
+      })) },
     ];
 
     return { sheets, pdfSections, periodLabel };
@@ -175,9 +239,12 @@
         rows: [
           { Mätvärde: 'Kund', Värde: meta.customerName },
           { Mätvärde: 'Period', Värde: periodLabel },
-          { Mätvärde: 'Bokade tider', Värde: summary.bookedCount },
+          { Mätvärde: 'Bokade pass', Värde: summary.bookedCount },
+          { Mätvärde: 'Planerade timmar', Värde: summary.plannedHours },
           { Mätvärde: 'Arbetade timmar', Värde: summary.workedHours },
           { Mätvärde: 'Antal städare', Värde: summary.cleanerCount },
+          { Mätvärde: 'Sjuka pass', Värde: summary.sickCount },
+          { Mätvärde: 'Avbokade pass', Värde: summary.cancelledCount },
           { Mätvärde: 'Reklamationer', Värde: summary.incidentsCount },
         ],
       },
