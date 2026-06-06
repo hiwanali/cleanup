@@ -1,6 +1,4 @@
--- CleanUp · Kund/kundanställd kan begära nytt pass (Planerat, utan städare)
-
-ALTER TYPE public.shift_source ADD VALUE IF NOT EXISTS 'customer_request';
+-- CleanUp · Kund/kundanställd kan INSERT:a Planerat pass (bokningsförfrågan)
 
 CREATE POLICY shifts_customer_request_insert ON public.shifts
   FOR INSERT TO authenticated
