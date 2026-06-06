@@ -11,6 +11,7 @@
  * Källfilerna lämnas orörda så att lokal utveckling fortsätter fungera med
  * CDN + text/babel (öppna CleanUp.html direkt).
  */
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
@@ -86,11 +87,14 @@ function step3_bundle() {
     parts.push(result.code);
   }
   const out = path.join(DIST_SRC, 'app.bundle.js');
-  fs.writeFileSync(out, parts.join('\n'), 'utf8');
+  const bundle = parts.join('\n');
+  fs.writeFileSync(out, bundle, 'utf8');
+  const hash = crypto.createHash('sha256').update(bundle).digest('hex').slice(0, 12);
   console.log('Wrote', out, `(${JS_FILES.length + JSX_FILES.length} filer)`);
+  return hash;
 }
 
-function step4_html() {
+function step4_html(bundleHash) {
   // Prod-version av CleanUp.html: byt CDN/Babel mot byggda artefakter.
   const srcHtml = fs.readFileSync(path.join(ROOT, 'CleanUp.html'), 'utf8');
 
@@ -100,7 +104,7 @@ function step4_html() {
     '  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin="anonymous"></script>',
     '  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" crossorigin="anonymous"></script>',
     '  <script src="src/config.js"></script>',
-    '  <script src="src/app.bundle.js"></script>',
+    `  <script src="src/app.bundle.js?v=${bundleHash}"></script>`,
   ].join('\n');
 
   const headOut = replaceRegion(srcHtml, 'build:dev:head', headReplacement);
@@ -137,8 +141,8 @@ function main() {
   fs.mkdirSync(DIST_SRC, { recursive: true });
   step1_config();
   step2_tailwind();
-  step3_bundle();
-  step4_html();
+  const bundleHash = step3_bundle();
+  step4_html(bundleHash);
   console.log('\nBygge klart -> dist/');
 }
 
