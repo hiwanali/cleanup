@@ -5188,9 +5188,17 @@
           ) : (
             <div className="grid md:grid-cols-2 gap-3">
               {props.map(p => {
-                const next = db.shiftsForProperty(p.id, { from: new Date() })[0];
+                const next = db.shiftsForProperty(p.id, { from: new Date() })
+                  .filter(s => !['Avbokat', 'Borttaget'].includes(s.status))[0];
                 return (
-                  <Card key={p.id} padding="md" className="hover:border-brand-300 transition-colors">
+                  <Card
+                    key={p.id}
+                    as="button"
+                    type="button"
+                    padding="md"
+                    className="text-left w-full hover:border-brand-300 hover:shadow-sm transition-all cursor-pointer"
+                    onClick={() => onNavigate(`/kund/objekt/${p.id}`)}
+                  >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <p className="font-semibold text-slate-900">{p.name}</p>
@@ -5202,6 +5210,7 @@
                       <div className="mt-3 pt-3 border-t border-slate-100 text-xs text-slate-600 flex items-center gap-2">
                         <Icon name="calendar" className="w-3.5 h-3.5 text-slate-400" />
                         Nästa pass: <span className="font-medium text-slate-800">{relativeDay(next.start_at)} {formatRange(next.start_at, next.end_at)}</span>
+                        {next.status === 'Planerat' && <span className="text-slate-500"> · väntar</span>}
                       </div>
                     )}
                   </Card>
