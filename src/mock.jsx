@@ -918,15 +918,36 @@
      * ============================================================ */
 
     // §7.1 sjukanmälan
-    reportSick(shiftId, actorUserId, reason = '') {
+    async reportSick(shiftId, actorUserId, reason = '') {
       const s = db.shiftById(shiftId);
-      if (!s) return;
+      if (!s) return { error: 'NOT_FOUND' };
+
+      const snapshot = {
+        status: s.status,
+        last_modified_by: s.last_modified_by,
+        shift_eventsLen: state.shift_events.length,
+        notificationsLen: state.notifications.length,
+      };
+
       s.status = 'Sjukanmäld';
       s.last_modified_by = actorUserId;
       state.shift_events.push({ id: id('se'), shift_id: shiftId, actor_user_id: actorUserId, event_type: 'sick_reported', payload: { reason }, created_at: new Date() });
+      bump();
+
+      const persist = window.dbPersist && window.dbPersist.reportSick;
+      if (persist) {
+        const r = await persist({ shiftId, actorUserId, reason });
+        if (!r.ok) {
+          s.status = snapshot.status;
+          s.last_modified_by = snapshot.last_modified_by;
+          state.shift_events.length = snapshot.shift_eventsLen;
+          bump();
+          return { error: 'PERSIST_FAILED', message: r.message };
+        }
+      }
+
       const prop = db.propertyById(s.property_id);
       const cust = state.customers.find(c => c.id === prop.customer_id);
-      // Notiser
       state.users.filter(u => u.role === 'admin').forEach(a => pushNotification(a.id, 'sick_reported', { shift_id: s.id, property_id: s.property_id, start_at: s.start_at }));
       if (cust) {
         pushNotification(cust.primary_contact_user_id, 'sick_reported', { shift_id: s.id, property_id: s.property_id, start_at: s.start_at });
@@ -937,42 +958,101 @@
         });
       }
       bump();
+      return { ok: true };
     },
 
     // §7.1 ombokning (byt städare)
-    swapCleaner(shiftId, newCleanerId, actorUserId) {
+    async swapCleaner(shiftId, newCleanerId, actorUserId) {
       const s = db.shiftById(shiftId);
-      if (!s) return;
+      if (!s) return { error: 'NOT_FOUND' };
+
+      const wasSick = s.status === 'Sjukanmäld';
+      const snapshot = {
+        cleaner_user_id: s.cleaner_user_id,
+        status: s.status,
+        last_modified_by: s.last_modified_by,
+        shift_eventsLen: state.shift_events.length,
+        notificationsLen: state.notifications.length,
+      };
       const oldCleanerId = s.cleaner_user_id;
+
       s.cleaner_user_id = newCleanerId;
-      if (s.status === 'Sjukanmäld') s.status = 'Godkänt';
+      if (wasSick) s.status = 'Godkänt';
       s.last_modified_by = actorUserId;
       state.shift_events.push({ id: id('se'), shift_id: shiftId, actor_user_id: actorUserId, event_type: 'cleaner_swapped', payload: { from: oldCleanerId, to: newCleanerId }, created_at: new Date() });
+      bump();
+
+      const persist = window.dbPersist && window.dbPersist.swapCleaner;
+      if (persist) {
+        const r = await persist({ shiftId, newCleanerId, actorUserId, wasSick });
+        if (!r.ok) {
+          s.cleaner_user_id = snapshot.cleaner_user_id;
+          s.status = snapshot.status;
+          s.last_modified_by = snapshot.last_modified_by;
+          state.shift_events.length = snapshot.shift_eventsLen;
+          bump();
+          return { error: 'PERSIST_FAILED', message: r.message };
+        }
+      }
+
       pushNotification(newCleanerId, 'assigned_shift', { shift_id: s.id, property_id: s.property_id, start_at: s.start_at });
       const prop = db.propertyById(s.property_id);
       const cust = state.customers.find(c => c.id === prop.customer_id);
       if (cust) pushNotification(cust.primary_contact_user_id, 'cleaner_swapped', { shift_id: s.id, property_id: s.property_id, start_at: s.start_at });
       bump();
+      return { ok: true };
     },
 
     // §7.4 justera tid
-    adjustTime(shiftId, newStart, newEnd, actorUserId) {
+    async adjustTime(shiftId, newStart, newEnd, actorUserId) {
       const s = db.shiftById(shiftId);
-      if (!s) return;
+      if (!s) return { error: 'NOT_FOUND' };
+
+      const wasSick = s.status === 'Sjukanmäld';
+      const snapshot = {
+        start_at: s.start_at,
+        end_at: s.end_at,
+        original_start_at: s.original_start_at,
+        original_end_at: s.original_end_at,
+        status: s.status,
+        last_modified_by: s.last_modified_by,
+        shift_eventsLen: state.shift_events.length,
+        notificationsLen: state.notifications.length,
+      };
+
       if (!s.original_start_at) {
         s.original_start_at = s.start_at;
         s.original_end_at = s.end_at;
       }
       s.start_at = new Date(newStart);
       s.end_at = new Date(newEnd);
-      if (s.status === 'Sjukanmäld') s.status = 'Godkänt';
+      if (wasSick) s.status = 'Godkänt';
       s.last_modified_by = actorUserId;
       state.shift_events.push({ id: id('se'), shift_id: shiftId, actor_user_id: actorUserId, event_type: 'time_adjusted', payload: { start_at: s.start_at, end_at: s.end_at }, created_at: new Date() });
+      bump();
+
+      const persist = window.dbPersist && window.dbPersist.adjustTime;
+      if (persist) {
+        const r = await persist({ shiftId, actorUserId, shift: s, wasSick });
+        if (!r.ok) {
+          s.start_at = snapshot.start_at;
+          s.end_at = snapshot.end_at;
+          s.original_start_at = snapshot.original_start_at;
+          s.original_end_at = snapshot.original_end_at;
+          s.status = snapshot.status;
+          s.last_modified_by = snapshot.last_modified_by;
+          state.shift_events.length = snapshot.shift_eventsLen;
+          bump();
+          return { error: 'PERSIST_FAILED', message: r.message };
+        }
+      }
+
       if (s.cleaner_user_id) pushNotification(s.cleaner_user_id, 'time_adjusted', { shift_id: s.id, start_at: s.start_at, end_at: s.end_at });
       const prop = db.propertyById(s.property_id);
       const cust = state.customers.find(c => c.id === prop.customer_id);
       if (cust) pushNotification(cust.primary_contact_user_id, 'time_adjusted', { shift_id: s.id, property_id: s.property_id, start_at: s.start_at });
       bump();
+      return { ok: true };
     },
 
     // §7.2 kundavbokning (48h räknas från planerad start, inte faktisk utcheckningstid)
@@ -1038,13 +1118,34 @@
     },
 
     // §7.1 admin markerar sjukanmält pass som "hanterat" (ingen ersättare hittas)
-    markSickAsFinal(shiftId, adminUserId) {
+    async markSickAsFinal(shiftId, adminUserId) {
       const s = db.shiftById(shiftId);
-      if (!s || s.status !== 'Sjukanmäld') return;
+      if (!s || s.status !== 'Sjukanmäld') return { error: 'NOT_FOUND' };
+
+      const snapshot = {
+        sick_finalized_at: s.sick_finalized_at,
+        last_modified_by: s.last_modified_by,
+        shift_eventsLen: state.shift_events.length,
+        notificationsLen: state.notifications.length,
+      };
+
       s.sick_finalized_at = new Date();
       s.last_modified_by = adminUserId;
       state.shift_events.push({ id: id('se'), shift_id: shiftId, actor_user_id: adminUserId, event_type: 'sick_finalized', payload: {}, created_at: new Date() });
-      // Notis till kund + admin: passet uteblir
+      bump();
+
+      const persist = window.dbPersist && window.dbPersist.markSickAsFinal;
+      if (persist) {
+        const r = await persist({ shiftId, adminUserId });
+        if (!r.ok) {
+          s.sick_finalized_at = snapshot.sick_finalized_at;
+          s.last_modified_by = snapshot.last_modified_by;
+          state.shift_events.length = snapshot.shift_eventsLen;
+          bump();
+          return { error: 'PERSIST_FAILED', message: r.message };
+        }
+      }
+
       const prop = db.propertyById(s.property_id);
       const cust = state.customers.find(c => c.id === prop.customer_id);
       state.users.filter(u => u.role === 'admin').forEach(a => pushNotification(a.id, 'shift_will_be_missed', { shift_id: s.id, property_id: s.property_id, start_at: s.start_at }));
@@ -1057,6 +1158,7 @@
         });
       }
       bump();
+      return { ok: true };
     },
 
     // §7.4 admin tar bort pass (optimistic + Supabase-persist)
@@ -1232,59 +1334,153 @@
     },
 
     // §7.3 kundledighet – registrera
-    createHoliday({ customerId, createdByUserId, scope, propertyIds, startDate, endDate, reason }) {
+    async createHoliday({ customerId, createdByUserId, scope, propertyIds, startDate, endDate, reason }) {
       const accessible = new Set(db.propertiesForUser(createdByUserId).map(p => p.id));
       if (scope === 'selected' && (propertyIds || []).some(pid => !accessible.has(pid))) {
         return { error: 'FORBIDDEN' };
       }
+
       const holiday = {
         id: id('ch'), customer_id: customerId,
         created_by_user_id: createdByUserId,
         scope, start_date: new Date(startDate), end_date: new Date(endDate), reason,
         created_at: new Date(),
       };
+      const snapshot = {
+        customer_holidaysLen: state.customer_holidays.length,
+        holiday_propsLen: state.customer_holiday_properties.length,
+        shift_eventsLen: state.shift_events.length,
+        notificationsLen: state.notifications.length,
+        pausedSnapshots: [],
+      };
+
       state.customer_holidays.push(holiday);
       if (scope === 'selected') {
         (propertyIds || []).forEach(pid => state.customer_holiday_properties.push({ customer_holiday_id: holiday.id, property_id: pid }));
       }
       const paused = db.previewPausedShifts({ customerId, scope, propertyIds, startDate, endDate });
       paused.forEach(s => {
+        snapshot.pausedSnapshots.push({
+          id: s.id,
+          status: s.status,
+          pre_pause_status: s.pre_pause_status,
+          paused_by_holiday_id: s.paused_by_holiday_id,
+          last_modified_by: s.last_modified_by,
+        });
         s.pre_pause_status = s.status;
         s.paused_by_holiday_id = holiday.id;
         s.status = 'Pausat (kundledighet)';
         s.last_modified_by = createdByUserId;
         state.shift_events.push({ id: id('se'), shift_id: s.id, actor_user_id: createdByUserId, event_type: 'paused_by_holiday', payload: { holiday_id: holiday.id }, created_at: new Date() });
+      });
+      bump();
+
+      const persist = window.dbPersist && window.dbPersist.createHoliday;
+      if (persist) {
+        const r = await persist({ customerId, scope, propertyIds, startDate, endDate, reason });
+        if (!r.ok) {
+          state.customer_holidays.length = snapshot.customer_holidaysLen;
+          state.customer_holiday_properties.length = snapshot.holiday_propsLen;
+          state.shift_events.length = snapshot.shift_eventsLen;
+          snapshot.pausedSnapshots.forEach(ps => {
+            const s = db.shiftById(ps.id);
+            if (!s) return;
+            s.status = ps.status;
+            s.pre_pause_status = ps.pre_pause_status;
+            s.paused_by_holiday_id = ps.paused_by_holiday_id;
+            s.last_modified_by = ps.last_modified_by;
+          });
+          bump();
+          return { error: 'PERSIST_FAILED', message: r.message };
+        }
+        if (r.holidayId) {
+          const oldId = holiday.id;
+          holiday.id = r.holidayId;
+          state.customer_holiday_properties.forEach(chp => {
+            if (chp.customer_holiday_id === oldId) chp.customer_holiday_id = r.holidayId;
+          });
+          paused.forEach(s => {
+            if (s.paused_by_holiday_id === oldId) s.paused_by_holiday_id = r.holidayId;
+          });
+          state.shift_events.forEach(e => {
+            if (e.payload?.holiday_id === oldId) e.payload = { ...e.payload, holiday_id: r.holidayId };
+          });
+        }
+      }
+
+      paused.forEach(s => {
         if (s.cleaner_user_id) pushNotification(s.cleaner_user_id, 'paused_by_holiday', { shift_id: s.id, property_id: s.property_id, start_at: s.start_at });
       });
       state.users.filter(u => u.role === 'admin').forEach(a => pushNotification(a.id, 'holiday_created', { customer_id: customerId, count: paused.length }));
       bump();
-      return { holiday, pausedCount: paused.length };
+      return { ok: true, holiday, pausedCount: paused.length };
     },
 
     // §7.3 kundledighet – ta bort (admin)
-    deleteHoliday(holidayId, actorUserId) {
+    async deleteHoliday(holidayId, actorUserId) {
       const h = state.customer_holidays.find(x => x.id === holidayId);
       if (!h) return { error: 'NOT_FOUND' };
-      // Återställ alla framtida pausade pass
+
       const now = Date.now();
+      const snapshot = {
+        holiday: { ...h },
+        holiday_props: state.customer_holiday_properties.filter(x => x.customer_holiday_id === holidayId).map(x => ({ ...x })),
+        restoredSnapshots: [],
+        shift_eventsLen: state.shift_events.length,
+        notificationsLen: state.notifications.length,
+      };
       let restoredCount = 0;
+
       state.shifts.forEach(s => {
         if (s.paused_by_holiday_id !== holidayId) return;
-        if (new Date(s.end_at).getTime() < now) return; // datum har passerat – rör inte
+        if (new Date(s.end_at).getTime() < now) return;
+        snapshot.restoredSnapshots.push({
+          id: s.id,
+          status: s.status,
+          pre_pause_status: s.pre_pause_status,
+          paused_by_holiday_id: s.paused_by_holiday_id,
+          last_modified_by: s.last_modified_by,
+        });
         s.status = s.pre_pause_status || 'Godkänt';
         s.pre_pause_status = null;
         s.paused_by_holiday_id = null;
         s.last_modified_by = actorUserId;
         state.shift_events.push({ id: id('se'), shift_id: s.id, actor_user_id: actorUserId, event_type: 'holiday_removed', payload: { holiday_id: holidayId }, created_at: new Date() });
-        if (s.cleaner_user_id) pushNotification(s.cleaner_user_id, 'holiday_removed', { shift_id: s.id, property_id: s.property_id, start_at: s.start_at });
         restoredCount++;
       });
-      // Notiser till kund + admin
-      pushNotification(h.created_by_user_id, 'holiday_removed', { customer_id: h.customer_id, restored: restoredCount });
-      state.users.filter(u => u.role === 'admin' && u.id !== actorUserId).forEach(a => pushNotification(a.id, 'holiday_removed', { customer_id: h.customer_id, restored: restoredCount }));
-      // Ta bort radern
+
       state.customer_holidays = state.customer_holidays.filter(x => x.id !== holidayId);
       state.customer_holiday_properties = state.customer_holiday_properties.filter(x => x.customer_holiday_id !== holidayId);
+      bump();
+
+      const persist = window.dbPersist && window.dbPersist.deleteHoliday;
+      if (persist) {
+        const r = await persist({ holidayId });
+        if (!r.ok) {
+          state.customer_holidays.push(snapshot.holiday);
+          state.customer_holiday_properties.push(...snapshot.holiday_props);
+          state.shift_events.length = snapshot.shift_eventsLen;
+          snapshot.restoredSnapshots.forEach(ps => {
+            const s = db.shiftById(ps.id);
+            if (!s) return;
+            s.status = ps.status;
+            s.pre_pause_status = ps.pre_pause_status;
+            s.paused_by_holiday_id = ps.paused_by_holiday_id;
+            s.last_modified_by = ps.last_modified_by;
+          });
+          bump();
+          return { error: 'PERSIST_FAILED', message: r.message };
+        }
+        restoredCount = r.restoredCount ?? restoredCount;
+      }
+
+      state.shifts.forEach(s => {
+        if (snapshot.restoredSnapshots.some(ps => ps.id === s.id) && s.cleaner_user_id) {
+          pushNotification(s.cleaner_user_id, 'holiday_removed', { shift_id: s.id, property_id: s.property_id, start_at: s.start_at });
+        }
+      });
+      pushNotification(h.created_by_user_id, 'holiday_removed', { customer_id: h.customer_id, restored: restoredCount });
+      state.users.filter(u => u.role === 'admin' && u.id !== actorUserId).forEach(a => pushNotification(a.id, 'holiday_removed', { customer_id: h.customer_id, restored: restoredCount }));
       bump();
       return { ok: true, restoredCount };
     },
@@ -1305,9 +1501,15 @@
     },
 
     // §7.5 checklist-bockning
-    toggleChecklistItem(itemId, cleanerUserId, done) {
+    async toggleChecklistItem(itemId, cleanerUserId, done) {
       const item = state.shift_checklist_items.find(c => c.id === itemId);
-      if (!item) return;
+      if (!item) return { error: 'NOT_FOUND' };
+
+      const snapshot = {
+        done_at: item.done_at,
+        done_by_cleaner_user_id: item.done_by_cleaner_user_id,
+      };
+
       if (done) {
         item.done_at = new Date();
         item.done_by_cleaner_user_id = cleanerUserId;
@@ -1316,6 +1518,19 @@
         item.done_by_cleaner_user_id = null;
       }
       bump();
+
+      const persist = window.dbPersist && window.dbPersist.toggleChecklistItem;
+      if (persist) {
+        const r = await persist({ itemId, cleanerUserId, done });
+        if (!r.ok) {
+          item.done_at = snapshot.done_at;
+          item.done_by_cleaner_user_id = snapshot.done_by_cleaner_user_id;
+          bump();
+          return { error: 'PERSIST_FAILED', message: r.message };
+        }
+      }
+
+      return { ok: true };
     },
 
     // §7.4 återkommande scheman – list
@@ -1526,7 +1741,7 @@
     },
 
     // §7.4 nytt one-off pass (status Planerat = ingen notis förrän godkänt)
-    createOneOffShift({ propertyId, cleanerUserId, startAt, endAt, actorUserId, notes = '', status = 'Godkänt' }) {
+    async createOneOffShift({ propertyId, cleanerUserId, startAt, endAt, actorUserId, notes = '', status = 'Godkänt' }) {
       const start_at = new Date(startAt);
       const end_at = new Date(endAt);
       const shiftStatus = status === 'Planerat' ? 'Planerat' : 'Godkänt';
@@ -1547,16 +1762,44 @@
         created_at: new Date(),
       };
       state.shifts.push(shift);
-      snapshotChecklistToShift(state.shifts.length - 1);
+      const shiftIndex = state.shifts.length - 1;
       state.shift_events.push({ id: id('se'), shift_id: shift.id, actor_user_id: actorUserId, event_type: 'shift_created', payload: { source: 'one_off', status: shiftStatus }, created_at: new Date() });
+      bump();
+
+      const persist = window.dbPersist && window.dbPersist.createOneOffShift;
+      if (persist) {
+        const r = await persist({ shift, actorUserId });
+        if (!r.ok) {
+          state.shifts.pop();
+          state.shift_events.pop();
+          bump();
+          return { error: 'PERSIST_FAILED', message: r.message };
+        }
+        if (r.shiftId) {
+          const oldId = shift.id;
+          shift.id = r.shiftId;
+          state.shift_events.forEach(e => {
+            if (e.shift_id === oldId) e.shift_id = r.shiftId;
+          });
+        }
+      }
+
+      snapshotChecklistToShift(shiftIndex);
       if (shiftStatus === 'Godkänt') {
         if (cleanerUserId) pushNotification(cleanerUserId, 'assigned_shift', { shift_id: shift.id, property_id: propertyId, start_at });
         const prop = db.propertyById(propertyId);
         const cust = state.customers.find(c => c.id === prop?.customer_id);
         if (cust?.primary_contact_user_id) pushNotification(cust.primary_contact_user_id, 'assigned_shift', { shift_id: shift.id, property_id: propertyId, start_at });
+        if (cust) {
+          state.customer_employees.filter(ce => ce.customer_id === cust.id).forEach(ce => {
+            const hasAccess = ce.scope === 'all_properties'
+              || state.customer_employee_properties.some(x => x.customer_employee_id === ce.id && x.property_id === propertyId);
+            if (hasAccess) pushNotification(ce.user_id, 'assigned_shift', { shift_id: shift.id, property_id: propertyId, start_at });
+          });
+        }
       }
       bump();
-      return shift;
+      return { ok: true, shift };
     },
 
     // §7.5 in/utcheckning
@@ -1669,7 +1912,7 @@
     },
 
     // §7.6 avvikelse / reklamation
-    createIncident({ shiftId, propertyId, reporterUserId, reporterRole, kind, category, title, description, attachments = [] }) {
+    async createIncident({ shiftId, propertyId, reporterUserId, reporterRole, kind, category, title, description, attachments = [] }) {
       const inc = {
         id: id('inc'), org_id: state.organizations[0].id,
         shift_id: shiftId || null, property_id: propertyId,
@@ -1681,17 +1924,40 @@
         created_at: new Date(),
       };
       state.incidents.push(inc);
+      bump();
+
+      const persist = window.dbPersist && window.dbPersist.createIncident;
+      if (persist) {
+        const r = await persist({ incident: inc });
+        if (!r.ok) {
+          state.incidents.pop();
+          bump();
+          return { error: 'PERSIST_FAILED', message: r.message };
+        }
+        if (r.incidentId) inc.id = r.incidentId;
+      }
+
       state.users.filter(u => u.role === 'admin').forEach(a => pushNotification(a.id, 'incident_created', { incident_id: inc.id, kind, property_id: propertyId }));
       if (kind === 'customer_complaint') {
         const sh = shiftId ? db.shiftById(shiftId) : null;
         if (sh && sh.cleaner_user_id) pushNotification(sh.cleaner_user_id, 'incident_created', { incident_id: inc.id, kind, property_id: propertyId });
       }
       bump();
-      return inc;
+      return { ok: true, incident: inc };
     },
-    resolveIncident(incidentId, adminUserId, resolutionNote, attachments = []) {
+    async resolveIncident(incidentId, adminUserId, resolutionNote, attachments = []) {
       const inc = state.incidents.find(i => i.id === incidentId);
-      if (!inc) return;
+      if (!inc) return { error: 'NOT_FOUND' };
+
+      const snapshot = {
+        status: inc.status,
+        resolved_by_admin_id: inc.resolved_by_admin_id,
+        resolved_at: inc.resolved_at,
+        resolution_note: inc.resolution_note,
+        attachments: [...(inc.attachments || [])],
+        notificationsLen: state.notifications.length,
+      };
+
       inc.status = 'resolved';
       inc.resolved_by_admin_id = adminUserId;
       inc.resolved_at = new Date();
@@ -1700,24 +1966,96 @@
         ...(inc.attachments || []),
         ...attachments.map(a => ({ ...a, uploaded_by: adminUserId, uploaded_at: new Date(), kind: 'admin' })),
       ];
+      bump();
+
+      const persist = window.dbPersist && window.dbPersist.updateIncident;
+      if (persist) {
+        const r = await persist({
+          incidentId,
+          fields: {
+            status: 'resolved',
+            resolved_by_admin_id: adminUserId,
+            resolved_at: inc.resolved_at.toISOString(),
+            resolution_note: inc.resolution_note,
+            attachments: inc.attachments,
+          },
+        });
+        if (!r.ok) {
+          inc.status = snapshot.status;
+          inc.resolved_by_admin_id = snapshot.resolved_by_admin_id;
+          inc.resolved_at = snapshot.resolved_at;
+          inc.resolution_note = snapshot.resolution_note;
+          inc.attachments = snapshot.attachments;
+          bump();
+          return { error: 'PERSIST_FAILED', message: r.message };
+        }
+      }
+
       pushNotification(inc.reported_by_user_id, 'incident_resolved', { incident_id: inc.id });
       bump();
+      return { ok: true };
     },
-    setIncidentInProgress(incidentId, adminUserId) {
+    async setIncidentInProgress(incidentId, adminUserId) {
       const inc = state.incidents.find(i => i.id === incidentId);
-      if (!inc) return;
+      if (!inc) return { error: 'NOT_FOUND' };
+
+      const snapshot = { status: inc.status, notificationsLen: state.notifications.length };
       inc.status = 'in_progress';
+      bump();
+
+      const persist = window.dbPersist && window.dbPersist.updateIncident;
+      if (persist) {
+        const r = await persist({ incidentId, fields: { status: 'in_progress' } });
+        if (!r.ok) {
+          inc.status = snapshot.status;
+          bump();
+          return { error: 'PERSIST_FAILED', message: r.message };
+        }
+      }
+
       pushNotification(inc.reported_by_user_id, 'incident_in_progress', { incident_id: inc.id });
       bump();
+      return { ok: true };
     },
-    reopenIncident(incidentId) {
+    async reopenIncident(incidentId) {
       const inc = state.incidents.find(i => i.id === incidentId);
-      if (!inc) return;
+      if (!inc) return { error: 'NOT_FOUND' };
+
+      const snapshot = {
+        status: inc.status,
+        resolved_by_admin_id: inc.resolved_by_admin_id,
+        resolved_at: inc.resolved_at,
+        resolution_note: inc.resolution_note,
+      };
+
       inc.status = 'open';
       inc.resolved_by_admin_id = null;
       inc.resolved_at = null;
       inc.resolution_note = null;
       bump();
+
+      const persist = window.dbPersist && window.dbPersist.updateIncident;
+      if (persist) {
+        const r = await persist({
+          incidentId,
+          fields: {
+            status: 'open',
+            resolved_by_admin_id: null,
+            resolved_at: null,
+            resolution_note: null,
+          },
+        });
+        if (!r.ok) {
+          inc.status = snapshot.status;
+          inc.resolved_by_admin_id = snapshot.resolved_by_admin_id;
+          inc.resolved_at = snapshot.resolved_at;
+          inc.resolution_note = snapshot.resolution_note;
+          bump();
+          return { error: 'PERSIST_FAILED', message: r.message };
+        }
+      }
+
+      return { ok: true };
     },
     incidentDetail(incidentId) {
       const inc = state.incidents.find(i => i.id === incidentId);
@@ -1732,53 +2070,126 @@
     },
 
     /* —— §7.5 städschema-mall (admin redigerar) —— */
-    addChecklistTemplateItem(propertyId, title) {
+    async addChecklistTemplateItem(propertyId, title) {
       const pos = state.cleaning_checklists.filter(c => c.property_id === propertyId).length + 1;
       const item = { id: id('cl'), property_id: propertyId, title: title.trim(), position: pos, active: true };
       state.cleaning_checklists.push(item);
       bump();
-      return item;
+
+      const persist = window.dbPersist && window.dbPersist.addChecklistTemplateItem;
+      if (persist) {
+        const r = await persist({ propertyId, title: item.title, position: pos });
+        if (!r.ok) {
+          state.cleaning_checklists.pop();
+          bump();
+          return { error: 'PERSIST_FAILED', message: r.message };
+        }
+        if (r.itemId) item.id = r.itemId;
+      }
+
+      return { ok: true, item };
     },
-    removeChecklistTemplateItem(itemId) {
+    async removeChecklistTemplateItem(itemId) {
       const idx = state.cleaning_checklists.findIndex(c => c.id === itemId);
-      if (idx === -1) return;
+      if (idx === -1) return { error: 'NOT_FOUND' };
       const removed = state.cleaning_checklists.splice(idx, 1)[0];
-      // packa position-värden för samma objekt
+      const snapshot = state.cleaning_checklists
+        .filter(c => c.property_id === removed.property_id)
+        .map(c => ({ id: c.id, position: c.position }));
       state.cleaning_checklists
         .filter(c => c.property_id === removed.property_id)
         .sort((a, b) => a.position - b.position)
         .forEach((c, i) => { c.position = i + 1; });
       bump();
+
+      const persist = window.dbPersist && window.dbPersist.removeChecklistTemplateItem;
+      if (persist) {
+        const r = await persist({ itemId, propertyId: removed.property_id });
+        if (!r.ok) {
+          state.cleaning_checklists.splice(idx, 0, removed);
+          snapshot.forEach(s => {
+            const c = state.cleaning_checklists.find(x => x.id === s.id);
+            if (c) c.position = s.position;
+          });
+          bump();
+          return { error: 'PERSIST_FAILED', message: r.message };
+        }
+      }
+
+      return { ok: true };
     },
-    renameChecklistTemplateItem(itemId, title) {
+    async renameChecklistTemplateItem(itemId, title) {
       const it = state.cleaning_checklists.find(c => c.id === itemId);
-      if (!it) return;
+      if (!it) return { error: 'NOT_FOUND' };
+      const snapshot = it.title;
       it.title = title;
       bump();
+
+      const persist = window.dbPersist && window.dbPersist.updateChecklistTemplateItem;
+      if (persist) {
+        const r = await persist({ itemId, fields: { title } });
+        if (!r.ok) {
+          it.title = snapshot;
+          bump();
+          return { error: 'PERSIST_FAILED', message: r.message };
+        }
+      }
+
+      return { ok: true };
     },
-    reorderChecklistTemplateItem(itemId, direction /* -1 | 1 */) {
+    async reorderChecklistTemplateItem(itemId, direction /* -1 | 1 */) {
       const it = state.cleaning_checklists.find(c => c.id === itemId);
-      if (!it) return;
+      if (!it) return { error: 'NOT_FOUND' };
       const siblings = state.cleaning_checklists
         .filter(c => c.property_id === it.property_id)
         .sort((a, b) => a.position - b.position);
       const idx = siblings.findIndex(c => c.id === itemId);
       const target = idx + direction;
-      if (target < 0 || target >= siblings.length) return;
+      if (target < 0 || target >= siblings.length) return { ok: true };
       const swap = siblings[target];
+      const snapshot = siblings.map(c => ({ id: c.id, position: c.position }));
       const tmp = it.position; it.position = swap.position; swap.position = tmp;
       bump();
+
+      const persist = window.dbPersist && window.dbPersist.updateChecklistTemplateItem;
+      if (persist) {
+        const r1 = await persist({ itemId, fields: { position: it.position } });
+        const r2 = await persist({ itemId: swap.id, fields: { position: swap.position } });
+        if (!r1.ok || !r2.ok) {
+          snapshot.forEach(s => {
+            const c = state.cleaning_checklists.find(x => x.id === s.id);
+            if (c) c.position = s.position;
+          });
+          bump();
+          return { error: 'PERSIST_FAILED', message: r1.message || r2.message };
+        }
+      }
+
+      return { ok: true };
     },
     listChecklistTemplate(propertyId, { includeInactive = true } = {}) {
       return state.cleaning_checklists
         .filter(c => c.property_id === propertyId && (includeInactive || c.active))
         .sort((a, b) => a.position - b.position);
     },
-    setChecklistTemplateItemActive(itemId, active) {
+    async setChecklistTemplateItemActive(itemId, active) {
       const it = state.cleaning_checklists.find(c => c.id === itemId);
-      if (!it) return;
+      if (!it) return { error: 'NOT_FOUND' };
+      const snapshot = it.active;
       it.active = !!active;
       bump();
+
+      const persist = window.dbPersist && window.dbPersist.updateChecklistTemplateItem;
+      if (persist) {
+        const r = await persist({ itemId, fields: { active: it.active } });
+        if (!r.ok) {
+          it.active = snapshot;
+          bump();
+          return { error: 'PERSIST_FAILED', message: r.message };
+        }
+      }
+
+      return { ok: true };
     },
 
     /* —— Objekt-uppdatering (admin) —— */
@@ -2382,10 +2793,27 @@
         .map(pc => ({ ...pc, cleaner: db.userById(pc.cleaner_user_id) }))
         .filter(pc => pc.cleaner);
     },
-    setPropertyCleaners(propertyId, cleanerUserIds) {
+    async setPropertyCleaners(propertyId, cleanerUserIds) {
+      const snapshot = state.property_cleaners
+        .filter(pc => pc.property_id === propertyId)
+        .map(pc => ({ ...pc }));
+
       state.property_cleaners = state.property_cleaners.filter(pc => pc.property_id !== propertyId);
       cleanerUserIds.forEach(uid => state.property_cleaners.push({ property_id: propertyId, cleaner_user_id: uid }));
       bump();
+
+      const persist = window.dbPersist && window.dbPersist.setPropertyCleaners;
+      if (persist) {
+        const r = await persist({ propertyId, cleanerUserIds });
+        if (!r.ok) {
+          state.property_cleaners = state.property_cleaners.filter(pc => pc.property_id !== propertyId);
+          state.property_cleaners.push(...snapshot);
+          bump();
+          return { error: 'PERSIST_FAILED', message: r.message };
+        }
+      }
+
+      return { ok: true };
     },
     async addCustomerEmployee({ customerId, name, email, phone = '', password = null, scope = 'all_properties', selectedPropertyIds = [], adminUserId, provision = false }) {
       const cust = db.customerById(customerId);

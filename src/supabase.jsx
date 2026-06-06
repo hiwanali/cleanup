@@ -41,11 +41,11 @@
     properties: ['created_at', 'updated_at'],
     property_cleaners: ['created_at'],
     recurring_schedules: ['created_at'],
-    shifts: ['start_at', 'end_at', 'original_start_at', 'original_end_at', 'checked_in_at', 'checked_out_at', 'created_at', 'updated_at'],
+    shifts: ['start_at', 'end_at', 'original_start_at', 'original_end_at', 'checked_in_at', 'checked_out_at', 'sick_finalized_at', 'created_at', 'updated_at'],
+    customer_holidays: ['start_date', 'end_date', 'created_at'],
     shift_events: ['created_at'],
     cleaning_checklists: ['created_at'],
     shift_checklist_items: ['done_at', 'created_at'],
-    customer_holidays: ['created_at'],
     customer_holiday_properties: [],
     incidents: ['resolved_at', 'created_at', 'updated_at'],
     notifications: ['read_at', 'created_at'],
@@ -560,7 +560,7 @@
   /* ---------- realtime (live-synk mellan användare) ---------- */
   let realtimeChannel = null;
   let hydrateDebounceTimer = null;
-  const HYDRATE_DEBOUNCE_MS = 700;
+  const HYDRATE_DEBOUNCE_MS = 350;
 
   function scheduleHydrateFromRealtime(userId) {
     if (!userId || typeof window.hydrateFromSupabase !== 'function') return;
@@ -619,6 +619,26 @@
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'shift_requests' },
+        () => scheduleHydrateFromRealtime(userId),
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'customer_holidays' },
+        () => scheduleHydrateFromRealtime(userId),
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'shift_checklist_items' },
+        () => scheduleHydrateFromRealtime(userId),
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'cleaning_checklists' },
+        () => scheduleHydrateFromRealtime(userId),
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'property_cleaners' },
         () => scheduleHydrateFromRealtime(userId),
       )
       .subscribe((status) => {
@@ -743,6 +763,46 @@
     }
 
     return { ok: true, shiftId: data.id };
+  }
+
+  async function persistCreateOneOffShift({ shift, actorUserId }) {
+    if (!enabled || !sb || !shift) {
+      return { ok: true, skipped: true };
+    }
+
+    const cleanerId = isUuid(shift.cleaner_user_id) ? shift.cleaner_user_id : null;
+    const { data, error } = await sb.from('shifts').insert({
+      property_id: shift.property_id,
+      cleaner_user_id: cleanerId,
+      start_at: toIso(shift.start_at),
+      end_at: toIso(shift.end_at),
+      status: shift.status,
+      source: 'one_off',
+      last_modified_by: actorUserId,
+      notes: shift.notes || '',
+    }).select('id').single();
+
+    if (error) {
+      console.error('[persist] createOneOffShift:', error.message);
+      return { ok: false, message: error.message };
+    }
+
+    const shiftId = data.id;
+
+    const { error: evErr } = await sb.from('shift_events').insert({
+      shift_id: shiftId,
+      actor_user_id: actorUserId,
+      event_type: 'shift_created',
+      payload: { source: 'one_off', status: shift.status },
+    });
+
+    if (evErr) {
+      return { ok: false, message: evErr.message };
+    }
+
+    await snapshotChecklistForShiftClient(shiftId, shift.property_id);
+
+    return { ok: true, shiftId };
   }
 
   async function persistCancelByCustomer({ shiftId, actorUserId, reason, hoursToStart }) {
@@ -1130,6 +1190,307 @@
     return { ok: true };
   }
 
+  async function persistReportSick({ shiftId, actorUserId, reason }) {
+    if (!enabled || !sb || !isUuid(shiftId)) {
+      return { ok: true, skipped: true };
+    }
+
+    const { error: shiftErr } = await sb.from('shifts').update({
+      status: 'Sjukanmäld',
+      last_modified_by: actorUserId,
+    }).eq('id', shiftId);
+
+    if (shiftErr) {
+      console.error('[persist] reportSick:', shiftErr.message);
+      return { ok: false, message: shiftErr.message };
+    }
+
+    const { error: evErr } = await sb.from('shift_events').insert({
+      shift_id: shiftId,
+      actor_user_id: actorUserId,
+      event_type: 'sick_reported',
+      payload: { reason: reason || '' },
+    });
+
+    if (evErr) return { ok: false, message: evErr.message };
+    return { ok: true };
+  }
+
+  async function persistSwapCleaner({ shiftId, newCleanerId, actorUserId, wasSick }) {
+    if (!enabled || !sb || !isUuid(shiftId)) {
+      return { ok: true, skipped: true };
+    }
+
+    const update = {
+      cleaner_user_id: isUuid(newCleanerId) ? newCleanerId : null,
+      last_modified_by: actorUserId,
+    };
+    if (wasSick) update.status = 'Godkänt';
+
+    const { error: shiftErr } = await sb.from('shifts').update(update).eq('id', shiftId);
+    if (shiftErr) {
+      console.error('[persist] swapCleaner:', shiftErr.message);
+      return { ok: false, message: shiftErr.message };
+    }
+
+    const { error: evErr } = await sb.from('shift_events').insert({
+      shift_id: shiftId,
+      actor_user_id: actorUserId,
+      event_type: 'cleaner_swapped',
+      payload: { to: newCleanerId },
+    });
+
+    if (evErr) return { ok: false, message: evErr.message };
+    return { ok: true };
+  }
+
+  async function persistAdjustTime({ shiftId, actorUserId, shift, wasSick }) {
+    if (!enabled || !sb || !isUuid(shiftId)) {
+      return { ok: true, skipped: true };
+    }
+
+    const update = {
+      start_at: toIso(shift.start_at),
+      end_at: toIso(shift.end_at),
+      original_start_at: shift.original_start_at ? toIso(shift.original_start_at) : null,
+      original_end_at: shift.original_end_at ? toIso(shift.original_end_at) : null,
+      last_modified_by: actorUserId,
+    };
+    if (wasSick) update.status = 'Godkänt';
+
+    const { error: shiftErr } = await sb.from('shifts').update(update).eq('id', shiftId);
+    if (shiftErr) {
+      console.error('[persist] adjustTime:', shiftErr.message);
+      return { ok: false, message: shiftErr.message };
+    }
+
+    const { error: evErr } = await sb.from('shift_events').insert({
+      shift_id: shiftId,
+      actor_user_id: actorUserId,
+      event_type: 'time_adjusted',
+      payload: { start_at: update.start_at, end_at: update.end_at },
+    });
+
+    if (evErr) return { ok: false, message: evErr.message };
+    return { ok: true };
+  }
+
+  async function persistMarkSickAsFinal({ shiftId, adminUserId }) {
+    if (!enabled || !sb || !isUuid(shiftId)) {
+      return { ok: true, skipped: true };
+    }
+
+    const now = new Date().toISOString();
+    const { error: shiftErr } = await sb.from('shifts').update({
+      sick_finalized_at: now,
+      last_modified_by: adminUserId,
+    }).eq('id', shiftId);
+
+    if (shiftErr) {
+      console.error('[persist] markSickAsFinal:', shiftErr.message);
+      return { ok: false, message: shiftErr.message };
+    }
+
+    const { error: evErr } = await sb.from('shift_events').insert({
+      shift_id: shiftId,
+      actor_user_id: adminUserId,
+      event_type: 'sick_finalized',
+      payload: {},
+    });
+
+    if (evErr) return { ok: false, message: evErr.message };
+    return { ok: true };
+  }
+
+  async function persistCreateHoliday({ customerId, scope, propertyIds, startDate, endDate, reason }) {
+    if (!enabled || !sb || !isUuid(customerId)) {
+      return { ok: true, skipped: true };
+    }
+
+    const start = toIso(startDate).slice(0, 10);
+    const end = toIso(endDate).slice(0, 10);
+    const { data, error } = await sb.rpc('create_customer_holiday', {
+      p_customer_id: customerId,
+      p_scope: scope,
+      p_property_ids: (propertyIds || []).filter(isUuid),
+      p_start_date: start,
+      p_end_date: end,
+      p_reason: reason || '',
+    });
+
+    if (error) {
+      console.error('[persist] createHoliday:', error.message);
+      return { ok: false, message: error.message };
+    }
+
+    return {
+      ok: true,
+      holidayId: data?.holiday_id,
+      pausedCount: data?.paused_count ?? 0,
+    };
+  }
+
+  async function persistDeleteHoliday({ holidayId }) {
+    if (!enabled || !sb || !isUuid(holidayId)) {
+      return { ok: true, skipped: true };
+    }
+
+    const { data, error } = await sb.rpc('delete_customer_holiday', {
+      p_holiday_id: holidayId,
+    });
+
+    if (error) {
+      console.error('[persist] deleteHoliday:', error.message);
+      return { ok: false, message: error.message };
+    }
+
+    return { ok: true, restoredCount: data?.restored_count ?? 0 };
+  }
+
+  async function persistCreateIncident({ incident }) {
+    if (!enabled || !sb || !incident) {
+      return { ok: true, skipped: true };
+    }
+
+    const { data, error } = await sb.from('incidents').insert({
+      org_id: incident.org_id,
+      shift_id: isUuid(incident.shift_id) ? incident.shift_id : null,
+      property_id: incident.property_id,
+      reported_by_user_id: incident.reported_by_user_id,
+      reporter_role: incident.reporter_role,
+      kind: incident.kind,
+      category: incident.category,
+      title: incident.title,
+      description: incident.description,
+      attachments: incident.attachments || [],
+      status: 'open',
+    }).select('id').single();
+
+    if (error) {
+      console.error('[persist] createIncident:', error.message);
+      return { ok: false, message: error.message };
+    }
+
+    return { ok: true, incidentId: data.id };
+  }
+
+  async function persistUpdateIncident({ incidentId, fields }) {
+    if (!enabled || !sb || !isUuid(incidentId)) {
+      return { ok: true, skipped: true };
+    }
+
+    const { error } = await sb.from('incidents').update(fields).eq('id', incidentId);
+    if (error) {
+      console.error('[persist] updateIncident:', error.message);
+      return { ok: false, message: error.message };
+    }
+
+    return { ok: true };
+  }
+
+  async function persistToggleChecklistItem({ itemId, cleanerUserId, done }) {
+    if (!enabled || !sb || !isUuid(itemId)) {
+      return { ok: true, skipped: true };
+    }
+
+    const update = done
+      ? { done_at: new Date().toISOString(), done_by_cleaner_user_id: cleanerUserId }
+      : { done_at: null, done_by_cleaner_user_id: null };
+
+    const { error } = await sb.from('shift_checklist_items').update(update).eq('id', itemId);
+    if (error) {
+      console.error('[persist] toggleChecklistItem:', error.message);
+      return { ok: false, message: error.message };
+    }
+
+    return { ok: true };
+  }
+
+  async function persistAddChecklistTemplateItem({ propertyId, title, position }) {
+    if (!enabled || !sb || !isUuid(propertyId)) {
+      return { ok: true, skipped: true };
+    }
+
+    const { data, error } = await sb.from('cleaning_checklists').insert({
+      property_id: propertyId,
+      title,
+      position,
+      active: true,
+    }).select('id').single();
+
+    if (error) {
+      console.error('[persist] addChecklistTemplateItem:', error.message);
+      return { ok: false, message: error.message };
+    }
+
+    return { ok: true, itemId: data.id };
+  }
+
+  async function persistRemoveChecklistTemplateItem({ itemId, propertyId }) {
+    if (!enabled || !sb || !isUuid(itemId)) {
+      return { ok: true, skipped: true };
+    }
+
+    const { error: delErr } = await sb.from('cleaning_checklists').delete().eq('id', itemId);
+    if (delErr) {
+      console.error('[persist] removeChecklistTemplateItem:', delErr.message);
+      return { ok: false, message: delErr.message };
+    }
+
+    if (isUuid(propertyId)) {
+      const { data: remaining } = await sb
+        .from('cleaning_checklists')
+        .select('id, position')
+        .eq('property_id', propertyId)
+        .order('position');
+      if (remaining?.length) {
+        await Promise.all(remaining.map((c, i) =>
+          sb.from('cleaning_checklists').update({ position: i + 1 }).eq('id', c.id),
+        ));
+      }
+    }
+
+    return { ok: true };
+  }
+
+  async function persistUpdateChecklistTemplateItem({ itemId, fields }) {
+    if (!enabled || !sb || !isUuid(itemId)) {
+      return { ok: true, skipped: true };
+    }
+
+    const { error } = await sb.from('cleaning_checklists').update(fields).eq('id', itemId);
+    if (error) {
+      console.error('[persist] updateChecklistTemplateItem:', error.message);
+      return { ok: false, message: error.message };
+    }
+
+    return { ok: true };
+  }
+
+  async function persistSetPropertyCleaners({ propertyId, cleanerUserIds }) {
+    if (!enabled || !sb || !isUuid(propertyId)) {
+      return { ok: true, skipped: true };
+    }
+
+    const { error: delErr } = await sb.from('property_cleaners').delete().eq('property_id', propertyId);
+    if (delErr) {
+      console.error('[persist] setPropertyCleaners delete:', delErr.message);
+      return { ok: false, message: delErr.message };
+    }
+
+    const ids = (cleanerUserIds || []).filter(isUuid);
+    if (ids.length > 0) {
+      const rows = ids.map(cleaner_user_id => ({ property_id: propertyId, cleaner_user_id }));
+      const { error: insErr } = await sb.from('property_cleaners').insert(rows);
+      if (insErr) {
+        console.error('[persist] setPropertyCleaners insert:', insErr.message);
+        return { ok: false, message: insErr.message };
+      }
+    }
+
+    return { ok: true };
+  }
+
   window.dbPersist = {
     insertNotifications: persistInsertNotifications,
     adminDelete: persistAdminDelete,
@@ -1155,5 +1516,19 @@
     createShiftRequest: persistCreateShiftRequest,
     deleteShiftRequest: persistDeleteShiftRequest,
     createCustomerShiftRequest: persistCreateCustomerShiftRequest,
+    createOneOffShift: persistCreateOneOffShift,
+    reportSick: persistReportSick,
+    swapCleaner: persistSwapCleaner,
+    adjustTime: persistAdjustTime,
+    markSickAsFinal: persistMarkSickAsFinal,
+    createHoliday: persistCreateHoliday,
+    deleteHoliday: persistDeleteHoliday,
+    createIncident: persistCreateIncident,
+    updateIncident: persistUpdateIncident,
+    toggleChecklistItem: persistToggleChecklistItem,
+    addChecklistTemplateItem: persistAddChecklistTemplateItem,
+    removeChecklistTemplateItem: persistRemoveChecklistTemplateItem,
+    updateChecklistTemplateItem: persistUpdateChecklistTemplateItem,
+    setPropertyCleaners: persistSetPropertyCleaners,
   };
 })();

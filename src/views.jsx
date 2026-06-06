@@ -452,9 +452,13 @@
                     <li key={item.id} className="px-2 py-2.5 flex items-start gap-3">
                       <button
                         disabled={!canCheckItems}
-                        onClick={() => {
+                        onClick={async () => {
                           const wasDone = !!item.done_at;
-                          db.toggleChecklistItem(item.id, session.userId, !wasDone);
+                          const r = await db.toggleChecklistItem(item.id, session.userId, !wasDone);
+                          if (r?.error) {
+                            toast.error(r.message || 'Kunde inte uppdatera checklistan.');
+                            return;
+                          }
                           toast.success(wasDone ? 'Avbockat.' : 'Klart!');
                         }}
                         className={cx(
@@ -751,9 +755,13 @@
                   <span>Markerat som hanterat – passet uteblir.</span>
                 </div>
               ) : (
-                <Button variant="ghost" icon="x" className="w-full justify-start" onClick={() => {
+                <Button variant="ghost" icon="x" className="w-full justify-start" onClick={async () => {
                   if (confirm('Lämna passet som "Sjukanmäld" och meddela kund att det uteblir?')) {
-                    db.markSickAsFinal(shift.id, session.userId);
+                    const r = await db.markSickAsFinal(shift.id, session.userId);
+                    if (r?.error) {
+                      toast.error(r.message || 'Kunde inte markera passet.');
+                      return;
+                    }
                     toast.success('Passet markerat som hanterat. Kund har fått besked.');
                     onClose && onClose();
                   }
@@ -976,9 +984,13 @@
                   <li key={c.user.id} className="px-1">
                     <button
                       disabled={isCurrent}
-                      onClick={() => {
+                      onClick={async () => {
                         if (c.conflict && !confirm(`${c.user.name} har redan ett pass under den här tiden. Tilldela ändå?`)) return;
-                        db.swapCleaner(shift.id, c.user.id, session.userId);
+                        const r = await db.swapCleaner(shift.id, c.user.id, session.userId);
+                        if (r?.error) {
+                          toast.error(r.message || 'Kunde inte byta städare.');
+                          return;
+                        }
                         toast.success(shift.status === 'Sjukanmäld'
                           ? `${c.user.name} tilldelad passet. Kund och städare är notifierade.`
                           : `${c.user.name} tar nu passet.`);
@@ -1051,10 +1063,18 @@
         footer={
           <>
             <Button variant="ghost" onClick={onClose}>Avbryt</Button>
-            <Button variant="primary" icon="check" disabled={!validTime || (swapCleaner && !newCleanerId)} onClick={() => {
-              db.adjustTime(shift.id, newStart, newEnd, session.userId);
+            <Button variant="primary" icon="check" disabled={!validTime || (swapCleaner && !newCleanerId)} onClick={async () => {
+              const r = await db.adjustTime(shift.id, newStart, newEnd, session.userId);
+              if (r?.error) {
+                toast.error(r.message || 'Kunde inte justera tiden.');
+                return;
+              }
               if (swapCleaner && newCleanerId) {
-                db.swapCleaner(shift.id, newCleanerId, session.userId);
+                const r2 = await db.swapCleaner(shift.id, newCleanerId, session.userId);
+                if (r2?.error) {
+                  toast.error(r2.message || 'Tiden sparades men städarbytet misslyckades.');
+                  return;
+                }
               }
               toast.success('Tiden uppdaterad. Berörda parter notifierade.');
               onClose();
@@ -1271,8 +1291,12 @@
         footer={
           <>
             <Button variant="ghost" onClick={onClose}>Avbryt</Button>
-            <Button variant="danger" icon="alert-circle" onClick={() => {
-              db.reportSick(shift.id, session.userId, reason.trim());
+            <Button variant="danger" icon="alert-circle" onClick={async () => {
+              const r = await db.reportSick(shift.id, session.userId, reason.trim());
+              if (r?.error) {
+                toast.error(r.message || 'Kunde inte spara sjukanmälan.');
+                return;
+              }
               toast.success(adminActor
                 ? `${cleaner?.name} är sjukanmäld. Kund har fått besked.`
                 : 'Sjukanmält. Admin och kund har fått besked.');
@@ -1456,8 +1480,8 @@
             <Button
               variant="primary"
               disabled={!canSubmit}
-              onClick={() => {
-                db.createIncident({
+              onClick={async () => {
+                const r = await db.createIncident({
                   shiftId: shift?.id,
                   propertyId: shift.property_id,
                   reporterUserId: session.userId,
@@ -1465,6 +1489,10 @@
                   kind: 'cleaner_issue',
                   category, title, description,
                 });
+                if (r?.error) {
+                  toast.error(r.message || 'Kunde inte skicka avvikelsen.');
+                  return;
+                }
                 toast.success('Avvikelse skickad. Admin notifieras.');
                 onClose();
                 onDone && onDone();
@@ -1516,8 +1544,8 @@
             <Button
               variant="primary"
               disabled={!canSubmit}
-              onClick={() => {
-                db.createIncident({
+              onClick={async () => {
+                const r = await db.createIncident({
                   shiftId: shift?.id,
                   propertyId: shift.property_id,
                   reporterUserId: session.userId,
@@ -1525,6 +1553,10 @@
                   kind: 'customer_complaint',
                   category, title, description, attachments,
                 });
+                if (r?.error) {
+                  toast.error(r.message || 'Kunde inte skicka reklamationen.');
+                  return;
+                }
                 toast.success('Tack — vi tar tag i det direkt.');
                 onClose();
                 onDone && onDone();
@@ -1576,8 +1608,12 @@
             <Button
               variant="primary"
               disabled={!canSubmit}
-              onClick={() => {
-                db.resolveIncident(incident.id, session.userId, note, attachments);
+              onClick={async () => {
+                const r = await db.resolveIncident(incident.id, session.userId, note, attachments);
+                if (r?.error) {
+                  toast.error(r.message || 'Kunde inte åtgärda ärendet.');
+                  return;
+                }
                 toast.success('Ärendet är markerat som åtgärdat.');
                 onClose();
                 onDone && onDone();
@@ -1766,8 +1802,12 @@
                 <h3 className="font-bold text-slate-900 mb-3">Admin-åtgärder</h3>
                 <div className="flex flex-wrap gap-2">
                   {detail.status === 'open' && (
-                    <Button variant="outline" icon="refresh" onClick={() => {
-                      db.setIncidentInProgress(detail.id, session.userId);
+                    <Button variant="outline" icon="refresh" onClick={async () => {
+                      const r = await db.setIncidentInProgress(detail.id, session.userId);
+                      if (r?.error) {
+                        toast.error(r.message || 'Kunde inte uppdatera ärendet.');
+                        return;
+                      }
                       toast.success('Ärendet är markerat som pågående.');
                     }}>Markera som pågående</Button>
                   )}
@@ -1775,8 +1815,12 @@
                     <Button variant="primary" icon="check-circle" onClick={() => setResolveOpen(true)}>Åtgärda</Button>
                   )}
                   {detail.status === 'resolved' && (
-                    <Button variant="ghost" icon="refresh" onClick={() => {
-                      db.reopenIncident(detail.id);
+                    <Button variant="ghost" icon="refresh" onClick={async () => {
+                      const r = await db.reopenIncident(detail.id);
+                      if (r?.error) {
+                        toast.error(r.message || 'Kunde inte återöppna ärendet.');
+                        return;
+                      }
                       toast.info('Ärendet är återöppnat.');
                     }}>Återöppna ärende</Button>
                   )}
@@ -2417,17 +2461,21 @@
     const validTime = startTime && endTime && startTime < endTime;
     const canSubmit = propertyId && cleanerId && date && validTime;
 
-    function submit() {
+    async function submit() {
       const startAt = combineDateTime(date, startTime);
       const endAt = combineDateTime(date, endTime);
       const status = requiresApproval ? 'Planerat' : 'Godkänt';
-      db.createOneOffShift({
+      const r = await db.createOneOffShift({
         propertyId, cleanerUserId: cleanerId,
         startAt, endAt,
         actorUserId: session.userId,
         notes: notes.trim(),
         status,
       });
+      if (r?.error) {
+        toast.error(r.message || 'Kunde inte spara passet. Försök igen.');
+        return;
+      }
       toast.success(
         requiresApproval
           ? 'Pass skapat som Planerat – godkänn det i dashboarden innan städare och kund meddelas.'
@@ -2965,9 +3013,9 @@
       setPropertyIds(prev => prev.includes(pid) ? prev.filter(x => x !== pid) : [...prev, pid]);
     }
 
-    function submit() {
+    async function submit() {
       setSubmitting(true);
-      const result = db.createHoliday({
+      const result = await db.createHoliday({
         customerId: customer.id,
         createdByUserId: session.userId,
         scope,
@@ -2979,6 +3027,10 @@
       setSubmitting(false);
       if (result?.error === 'FORBIDDEN') {
         toast.error('Du kan bara registrera ledighet på objekt du har åtkomst till.');
+        return;
+      }
+      if (result?.error) {
+        toast.error(result.message || 'Kunde inte registrera ledigheten.');
         return;
       }
       toast.success(`Ledighet registrerad – ${result.pausedCount} pass pausade.`);
@@ -3094,9 +3146,13 @@
               message={`${holiday.pausedCount} pausade pass kommer att återaktiveras. Städare och admin notifieras.`}
               confirmLabel="Ta bort"
               danger
-              onConfirm={() => {
-                const r = db.deleteHoliday(holiday.id, session.userId);
-                if (r?.ok) toast.success(`Ledighet borttagen – ${r.restoredCount} pass återaktiverade.`);
+              onConfirm={async () => {
+                const r = await db.deleteHoliday(holiday.id, session.userId);
+                if (r?.error) {
+                  toast.error(r.message || 'Kunde inte ta bort ledigheten.');
+                } else if (r?.ok) {
+                  toast.success(`Ledighet borttagen – ${r.restoredCount} pass återaktiverade.`);
+                }
                 setConfirmOpen(false);
               }}
             />
@@ -3679,8 +3735,12 @@
             ))}
           </ul>
           {dirty && (
-            <Button variant="primary" size="sm" onClick={() => {
-              db.setPropertyCleaners(property.id, cleanerIds);
+            <Button variant="primary" size="sm" onClick={async () => {
+              const r = await db.setPropertyCleaners(property.id, cleanerIds);
+              if (r?.error) {
+                toast.error(r.message || 'Kunde inte spara städarpoolen.');
+                return;
+              }
               toast.success('Städarpool uppdaterad.');
             }}>Spara städare</Button>
           )}
@@ -4623,18 +4683,26 @@
                     iconOnly
                     icon={it.active ? 'eye' : 'eye-off'}
                     title={it.active ? 'Avaktivera (visas inte i nya pass)' : 'Aktivera igen'}
-                    onClick={() => {
+                    onClick={async () => {
                       const wasActive = it.active;
-                      db.setChecklistTemplateItemActive(it.id, !wasActive);
+                      const r = await db.setChecklistTemplateItemActive(it.id, !wasActive);
+                      if (r?.error) {
+                        toast.error(r.message || 'Kunde inte uppdatera punkten.');
+                        return;
+                      }
                       toast.success(wasActive ? 'Punkten är avaktiverad.' : 'Punkten är aktiv igen.');
                     }}
                     aria-label={it.active ? 'Avaktivera' : 'Aktivera'}
                   />
                   <Button variant="ghost" size="sm" iconOnly icon="chevron-down" onClick={() => db.reorderChecklistTemplateItem(it.id, 1)} disabled={idx === items.length - 1} aria-label="Flytta ner" />
                   <Button variant="ghost" size="sm" iconOnly icon="chevron-down" className="rotate-180" onClick={() => db.reorderChecklistTemplateItem(it.id, -1)} disabled={idx === 0} aria-label="Flytta upp" />
-                  <Button variant="danger-ghost" size="sm" iconOnly icon="trash" onClick={() => {
+                  <Button variant="danger-ghost" size="sm" iconOnly icon="trash" onClick={async () => {
                     if (confirm(`Ta bort "${it.title}"?`)) {
-                      db.removeChecklistTemplateItem(it.id);
+                      const r = await db.removeChecklistTemplateItem(it.id);
+                      if (r?.error) {
+                        toast.error(r.message || 'Kunde inte ta bort punkten.');
+                        return;
+                      }
                       toast.success('Punkten borttagen.');
                     }
                   }} aria-label="Ta bort" />
@@ -4649,9 +4717,13 @@
             placeholder="Beskriv nästa punkt…"
             value={newTitle}
             onChange={e => setNewTitle(e.target.value)}
-            onKeyDown={e => {
+            onKeyDown={async e => {
               if (e.key === 'Enter' && newTitle.trim()) {
-                db.addChecklistTemplateItem(propertyId, newTitle);
+                const r = await db.addChecklistTemplateItem(propertyId, newTitle);
+                if (r?.error) {
+                  toast.error(r.message || 'Kunde inte lägga till punkten.');
+                  return;
+                }
                 toast.success('Punkt tillagd.');
                 setNewTitle('');
               }
@@ -4661,8 +4733,12 @@
             variant="primary"
             icon="plus"
             disabled={!newTitle.trim()}
-            onClick={() => {
-              db.addChecklistTemplateItem(propertyId, newTitle);
+            onClick={async () => {
+              const r = await db.addChecklistTemplateItem(propertyId, newTitle);
+              if (r?.error) {
+                toast.error(r.message || 'Kunde inte lägga till punkten.');
+                return;
+              }
               toast.success('Punkt tillagd.');
               setNewTitle('');
             }}
