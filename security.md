@@ -75,8 +75,21 @@ Frontend: `db.incidents()` i `src/mock.jsx` visar nu båda ärendetyperna för k
 1. **Helper-funktioner exponerade som RPC för `authenticated`** (`is_admin()`, `current_org_id()` m.fl.):
    låg risk eftersom de internt filtrerar på `auth.uid()` och endast returnerar anroparens egen
    org/roll. RLS-policyerna kräver `EXECUTE`, så de kan inte enbart revokeras — full åtgärd kräver
-   att de flyttas till ett icke-exponerat schema och att alla policyer skrivs om. Skjuts upp för
-   att inte riskera live-driften nu.
+   att de flyttas till ett icke-exponerat schema och att alla policyer skrivs om. Accepterad risk
+   tills vidare (se `20260529100700_fix_rls_helper_grants.sql`).
+
+### RLS-prestanda (2026-06-06)
+
+Migration `20260606200000_rls_perf_and_cancel_reason.sql` (applicerad live):
+
+1. **auth.uid() initplan** → Alla RLS-hjälpfunktioner och policies som direkt använder `auth.uid()`
+   ersatta med `(select auth.uid())` för att undvika per-rad re-evaluering (Supabase performance
+   advisor).
+2. **shifts.cancel_reason** → Kolumn tillagd för avbokningsorsak vid kundavbokning.
+3. **FK-index** → `shifts.recurring_id`, `incidents.shift_id`, `customer_holidays.customer_id`,
+   `thread_reads.user_id`.
+4. **shift_events_insert** → Utökad till `is_customer_role()` så kundanställd kan logga
+   avbokningshändelser.
 
 ### Production monitoring
 1. **Error tracking**: Överväg Sentry/LogRocket för produktionsfel
