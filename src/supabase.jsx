@@ -656,13 +656,14 @@
     return { ok: true };
   }
 
-  async function persistApproveShift({ shiftId, actorUserId, shift, primaryContactUserId }) {
+  async function persistApproveShift({ shiftId, actorUserId, cleanerUserId, shift, primaryContactUserId }) {
     if (!enabled || !sb || !isUuid(shiftId)) {
       return { ok: true, skipped: true };
     }
 
     const { error: shiftErr } = await sb.from('shifts').update({
       status: 'Godkänt',
+      cleaner_user_id: cleanerUserId || shift?.cleaner_user_id || null,
       last_modified_by: actorUserId,
     }).eq('id', shiftId);
 
@@ -691,7 +692,7 @@
     }
 
     const { error: shiftErr } = await sb.from('shifts').update({
-      status: 'Borttaget',
+      status: 'Avbokat',
       last_modified_by: actorUserId,
     }).eq('id', shiftId);
 
@@ -705,6 +706,71 @@
       event_type: 'shift_declined',
       payload: { hours_to_start: hoursToStart },
     });
+
+    return { ok: true };
+  }
+
+  async function persistCreateCustomerShiftRequest({ shift, actorUserId }) {
+    if (!enabled || !sb || !shift) {
+      return { ok: true, skipped: true };
+    }
+
+    const { data, error } = await sb.from('shifts').insert({
+      property_id: shift.property_id,
+      cleaner_user_id: null,
+      start_at: toIso(shift.start_at),
+      end_at: toIso(shift.end_at),
+      status: 'Planerat',
+      source: 'customer_request',
+      last_modified_by: actorUserId,
+      notes: shift.notes || '',
+    }).select('id').single();
+
+    if (error) {
+      console.error('[persist] createCustomerShiftRequest:', error.message);
+      return { ok: false, message: error.message };
+    }
+
+    const { error: evErr } = await sb.from('shift_events').insert({
+      shift_id: data.id,
+      actor_user_id: actorUserId,
+      event_type: 'customer_booking_requested',
+      payload: { source: 'customer_request' },
+    });
+
+    if (evErr) {
+      return { ok: false, message: evErr.message };
+    }
+
+    return { ok: true, shiftId: data.id };
+  }
+
+  async function persistCancelByCustomer({ shiftId, actorUserId, reason, hoursToStart }) {
+    if (!enabled || !sb || !isUuid(shiftId)) {
+      return { ok: true, skipped: true };
+    }
+
+    const { error: shiftErr } = await sb.from('shifts').update({
+      status: 'Avbokat',
+      cancel_reason: reason || null,
+      last_modified_by: actorUserId,
+    }).eq('id', shiftId);
+
+    if (shiftErr) {
+      console.error('[persist] cancelByCustomer:', shiftErr.message);
+      return { ok: false, message: shiftErr.message };
+    }
+
+    const { error: evErr } = await sb.from('shift_events').insert({
+      shift_id: shiftId,
+      actor_user_id: actorUserId,
+      event_type: 'customer_cancelled',
+      payload: { hours_to_start: hoursToStart, reason: reason || null },
+    });
+
+    if (evErr) {
+      return { ok: false, message: evErr.message };
+    }
 
     return { ok: true };
   }
@@ -1079,6 +1145,7 @@
     markNotificationsRead: persistMarkNotificationsRead,
     approveShift: persistApproveShift,
     declineShift: persistDeclineShift,
+    cancelByCustomer: persistCancelByCustomer,
     checkIn: persistCheckIn,
     checkOut: persistCheckOut,
     createRecurringSchedule: persistCreateRecurringSchedule,
@@ -1087,5 +1154,6 @@
     markThreadRead: persistMarkThreadRead,
     createShiftRequest: persistCreateShiftRequest,
     deleteShiftRequest: persistDeleteShiftRequest,
+    createCustomerShiftRequest: persistCreateCustomerShiftRequest,
   };
 })();

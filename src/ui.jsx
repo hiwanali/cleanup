@@ -174,7 +174,7 @@
   }
 
   const STATUS_MAP = {
-    Planerat: { variant: 'brand', icon: 'calendar', label: 'Planerat' },
+    Planerat: { variant: 'zinc', icon: 'calendar', label: 'Väntar på godkännande' },
     Godkänt: { variant: 'emerald', icon: 'check-circle', label: 'Godkänt' },
     Pågående: { variant: 'accent', icon: 'play', label: 'Pågående' },
     Utfört: { variant: 'slate', icon: 'check', label: 'Utfört' },

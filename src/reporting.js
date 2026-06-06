@@ -3,7 +3,8 @@
  * Arbetade timmar: endast Utfört, via shiftTimes (faktisk tid efter utcheckning).
  */
 (function () {
-  const EXCLUDED_BOOKED = new Set(['Borttaget', 'Avbokat']);
+  // Planerat = väntande förfrågan – räknas inte förrän admin godkänt (Godkänt).
+  const EXCLUDED_BOOKED = new Set(['Borttaget', 'Avbokat', 'Planerat']);
 
   function startOfDay(d) {
     const x = new Date(d);
@@ -192,7 +193,7 @@
         totalTimeAdjusted,
         totalSickReports,
         customerNewTimes: 0,
-        customerNewTimesNote: 'Kommer när kund kan boka eller efterfråga pass i plattformen.',
+        customerNewTimesNote: 'Kundförfrågningar (Planerat) räknas när de godkänts.',
       },
       byCustomer: [...byCustomer.values()].sort(sortByHours),
       byProperty: [...byProperty.values()].sort(sortByHours),
@@ -206,9 +207,11 @@
     const period = parsePeriod(filters);
     const { start, end } = period;
 
-    const propertyIds = new Set(
-      state.properties.filter(p => p.customer_id === customerId).map(p => p.id),
-    );
+    const propertyIds = opts.propertyIds
+      ? new Set(opts.propertyIds)
+      : new Set(
+          state.properties.filter(p => p.customer_id === customerId).map(p => p.id),
+        );
 
     let bookedCount = 0;
     const cleanerIds = new Set();

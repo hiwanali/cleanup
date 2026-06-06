@@ -146,6 +146,28 @@
     );
   }
 
+  function CustomerWorkedTimeDisplay({ shift }) {
+    useDb();
+    const times = db.shiftTimes(shift);
+    const workedMs = new Date(times.effective.end) - new Date(times.effective.start);
+    const workedHours = workedMs > 0 ? Math.round((workedMs / 36e5) * 100) / 100 : 0;
+    return (
+      <div className="space-y-1.5">
+        <div>
+          <span className="text-[11px] text-slate-500 block">Bokad tid</span>
+          <span>{formatRange(times.planned.start, times.planned.end)}</span>
+        </div>
+        <div>
+          <span className="text-[11px] text-emerald-700 block">Utförd tid</span>
+          <span className="text-emerald-800">{formatRange(times.effective.start, times.effective.end)}</span>
+          {workedHours > 0 && (
+            <span className="text-[11px] text-emerald-600 block mt-0.5">{workedHours} timmar arbetade</span>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   /* ============================================================
    * Gemensamma kort
    * ============================================================ */
@@ -465,7 +487,7 @@
 
             {/* §7.6 Avvikelse / reklamation — formulär + lista */}
             {isOwnerCleaner && <CleanerIncidentSection shift={shift} session={session} />}
-            {isCustomerView && shift.status === 'Utfört' && session.user.role === 'customer' && (
+            {isCustomerView && shift.status === 'Utfört' && (
               <CustomerComplaintSection shift={shift} session={session} />
             )}
             {/* §7.6 ärenden kopplade till passet — synliga för admin + kund */}
@@ -489,7 +511,11 @@
                   <div className="flex-1">
                     <dt className="text-xs text-slate-500">Tid</dt>
                     <dd className="font-medium text-slate-900">
-                      <ShiftTimeDisplay shift={shift} plannedClassName="block text-xs text-slate-500 mt-0.5 font-normal" />
+                      {isCustomerView && shift.status === 'Utfört' ? (
+                        <CustomerWorkedTimeDisplay shift={shift} />
+                      ) : (
+                        <ShiftTimeDisplay shift={shift} plannedClassName="block text-xs text-slate-500 mt-0.5 font-normal" />
+                      )}
                     </dd>
                   </div>
                 </div>
@@ -649,14 +675,16 @@
     const isBorttaget = shift.status === 'Borttaget';
     const cleaner = db.userById(shift.cleaner_user_id);
 
-    async function handleApprove() {
+    async function handleApprove(cleanerUserId) {
       setActing(true);
       try {
-        const r = await db.approveShift(shift.id, session.userId);
+        const r = await db.approveShift(shift.id, session.userId, { cleanerUserId });
         if (r?.ok) {
           toast.success('Passet godkänt. Städare och kund har fått besked.');
           setApproveOpen(false);
           onClose && onClose();
+        } else if (r?.error === 'NO_CLEANER') {
+          toast.error('Välj en städare innan du godkänner.');
         } else if (r?.error === 'PERSIST_FAILED') {
           toast.error('Kunde inte spara – försök igen.');
         } else {
@@ -778,19 +806,18 @@
           <AdminDeleteShiftSection shift={shift} session={session} onClose={onClose} />
           <AssignReplacementModal open={assignOpen} onClose={() => setAssignOpen(false)} shift={shift} session={session} onDone={onClose} />
           <AdjustShiftModal open={adjustOpen} onClose={() => setAdjustOpen(false)} shift={shift} session={session} onDone={onClose} />
-          <ConfirmDialog
+          <ApproveShiftModal
             open={approveOpen}
             onClose={() => { if (!acting) setApproveOpen(false); }}
-            title="Godkänn passet?"
-            message="Passet blir Godkänt och städare samt kund får en tilldelningsnotis."
-            confirmLabel={acting ? 'Godkänner…' : 'Godkänn'}
-            onConfirm={handleApprove}
+            shift={shift}
+            acting={acting}
+            onApprove={handleApprove}
           />
           <ConfirmDialog
             open={declineOpen}
             onClose={() => { if (!acting) setDeclineOpen(false); }}
             title="Avslå förfrågan?"
-            message="Passet markeras som Borttaget. Städare och kund får besked att passet inte blir av."
+            message="Passet markeras som Avbokat i den gemensamma kalendern. Kund och städare får besked."
             confirmLabel={acting ? 'Avslår…' : 'Avslå'}
             danger
             onConfirm={handleDecline}
@@ -846,6 +873,61 @@
         </Card>
         <AdminDeleteShiftSection shift={shift} session={session} onClose={onClose} />
       </>
+    );
+  }
+
+  /* ============================================================
+   * ApproveShiftModal – godkänn Planerat med obligatorisk städare
+   * ============================================================ */
+  function ApproveShiftModal({ open, onClose, shift, acting, onApprove }) {
+    const [cleanerId, setCleanerId] = useState('');
+    useEffect(() => {
+      if (open) setCleanerId(shift?.cleaner_user_id || '');
+    }, [open, shift?.id, shift?.cleaner_user_id]);
+    if (!open || !shift) return null;
+
+    const candidates = db.availableCleanersFor(shift.id)
+      .sort((a, b) => (a.conflict - b.conflict) || (b.inPool - a.inPool) || a.user.name.localeCompare(b.user.name, 'sv'));
+    const poolDefault = candidates.find(c => c.inPool)?.user.id || candidates[0]?.user.id || '';
+    const effectiveCleanerId = cleanerId || poolDefault;
+
+    return (
+      <Modal
+        open={open}
+        onClose={onClose}
+        title="Godkänn passet"
+        size="md"
+        footer={
+          <>
+            <Button variant="ghost" onClick={onClose} disabled={acting}>Avbryt</Button>
+            <Button
+              variant="primary"
+              icon="check"
+              disabled={acting || !effectiveCleanerId}
+              onClick={() => onApprove(effectiveCleanerId)}
+            >
+              {acting ? 'Godkänner…' : 'Godkänn och tilldela'}
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-slate-600 mb-4">
+          Passet blir <span className="font-semibold text-emerald-700">Godkänt</span> i den gemensamma kalendern. Välj städare – både städare och kund får notis.
+        </p>
+        <Field label="Städare" required>
+          <Select value={effectiveCleanerId} onChange={e => setCleanerId(e.target.value)}>
+            <option value="">Välj städare…</option>
+            {candidates.map(c => (
+              <option key={c.user.id} value={c.user.id}>
+                {c.user.name}{c.inPool ? ' · i poolen' : ''}{c.conflict ? ' · krock' : ''}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        {candidates.length === 0 && (
+          <p className="text-xs text-amber-700 mt-2">Inga tillgängliga städare utan tidskrock. Justera tiden eller tilldela manuellt via ”Byt städare”.</p>
+        )}
+      </Modal>
     );
   }
 
@@ -1113,10 +1195,36 @@
    * ============================================================ */
   function CancelShiftModal({ open, onClose, shift, session, onDone }) {
     const [reason, setReason] = useState('');
+    const [cancelling, setCancelling] = useState(false);
     useEffect(() => { if (open) setReason(''); }, [open]);
     if (!shift) return null;
     const prop = db.propertyById(shift.property_id);
     const hoursToStart = (new Date(shift.start_at).getTime() - Date.now()) / 36e5;
+
+    async function confirmCancel() {
+      setCancelling(true);
+      try {
+        const result = await db.cancelByCustomer(shift.id, session.userId, reason);
+        if (result?.error === 'INSIDE_48H') {
+          toast.error('Passet ligger inom 48 timmar – kontakta admin för att avboka.');
+          return;
+        }
+        if (result?.error === 'FORBIDDEN') {
+          toast.error('Du har inte behörighet att avboka det här passet.');
+          return;
+        }
+        if (result?.error === 'PERSIST_FAILED') {
+          toast.error('Kunde inte spara – försök igen.');
+          return;
+        }
+        toast.success('Passet är avbokat. Admin och städaren är notifierade.');
+        onClose();
+        onDone && onDone();
+      } finally {
+        setCancelling(false);
+      }
+    }
+
     return (
       <Modal
         open={open}
@@ -1125,17 +1233,10 @@
         size="sm"
         footer={
           <>
-            <Button variant="ghost" onClick={onClose}>Behåll passet</Button>
-            <Button variant="danger" icon="x" onClick={() => {
-              const result = db.cancelByCustomer(shift.id, session.userId, reason);
-              if (result?.error === 'INSIDE_48H') {
-                toast.error('Passet ligger inom 48 timmar – kontakta admin för att avboka.');
-                return;
-              }
-              toast.success('Passet är avbokat. Admin och städaren är notifierade.');
-              onClose();
-              onDone && onDone();
-            }}>Avboka pass</Button>
+            <Button variant="ghost" onClick={onClose} disabled={cancelling}>Behåll passet</Button>
+            <Button variant="danger" icon="x" disabled={cancelling} onClick={confirmCancel}>
+              {cancelling ? 'Avbokar…' : 'Avboka pass'}
+            </Button>
           </>
         }
       >
@@ -1979,7 +2080,7 @@
   ];
   const CAL_STATUS_CHIP = {
     'Godkänt': 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200',
-    'Planerat': 'bg-brand-100 text-brand-800 hover:bg-brand-200',
+    'Planerat': 'bg-slate-200 text-slate-700 hover:bg-slate-300',
     'Pågående': 'bg-accent-100 text-accent-700 hover:bg-accent-200',
     'Utfört': 'bg-slate-100 text-slate-600 hover:bg-slate-200',
     'Sjukanmäld': 'bg-amber-100 text-amber-800 hover:bg-amber-200',
@@ -2397,6 +2498,111 @@
     );
   }
 
+  /* ============================================================
+   * CustomerShiftRequestModal – kund begär nytt pass (Planerat)
+   * ============================================================ */
+  function CustomerShiftRequestModal({ open, onClose, session, preselectPropertyId = null }) {
+    const properties = db.propertiesForUser(session.userId).slice().sort((a, b) => a.name.localeCompare(b.name, 'sv'));
+    const [propertyId, setPropertyId] = useState(preselectPropertyId || '');
+    const [date, setDate] = useState(toDateInput(new Date()));
+    const [startTime, setStartTime] = useState('08:00');
+    const [endTime, setEndTime] = useState('10:00');
+    const [notes, setNotes] = useState('');
+    const [submitting, setSubmitting] = useState(false);
+
+    useEffect(() => {
+      if (open) {
+        setPropertyId(preselectPropertyId || properties[0]?.id || '');
+        setDate(toDateInput(new Date()));
+        setStartTime('08:00');
+        setEndTime('10:00');
+        setNotes('');
+      }
+    }, [open, preselectPropertyId]);
+
+    const validTime = startTime && endTime && startTime < endTime;
+    const canSubmit = propertyId && date && validTime && !submitting;
+
+    async function submit() {
+      setSubmitting(true);
+      try {
+        const r = await db.createCustomerShiftRequest({
+          propertyId,
+          startAt: combineDateTime(date, startTime),
+          endAt: combineDateTime(date, endTime),
+          actorUserId: session.userId,
+          notes,
+        });
+        if (r?.error === 'FORBIDDEN') {
+          toast.error('Du har inte åtkomst till det valda objektet.');
+          return;
+        }
+        if (r?.error === 'INVALID_TIME') {
+          toast.error('Sluttid måste vara efter starttid.');
+          return;
+        }
+        if (r?.error === 'PERSIST_FAILED') {
+          toast.error('Kunde inte skicka – försök igen.');
+          return;
+        }
+        toast.success('Förfrågan skickad. Den syns som grå i kalendern tills admin godkänner.');
+        onClose();
+      } finally {
+        setSubmitting(false);
+      }
+    }
+
+    return (
+      <Modal
+        open={open}
+        onClose={onClose}
+        title="Begär städning"
+        size="md"
+        footer={
+          <>
+            <Button variant="ghost" onClick={onClose} disabled={submitting}>Avbryt</Button>
+            <Button disabled={!canSubmit} icon="send" onClick={submit}>
+              {submitting ? 'Skickar…' : 'Skicka förfrågan'}
+            </Button>
+          </>
+        }
+      >
+        {properties.length === 0 ? (
+          <EmptyState icon="building" title="Inga objekt" description="Du saknar åtkomst till objekt. Kontakta admin." />
+        ) : (
+          <>
+            <Field label="Objekt" required>
+              <Select value={propertyId} onChange={e => setPropertyId(e.target.value)} disabled={!!preselectPropertyId}>
+                {properties.map(p => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </Select>
+            </Field>
+            <div className="grid grid-cols-3 gap-3 mt-3">
+              <Field label="Datum">
+                <Input type="date" value={date} onChange={e => setDate(e.target.value)} />
+              </Field>
+              <Field label="Starttid">
+                <Input type="time" value={startTime} onChange={e => setStartTime(e.target.value)} />
+              </Field>
+              <Field label="Sluttid" error={!validTime && startTime && endTime ? 'Måste vara efter starttid.' : null}>
+                <Input type="time" value={endTime} onChange={e => setEndTime(e.target.value)} />
+              </Field>
+            </div>
+            <div className="mt-3">
+              <Field label="Kommentar" hint="Valfritt – t.ex. extrastädning eller särskilda önskemål.">
+                <Textarea rows={2} value={notes} onChange={e => setNotes(e.target.value)} placeholder="Beskriv kort vad ni behöver." />
+              </Field>
+            </div>
+            <p className="text-xs text-slate-500 mt-3">
+              Förfrågan visas som <span className="font-medium text-slate-700">grå</span> i kalendern tills admin godkänner och tilldelar städare.
+            </p>
+          </>
+        )}
+      </Modal>
+    );
+  }
+
   function AdminShiftDetailView({ session, onNavigate, shiftId }) {
     useDb();
     const shift = db.shiftById(shiftId);
@@ -2705,8 +2911,6 @@
     if (!customer) return <ComingSoonView title="Ledighet" section="§7.3" description="Ingen kund kopplad till denna profil." />;
 
     const allProperties = db.propertiesForUser(session.userId);
-    const isHuvudkontakt = session.user.role === 'customer';
-    const isEmployee = session.user.role === 'customer_employee';
     const holidays = db.holidaysWithSummary(customer.id);
 
     return (
@@ -2717,21 +2921,14 @@
         />
         <div className="grid lg:grid-cols-5 gap-6">
           <div className="lg:col-span-3 space-y-4">
-            {isHuvudkontakt ? (
-              <HolidayForm session={session} customer={customer} properties={allProperties} />
-            ) : (
-              <Card padding="md" className="border-slate-200 bg-slate-50/60">
-                <h3 className="font-bold text-slate-700 mb-1">Endast huvudkontakt kan registrera ledighet</h3>
-                <p className="text-sm text-slate-600">Som kundanställd kan du se befintliga ledigheter. Be {customer.name}s huvudkontakt registrera ny ledighet.</p>
-              </Card>
-            )}
+            <HolidayForm session={session} customer={customer} properties={allProperties} />
           </div>
           <div className="lg:col-span-2 space-y-3">
             <h2 className="text-lg font-bold text-slate-900">Registrerade ledigheter</h2>
             {holidays.length === 0 ? (
               <Card padding="md"><EmptyState icon="calendar" title="Inga registrerade ledigheter" /></Card>
             ) : (
-              holidays.map(h => <HolidayCard key={h.id} holiday={h} session={session} isAdmin={false} isEmployee={isEmployee} />)
+              holidays.map(h => <HolidayCard key={h.id} holiday={h} session={session} isAdmin={false} />)
             )}
           </div>
         </div>
@@ -2780,6 +2977,10 @@
         reason: reason.trim(),
       });
       setSubmitting(false);
+      if (result?.error === 'FORBIDDEN') {
+        toast.error('Du kan bara registrera ledighet på objekt du har åtkomst till.');
+        return;
+      }
       toast.success(`Ledighet registrerad – ${result.pausedCount} pass pausade.`);
       setScope('all_properties');
       setPropertyIds([]);
@@ -4960,23 +5161,24 @@
     const props = db.propertiesForUser(session.userId);
     const upcoming = db.shiftsForCustomerUser(session.userId, { from: new Date(), statuses: ['Godkänt', 'Planerat', 'Sjukanmäld', 'Pausat (kundledighet)'] }).slice(0, 8);
     const openIncidents = db.incidents({ viewerUserId: session.userId, status: 'open' });
-    const isReadOnly = session.user.role === 'customer_employee';
+    const isEmployee = session.user.role === 'customer_employee';
+    const roleLabel = isEmployee ? 'Kundanställd' : 'Huvudkontakt';
 
     return (
       <div>
         <PageHeader
           title={customer ? customer.name : 'Översikt'}
-          subtitle={isReadOnly ? 'Du har läsbehörighet på utvalda objekt.' : `${props.length} objekt · ${session.user.name}`}
-          actions={!isReadOnly && (
+          subtitle={`${props.length} objekt · ${session.user.name}`}
+          actions={
             <Button variant="outline" icon="calendar" onClick={() => onNavigate('/kund/ledighet')}>Ny ledighet</Button>
-          )}
+          }
         />
 
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-8">
           <Stat label="Objekt" value={props.length} icon="building" tone="brand" />
           <Stat label="Kommande pass" value={upcoming.length} icon="calendar" tone="accent" />
           <Stat label="Öppna ärenden" value={openIncidents.length} icon="alert-triangle" tone="amber" />
-          <Stat label="Roll" value={isReadOnly ? 'Läs' : 'Admin'} hint={isReadOnly ? 'Kundanställd' : 'Huvudkontakt'} icon="shield" tone="emerald" />
+          <Stat label="Roll" value={roleLabel} icon="shield" tone="emerald" />
         </div>
 
         <section className="mb-8">
@@ -5067,6 +5269,8 @@
   window.HolidayCard = HolidayCard;
   window.AdminSchemaView = AdminSchemaView;
   window.CreateShiftModal = CreateShiftModal;
+  window.CustomerShiftRequestModal = CustomerShiftRequestModal;
+  window.ApproveShiftModal = ApproveShiftModal;
   window.AdminRecurringEditor = AdminRecurringEditor;
   window.CreateRecurringModal = CreateRecurringModal;
   // §7.6
@@ -5305,23 +5509,13 @@
     );
   }
 
-  function CustomerReportsEmployeeBlocked() {
-    return (
-      <div>
-        <PageHeader title="Rapporter" subtitle="Sammanfattning av era städpass." />
-        <Card padding="lg">
-          <EmptyState
-            icon="file-text"
-            title="Endast för huvudkontakt"
-            description="Rapporter är tillgängliga för kundens huvudkontakt. Kontakta er administratör om ni behöver en export."
-          />
-        </Card>
-      </div>
-    );
-  }
-
   function CustomerReportsMain({ session }) {
     useDb();
+    const accessibleProps = db.propertiesForUser(session.userId);
+    const isEmployee = session.user.role === 'customer_employee';
+    const scopeHint = isEmployee && accessibleProps.length > 0
+      ? `Baserat på ${accessibleProps.length} objekt du har åtkomst till.`
+      : null;
     const [preset, setPreset] = useState('this_month');
     const [from, setFrom] = useState(toDateInput(new Date()));
     const [to, setTo] = useState(toDateInput(new Date()));
@@ -5378,7 +5572,7 @@
       <div>
         <PageHeader
           title="Rapporter"
-          subtitle="Översikt av bokade pass och arbetade timmar. Städare visas som ”Städare” enligt era visningsregler."
+          subtitle={scopeHint || 'Översikt av bokade pass och arbetade timmar. Städare visas som ”Städare” enligt era visningsregler.'}
           actions={
             <div className="flex flex-wrap gap-2">
               <Button variant="primary" icon="file-text" onClick={generate}>Generera rapport</Button>
@@ -5415,7 +5609,7 @@
               Period: <span className="font-semibold text-slate-900">{report.meta.label}</span>
             </p>
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-              <Stat label="Bokade tider" value={s.bookedCount} icon="calendar" tone="brand" />
+              <Stat label="Bokade tider" value={s.bookedCount} hint="Godkända pass (ej väntande)" icon="calendar" tone="brand" />
               <Stat label="Arbetade timmar" value={s.workedHours} hint="Utförda pass" icon="clock" tone="emerald" />
               <Stat label="Antal städare" value={s.cleanerCount} hint="Unika på bokade pass" icon="users" tone="accent" />
               <Stat label="Reklamationer" value={s.incidentsCount} icon="alert-triangle" tone="rose" />
@@ -5427,26 +5621,119 @@
   }
 
   function CustomerReportsView({ session }) {
-    if (session.user.role === 'customer_employee') {
-      return <CustomerReportsEmployeeBlocked />;
-    }
     return <CustomerReportsMain session={session} />;
+  }
+
+  function CustomerPropertiesView({ session, onNavigate }) {
+    useDb();
+    const props = db.propertiesForUser(session.userId);
+    return (
+      <div>
+        <PageHeader title="Objekt" subtitle="Ett kort per objekt – klicka för schema och bokning." />
+        {props.length === 0 ? (
+          <Card padding="lg"><EmptyState icon="building" title="Inga objekt" description="Kontakta admin om du saknar åtkomst." /></Card>
+        ) : (
+          <div className="grid md:grid-cols-2 gap-3">
+            {props.map(p => {
+              const next = db.shiftsForProperty(p.id, { from: new Date() })
+                .filter(s => !['Avbokat', 'Borttaget'].includes(s.status))[0];
+              return (
+                <button
+                  key={p.id}
+                  onClick={() => onNavigate(`/kund/objekt/${p.id}`)}
+                  className="text-left bg-white rounded-2xl border border-slate-200 p-4 hover:border-brand-300 hover:shadow-sm transition-all"
+                >
+                  <p className="font-semibold text-slate-900">{p.name}</p>
+                  <p className="text-xs text-slate-500 mt-0.5 truncate">{p.address}</p>
+                  {next && (
+                    <p className="text-xs text-slate-600 mt-3 pt-3 border-t border-slate-100">
+                      Nästa: {relativeDay(next.start_at)} {formatRange(next.start_at, next.end_at)}
+                      {next.status === 'Planerat' && <span className="text-slate-500"> · väntar</span>}
+                    </p>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  function CustomerPropertyView({ session, onNavigate, propertyId }) {
+    useDb();
+    const [requestOpen, setRequestOpen] = useState(false);
+    const allowed = db.propertiesForUser(session.userId).some(p => p.id === propertyId);
+    const prop = db.propertyById(propertyId);
+    if (!prop || !allowed) {
+      return (
+        <div>
+          <PageHeader title="Åtkomst nekas" />
+          <Card padding="lg"><EmptyState icon="shield" title="Det här objektet tillhör inte dig" action={<Button onClick={() => onNavigate('/kund/objekt')}>Till objekt</Button>} /></Card>
+        </div>
+      );
+    }
+    const shifts = db.shiftsForProperty(propertyId);
+    const upcoming = shifts.filter(s => new Date(s.end_at) >= Date.now() && !['Avbokat', 'Borttaget'].includes(s.status));
+    const past = shifts.filter(s => new Date(s.end_at) < Date.now()).reverse().slice(0, 5);
+
+    return (
+      <div>
+        <PageHeader
+          breadcrumbs={[{ label: 'Objekt', href: '#/kund/objekt' }, { label: prop.name }]}
+          title={prop.name}
+          subtitle={prop.address}
+          actions={
+            <div className="flex gap-2">
+              <Button variant="outline" icon="calendar" onClick={() => onNavigate('/kund/schema')}>Hela schemat</Button>
+              <Button icon="plus" onClick={() => setRequestOpen(true)}>Begär städning</Button>
+            </div>
+          }
+        />
+        <div className="grid lg:grid-cols-3 gap-4 mb-6">
+          <Stat label="Kommande pass" value={upcoming.length} icon="calendar" tone="brand" />
+          <Stat label="Totalt i historik" value={shifts.length} icon="clock" tone="slate" />
+          {prop.area_sqm && <Stat label="Yta" value={`${prop.area_sqm} m²`} icon="building" tone="accent" />}
+        </div>
+        <ScheduleCalendar
+          shifts={shifts}
+          viewerRole={session.user.role}
+          onSelectShift={s => onNavigate(`/kund/pass/${s.id}`)}
+        />
+        {past.length > 0 && (
+          <section className="mt-8">
+            <h2 className="text-lg font-bold text-slate-900 mb-3">Senaste utförda</h2>
+            <div className="grid md:grid-cols-2 gap-3">
+              {past.filter(s => s.status === 'Utfört').map(s => (
+                <ShiftCard key={s.id} shift={s} viewerRole={session.user.role} viewerUserId={session.userId} onClick={() => onNavigate(`/kund/pass/${s.id}`)} />
+              ))}
+            </div>
+          </section>
+        )}
+        <CustomerShiftRequestModal open={requestOpen} onClose={() => setRequestOpen(false)} session={session} preselectPropertyId={propertyId} />
+      </div>
+    );
   }
 
   function CustomerScheduleView({ session, onNavigate }) {
     useDb();
+    const [requestOpen, setRequestOpen] = useState(false);
     const shifts = db.shiftsForCustomerUser(session.userId);
     return (
       <div>
         <PageHeader
           title="Schema"
-          subtitle="Kalenderöversikt över alla pass på dina objekt."
+          subtitle="Kalenderöversikt över alla pass på dina objekt. Grå = väntar på godkännande, grön = godkänt."
+          actions={
+            <Button icon="plus" onClick={() => setRequestOpen(true)}>Begär städning</Button>
+          }
         />
         <ScheduleCalendar
           shifts={shifts}
           viewerRole={session.user.role}
           onSelectShift={s => onNavigate(`/kund/pass/${s.id}`)}
         />
+        <CustomerShiftRequestModal open={requestOpen} onClose={() => setRequestOpen(false)} session={session} />
       </div>
     );
   }
@@ -5454,5 +5741,7 @@
   window.AdminReportsView = AdminReportsView;
   window.CustomerReportsView = CustomerReportsView;
   window.CustomerScheduleView = CustomerScheduleView;
+  window.CustomerPropertiesView = CustomerPropertiesView;
+  window.CustomerPropertyView = CustomerPropertyView;
   window.MessagesView = MessagesView;
 })();

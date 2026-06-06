@@ -976,11 +976,22 @@
     },
 
     // §7.2 kundavbokning (48h räknas från planerad start, inte faktisk utcheckningstid)
-    cancelByCustomer(shiftId, actorUserId, reason = '') {
+    async cancelByCustomer(shiftId, actorUserId, reason = '') {
       const s = db.shiftById(shiftId);
-      if (!s) return;
+      if (!s) return { error: 'NOT_FOUND' };
+      const allowed = db.shiftsForCustomerUser(actorUserId).some(x => x.id === shiftId);
+      if (!allowed) return { error: 'FORBIDDEN' };
       const hours = (new Date(db.shiftPlannedStart(s)) - Date.now()) / 36e5;
       if (hours <= 48) return { error: 'INSIDE_48H' };
+
+      const snapshot = {
+        status: s.status,
+        cancel_reason: s.cancel_reason,
+        last_modified_by: s.last_modified_by,
+        shift_eventsLen: state.shift_events.length,
+        notificationsLen: state.notifications.length,
+      };
+
       s.status = 'Avbokat';
       s.cancel_reason = reason.trim() || null;
       s.last_modified_by = actorUserId;
@@ -988,6 +999,21 @@
       state.users.filter(u => u.role === 'admin').forEach(a => pushNotification(a.id, 'customer_cancelled', { shift_id: s.id, property_id: s.property_id, start_at: s.start_at }));
       if (s.cleaner_user_id) pushNotification(s.cleaner_user_id, 'customer_cancelled', { shift_id: s.id, property_id: s.property_id, start_at: s.start_at });
       bump();
+
+      const persist = window.dbPersist && window.dbPersist.cancelByCustomer;
+      if (persist) {
+        const r = await persist({ shiftId, actorUserId, reason: s.cancel_reason, hoursToStart: hours });
+        if (!r.ok) {
+          s.status = snapshot.status;
+          s.cancel_reason = snapshot.cancel_reason;
+          s.last_modified_by = snapshot.last_modified_by;
+          state.shift_events.length = snapshot.shift_eventsLen;
+          state.notifications.length = snapshot.notificationsLen;
+          bump();
+          return { error: 'PERSIST_FAILED', message: r.message };
+        }
+      }
+
       return { ok: true };
     },
 
@@ -1089,19 +1115,23 @@
       return { ok: true };
     },
 
-    // Planerat → Godkänt (admin godkänner förfrågan)
-    async approveShift(shiftId, actorUserId) {
+    // Planerat → Godkänt (admin godkänner förfrågan; städare krävs)
+    async approveShift(shiftId, actorUserId, { cleanerUserId } = {}) {
       const s = db.shiftById(shiftId);
       if (!s) return { error: 'NOT_FOUND' };
       if (s.status !== 'Planerat') return { error: 'INVALID_STATUS' };
+      const resolvedCleanerId = cleanerUserId || s.cleaner_user_id;
+      if (!resolvedCleanerId) return { error: 'NO_CLEANER' };
 
       const snapshot = {
         status: s.status,
+        cleaner_user_id: s.cleaner_user_id,
         last_modified_by: s.last_modified_by,
         shift_eventsLen: state.shift_events.length,
         notificationsLen: state.notifications.length,
       };
 
+      s.cleaner_user_id = resolvedCleanerId;
       s.status = 'Godkänt';
       s.last_modified_by = actorUserId;
       state.shift_events.push({
@@ -1127,11 +1157,13 @@
         const r = await persist({
           shiftId,
           actorUserId,
+          cleanerUserId: resolvedCleanerId,
           shift: s,
           primaryContactUserId: cust ? cust.primary_contact_user_id : null,
         });
         if (!r.ok) {
           s.status = snapshot.status;
+          s.cleaner_user_id = snapshot.cleaner_user_id;
           s.last_modified_by = snapshot.last_modified_by;
           state.shift_events.length = snapshot.shift_eventsLen;
           state.notifications.length = snapshot.notificationsLen;
@@ -1143,7 +1175,7 @@
       return { ok: true };
     },
 
-    // Planerat → Borttaget (admin avslår förfrågan)
+    // Planerat → Avbokat (admin avslår förfrågan)
     async declineShift(shiftId, actorUserId) {
       const s = db.shiftById(shiftId);
       if (!s) return { error: 'NOT_FOUND' };
@@ -1157,7 +1189,7 @@
       };
 
       const hoursToStart = (new Date(s.start_at) - Date.now()) / 36e5;
-      s.status = 'Borttaget';
+      s.status = 'Avbokat';
       s.last_modified_by = actorUserId;
       state.shift_events.push({
         id: id('se'),
@@ -1168,12 +1200,12 @@
         created_at: new Date(),
       });
       if (s.cleaner_user_id) {
-        pushNotification(s.cleaner_user_id, 'admin_deleted', { shift_id: s.id, property_id: s.property_id, start_at: s.start_at });
+        pushNotification(s.cleaner_user_id, 'customer_cancelled', { shift_id: s.id, property_id: s.property_id, start_at: s.start_at });
       }
       const prop = db.propertyById(s.property_id);
       const cust = prop ? state.customers.find(c => c.id === prop.customer_id) : null;
       if (cust?.primary_contact_user_id) {
-        pushNotification(cust.primary_contact_user_id, 'admin_deleted', { shift_id: s.id, property_id: s.property_id, start_at: s.start_at });
+        pushNotification(cust.primary_contact_user_id, 'customer_cancelled', { shift_id: s.id, property_id: s.property_id, start_at: s.start_at });
       }
       bump();
 
@@ -1201,6 +1233,10 @@
 
     // §7.3 kundledighet – registrera
     createHoliday({ customerId, createdByUserId, scope, propertyIds, startDate, endDate, reason }) {
+      const accessible = new Set(db.propertiesForUser(createdByUserId).map(p => p.id));
+      if (scope === 'selected' && (propertyIds || []).some(pid => !accessible.has(pid))) {
+        return { error: 'FORBIDDEN' };
+      }
       const holiday = {
         id: id('ch'), customer_id: customerId,
         created_by_user_id: createdByUserId,
@@ -1433,6 +1469,60 @@
       }
 
       return { ok: true, removed };
+    },
+
+    // Kund/kundanställd begär nytt pass (Planerat, utan städare – admin tilldelar vid godkännande)
+    async createCustomerShiftRequest({ propertyId, startAt, endAt, actorUserId, notes = '' }) {
+      const accessible = db.propertiesForUser(actorUserId);
+      if (!accessible.some(p => p.id === propertyId)) return { error: 'FORBIDDEN' };
+      const start_at = new Date(startAt);
+      const end_at = new Date(endAt);
+      if (end_at <= start_at) return { error: 'INVALID_TIME' };
+
+      const shift = {
+        id: id('s'),
+        property_id: propertyId,
+        cleaner_user_id: null,
+        start_at, end_at,
+        status: 'Planerat',
+        source: 'customer_request',
+        recurring_id: null,
+        original_start_at: null,
+        original_end_at: null,
+        last_modified_by: actorUserId,
+        notes: notes.trim(),
+        checked_in_at: null,
+        checked_out_at: null,
+        created_at: new Date(),
+      };
+      state.shifts.push(shift);
+      snapshotChecklistToShift(state.shifts.length - 1);
+      state.shift_events.push({
+        id: id('se'),
+        shift_id: shift.id,
+        actor_user_id: actorUserId,
+        event_type: 'customer_booking_requested',
+        payload: { source: 'customer_request' },
+        created_at: new Date(),
+      });
+      state.users.filter(u => u.role === 'admin').forEach(a => {
+        pushNotification(a.id, 'customer_booking_request', { shift_id: shift.id, property_id: propertyId, start_at });
+      });
+      bump();
+
+      const persist = window.dbPersist && window.dbPersist.createCustomerShiftRequest;
+      if (persist) {
+        const r = await persist({ shift, actorUserId });
+        if (!r.ok) {
+          state.shifts.pop();
+          state.shift_events.pop();
+          bump();
+          return { error: 'PERSIST_FAILED', message: r.message };
+        }
+        if (r.shiftId) shift.id = r.shiftId;
+      }
+
+      return { ok: true, shift };
     },
 
     // §7.4 nytt one-off pass (status Planerat = ingen notis förrän godkänt)
@@ -2409,8 +2499,10 @@
       if (!window.Reporting) return null;
       const customer = db.customerForUser(userId);
       if (!customer) return null;
+      const accessibleProps = db.propertiesForUser(userId);
       return window.Reporting.buildCustomerReport(state, customer.id, filters, {
         shiftTimesFn: s => db.shiftTimes(s),
+        propertyIds: accessibleProps.map(p => p.id),
       });
     },
   };

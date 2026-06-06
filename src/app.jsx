@@ -298,6 +298,8 @@
           return { title: 'Nytt meddelande', body: '', icon: 'message-square', tone: 'brand' };
         case 'shift_request_created':
           return { title: 'Nytt önskemål från kund', body: prop ? prop.name : '', icon: 'message-square', tone: 'sky' };
+        case 'customer_booking_request':
+          return { title: 'Ny bokningsförfrågan', body: prop ? `${prop.name} · ${formatDateTime(n.payload.start_at)}` : '', icon: 'calendar', tone: 'sky' };
         default:
           return { title: n.kind, body: '', icon: 'bell', tone: 'slate' };
       }
@@ -411,7 +413,8 @@
     // —— CUSTOMER + customer_employee ——
     if (matchPath(path, '/kund/oversikt')) return <CustomerOverviewView session={session} onNavigate={navigate} />;
     if (matchPath(path, '/kund/schema')) return <CustomerScheduleView session={session} onNavigate={navigate} />;
-    if (matchPath(path, '/kund/objekt')) return <ComingSoonView title="Objekt" section="§8" description="Ett kort per objekt med kommande och senaste utförda pass." />;
+    if (matchPath(path, '/kund/objekt')) return <CustomerPropertiesView session={session} onNavigate={navigate} />;
+    if ((m = matchPath(path, '/kund/objekt/:id'))) return <CustomerPropertyView session={session} onNavigate={navigate} propertyId={m.id} />;
     if ((m = matchPath(path, '/kund/pass/:id'))) return <CustomerShiftDetailView session={session} onNavigate={navigate} shiftId={m.id} />;
     if (matchPath(path, '/kund/ledighet')) return <CustomerHolidayView session={session} onNavigate={navigate} />;
     if ((m = matchPath(path, '/kund/avvikelser/:id'))) return <IncidentDetailView session={session} onNavigate={navigate} incidentId={m.id} />;
