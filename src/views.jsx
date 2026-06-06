@@ -5469,8 +5469,16 @@
     );
   }
 
+  async function hydrateReportData(userId) {
+    if (window.SUPABASE_ENABLED && typeof window.hydrateFromSupabase === 'function') {
+      await window.hydrateFromSupabase(userId);
+      return new Date();
+    }
+    return null;
+  }
+
   function AdminReportsView({ session }) {
-    useDb();
+    const dbVersion = useDb();
     const [preset, setPreset] = useState('this_month');
     const [from, setFrom] = useState(toDateInput(new Date()));
     const [to, setTo] = useState(toDateInput(new Date()));
@@ -5479,6 +5487,9 @@
     const [propertyId, setPropertyId] = useState('all');
     const [detailTab, setDetailTab] = useState('all');
     const [report, setReport] = useState(null);
+    const [reportFilters, setReportFilters] = useState(null);
+    const [dataSyncedAt, setDataSyncedAt] = useState(null);
+    const [generating, setGenerating] = useState(false);
     const [exporting, setExporting] = useState(null);
 
     const customers = db.state.customers.slice().sort((a, b) => a.name.localeCompare(b.name, 'sv'));
@@ -5487,17 +5498,48 @@
     if (customerId !== 'all') scopedProperties = scopedProperties.filter(p => p.customer_id === customerId);
     scopedProperties = scopedProperties.slice().sort((a, b) => a.name.localeCompare(b.name, 'sv'));
 
-    function generate() {
-      const data = db.buildAdminReport({
+    function currentFilters() {
+      return {
         preset,
         from: preset === 'custom' ? from : null,
         to: preset === 'custom' ? to : null,
         customerId,
         cleanerId,
         propertyId,
-      });
-      setReport(data);
+      };
     }
+
+    function buildFromFilters(filters) {
+      return db.buildAdminReport(filters);
+    }
+
+    async function generate() {
+      setGenerating(true);
+      try {
+        const syncedAt = await hydrateReportData(session.userId);
+        if (syncedAt) setDataSyncedAt(syncedAt);
+        const filters = currentFilters();
+        setReportFilters(filters);
+        setReport(buildFromFilters(filters));
+      } catch (e) {
+        console.error(e);
+        toast.error('Kunde inte hämta senaste data från databasen.');
+      } finally {
+        setGenerating(false);
+      }
+    }
+
+    useEffect(() => {
+      setReport(null);
+      setReportFilters(null);
+      setDataSyncedAt(null);
+    }, [preset, from, to, customerId, cleanerId, propertyId]);
+
+    useEffect(() => {
+      if (!reportFilters) return;
+      setReport(buildFromFilters(reportFilters));
+      if (window.SUPABASE_ENABLED) setDataSyncedAt(new Date());
+    }, [dbVersion]);
 
     function handleCustomerChange(id) {
       setCustomerId(id);
@@ -5508,7 +5550,14 @@
       if (!report || !window.ReportExport) return;
       setExporting('xlsx');
       try {
-        const { sheets, periodLabel } = window.ReportExport.adminReportToExport(report);
+        const syncedAt = await hydrateReportData(session.userId);
+        let exportReport = report;
+        if (syncedAt && reportFilters) {
+          exportReport = buildFromFilters(reportFilters);
+          setReport(exportReport);
+          setDataSyncedAt(syncedAt);
+        }
+        const { sheets, periodLabel } = window.ReportExport.adminReportToExport(exportReport);
         const safe = periodLabel.replace(/[^\w\d-]+/g, '_').slice(0, 40);
         await window.ReportExport.exportReportXlsx({ filename: `cleanup-admin-rapport-${safe}.xlsx`, sheets });
         toast.success('Excel-fil nedladdad.');
@@ -5524,7 +5573,14 @@
       if (!report || !window.ReportExport) return;
       setExporting('pdf');
       try {
-        const { pdfSections, periodLabel } = window.ReportExport.adminReportToExport(report);
+        const syncedAt = await hydrateReportData(session.userId);
+        let exportReport = report;
+        if (syncedAt && reportFilters) {
+          exportReport = buildFromFilters(reportFilters);
+          setReport(exportReport);
+          setDataSyncedAt(syncedAt);
+        }
+        const { pdfSections, periodLabel } = window.ReportExport.adminReportToExport(exportReport);
         const safe = periodLabel.replace(/[^\w\d-]+/g, '_').slice(0, 40);
         await window.ReportExport.exportReportPdf({
           filename: `cleanup-admin-rapport-${safe}.pdf`,
@@ -5572,13 +5628,15 @@
           subtitle="KPI:er och löneunderlag för revisor. Arbetade timmar = utförda pass (faktisk in/utcheckning). Filtrera på kund, städare och period."
           actions={
             <div className="flex flex-wrap gap-2">
-              <Button variant="primary" icon="file-text" onClick={generate}>Generera rapport</Button>
+              <Button variant="primary" icon="file-text" disabled={generating} onClick={generate}>
+                {generating ? 'Hämtar data…' : 'Generera rapport'}
+              </Button>
               {report && (
                 <>
-                  <Button variant="outline" icon="download" disabled={!!exporting} onClick={exportExcel}>
+                  <Button variant="outline" icon="download" disabled={!!exporting || generating} onClick={exportExcel}>
                     {exporting === 'xlsx' ? 'Exporterar…' : 'Exportera Excel'}
                   </Button>
-                  <Button variant="outline" icon="download" disabled={!!exporting} onClick={exportPdf}>
+                  <Button variant="outline" icon="download" disabled={!!exporting || generating} onClick={exportPdf}>
                     {exporting === 'pdf' ? 'Exporterar…' : 'Exportera PDF'}
                   </Button>
                 </>
@@ -5613,7 +5671,7 @@
             <EmptyState
               icon="file-text"
               title="Ingen rapport genererad"
-              description="Välj period, filter och klicka på Generera rapport."
+              description="Välj period, filter och klicka på Generera rapport. Data hämtas direkt från Supabase."
             />
           </Card>
         ) : (
@@ -5622,6 +5680,12 @@
               Period: <span className="font-semibold text-slate-900">{report.meta.label}</span>
               {report.meta.filterLabel && report.meta.filterLabel !== 'Alla kunder & städare' && (
                 <span className="text-slate-500"> · Filter: {report.meta.filterLabel}</span>
+              )}
+              {dataSyncedAt && (
+                <span className="block text-xs text-slate-500 mt-1">
+                  Senast synkad {formatTime(dataSyncedAt)}
+                  {window.SUPABASE_ENABLED && ' · uppdateras automatiskt vid ändringar i schemat'}
+                </span>
               )}
             </p>
 
@@ -5706,7 +5770,7 @@
   }
 
   function CustomerReportsMain({ session }) {
-    useDb();
+    const dbVersion = useDb();
     const accessibleProps = db.propertiesForUser(session.userId);
     const isEmployee = session.user.role === 'customer_employee';
     const scopeHint = isEmployee && accessibleProps.length > 0
@@ -5716,22 +5780,62 @@
     const [from, setFrom] = useState(toDateInput(new Date()));
     const [to, setTo] = useState(toDateInput(new Date()));
     const [report, setReport] = useState(null);
+    const [reportFilters, setReportFilters] = useState(null);
+    const [dataSyncedAt, setDataSyncedAt] = useState(null);
+    const [generating, setGenerating] = useState(false);
     const [exporting, setExporting] = useState(null);
 
-    function generate() {
-      const data = db.buildCustomerReport(session.userId, {
+    function currentFilters() {
+      return {
         preset,
         from: preset === 'custom' ? from : null,
         to: preset === 'custom' ? to : null,
-      });
-      setReport(data);
+      };
     }
+
+    function buildFromFilters(filters) {
+      return db.buildCustomerReport(session.userId, filters);
+    }
+
+    async function generate() {
+      setGenerating(true);
+      try {
+        const syncedAt = await hydrateReportData(session.userId);
+        if (syncedAt) setDataSyncedAt(syncedAt);
+        const filters = currentFilters();
+        setReportFilters(filters);
+        setReport(buildFromFilters(filters));
+      } catch (e) {
+        console.error(e);
+        toast.error('Kunde inte hämta senaste data.');
+      } finally {
+        setGenerating(false);
+      }
+    }
+
+    useEffect(() => {
+      setReport(null);
+      setReportFilters(null);
+      setDataSyncedAt(null);
+    }, [preset, from, to]);
+
+    useEffect(() => {
+      if (!reportFilters) return;
+      setReport(buildFromFilters(reportFilters));
+      if (window.SUPABASE_ENABLED) setDataSyncedAt(new Date());
+    }, [dbVersion]);
 
     async function exportExcel() {
       if (!report || !window.ReportExport) return;
       setExporting('xlsx');
       try {
-        const { sheets, periodLabel } = window.ReportExport.customerReportToExport(report);
+        const syncedAt = await hydrateReportData(session.userId);
+        let exportReport = report;
+        if (syncedAt && reportFilters) {
+          exportReport = buildFromFilters(reportFilters);
+          setReport(exportReport);
+        }
+        const { sheets, periodLabel } = window.ReportExport.customerReportToExport(exportReport);
         const safe = periodLabel.replace(/[^\w\d-]+/g, '_').slice(0, 40);
         await window.ReportExport.exportReportXlsx({ filename: `cleanup-kund-rapport-${safe}.xlsx`, sheets });
         toast.success('Excel-fil nedladdad.');
@@ -5746,7 +5850,13 @@
       if (!report || !window.ReportExport) return;
       setExporting('pdf');
       try {
-        const { pdfSections, periodLabel } = window.ReportExport.customerReportToExport(report);
+        const syncedAt = await hydrateReportData(session.userId);
+        let exportReport = report;
+        if (syncedAt && reportFilters) {
+          exportReport = buildFromFilters(reportFilters);
+          setReport(exportReport);
+        }
+        const { pdfSections, periodLabel } = window.ReportExport.customerReportToExport(exportReport);
         const safe = periodLabel.replace(/[^\w\d-]+/g, '_').slice(0, 40);
         await window.ReportExport.exportReportPdf({
           filename: `cleanup-kund-rapport-${safe}.pdf`,
@@ -5771,13 +5881,15 @@
           subtitle={scopeHint || 'Översikt av bokade pass och arbetade timmar. Städare visas som ”Städare” enligt era visningsregler.'}
           actions={
             <div className="flex flex-wrap gap-2">
-              <Button variant="primary" icon="file-text" onClick={generate}>Generera rapport</Button>
+              <Button variant="primary" icon="file-text" disabled={generating} onClick={generate}>
+                {generating ? 'Hämtar data…' : 'Generera rapport'}
+              </Button>
               {report && (
                 <>
-                  <Button variant="outline" icon="download" disabled={!!exporting} onClick={exportExcel}>
+                  <Button variant="outline" icon="download" disabled={!!exporting || generating} onClick={exportExcel}>
                     {exporting === 'xlsx' ? 'Exporterar…' : 'Exportera Excel'}
                   </Button>
-                  <Button variant="outline" icon="download" disabled={!!exporting} onClick={exportPdf}>
+                  <Button variant="outline" icon="download" disabled={!!exporting || generating} onClick={exportPdf}>
                     {exporting === 'pdf' ? 'Exporterar…' : 'Exportera PDF'}
                   </Button>
                 </>
@@ -5797,12 +5909,18 @@
 
         {!report ? (
           <Card padding="lg">
-            <EmptyState icon="file-text" title="Ingen rapport genererad" description="Välj period och klicka Generera rapport." />
+            <EmptyState icon="file-text" title="Ingen rapport genererad" description="Välj period och klicka Generera rapport. Data hämtas direkt från Supabase." />
           </Card>
         ) : (
           <>
             <p className="text-sm text-slate-600 mb-4">
               Period: <span className="font-semibold text-slate-900">{report.meta.label}</span>
+              {dataSyncedAt && (
+                <span className="block text-xs text-slate-500 mt-1">
+                  Senast synkad {formatTime(dataSyncedAt)}
+                  {window.SUPABASE_ENABLED && ' · uppdateras automatiskt vid ändringar'}
+                </span>
+              )}
             </p>
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
               <Stat label="Bokade pass" value={s.bookedCount} hint={`${s.plannedHours} planerade timmar`} icon="calendar" tone="brand" />
