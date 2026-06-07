@@ -103,6 +103,7 @@
       { path: '/stadare/idag', label: 'Idag', icon: 'home' },
       { path: '/stadare/pass', label: 'Mina pass', icon: 'calendar' },
       { path: '/stadare/avvikelser', label: 'Avvikelser', icon: 'alert-triangle' },
+      { path: '/stadare/installningar', label: 'Inställningar', icon: 'settings' },
     ],
     customer: [
       { path: '/kund/oversikt', label: 'Översikt', icon: 'home' },
@@ -396,7 +397,8 @@
     if (matchPath(path, '/admin/kunder')) return <AdminCustomersListView session={session} onNavigate={navigate} />;
     if ((m = matchPath(path, '/admin/kunder/:cid'))) return <AdminCustomerView session={session} onNavigate={navigate} customerId={m.cid} />;
     if ((m = matchPath(path, '/admin/kunder/:cid/objekt/:pid'))) return <AdminPropertyView session={session} onNavigate={navigate} customerId={m.cid} propertyId={m.pid} />;
-    if (matchPath(path, '/admin/stadare')) return <ComingSoonView title="Städare" section="§4 + §7.7" description="Lista över städare, profiler och tilldelningar till objekt." />;
+    if ((m = matchPath(path, '/admin/stadare/:id'))) return <AdminCleanerView session={session} onNavigate={navigate} cleanerId={m.id} />;
+    if (matchPath(path, '/admin/stadare')) return <AdminCleanersListView session={session} onNavigate={navigate} />;
     if ((m = matchPath(path, '/admin/avvikelser/:id'))) return <IncidentDetailView session={session} onNavigate={navigate} incidentId={m.id} />;
     if (matchPath(path, '/admin/avvikelser')) return <AdminIncidentsView session={session} onNavigate={navigate} />;
     if (matchPath(path, '/admin/meddelanden')) return <MessagesView session={session} onNavigate={navigate} />;
@@ -409,6 +411,7 @@
     if ((m = matchPath(path, '/stadare/pass/:id'))) return <CleanerShiftDetailView session={session} onNavigate={navigate} shiftId={m.id} />;
     if ((m = matchPath(path, '/stadare/avvikelser/:id'))) return <IncidentDetailView session={session} onNavigate={navigate} incidentId={m.id} />;
     if (matchPath(path, '/stadare/avvikelser')) return <CleanerIncidentsView session={session} onNavigate={navigate} />;
+    if (matchPath(path, '/stadare/installningar')) return <CleanerSettingsView session={session} />;
 
     // —— CUSTOMER + customer_employee ——
     if (matchPath(path, '/kund/oversikt')) return <CustomerOverviewView session={session} onNavigate={navigate} />;
