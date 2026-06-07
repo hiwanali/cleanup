@@ -18,9 +18,28 @@
     return <DevLoginView onLogin={onLogin} />;
   }
 
+  const LOGIN_REMEMBER_KEY = 'cleanup_login_remember_v1';
+  function loadRememberedLogin() {
+    try {
+      const raw = localStorage.getItem(LOGIN_REMEMBER_KEY);
+      if (!raw) return { email: '', rememberMe: false };
+      const { email } = JSON.parse(raw);
+      if (email) return { email, rememberMe: true };
+    } catch (_) {}
+    return { email: '', rememberMe: false };
+  }
+  function saveRememberedLogin(email, rememberMe) {
+    try {
+      if (rememberMe) localStorage.setItem(LOGIN_REMEMBER_KEY, JSON.stringify({ email: email.trim() }));
+      else localStorage.removeItem(LOGIN_REMEMBER_KEY);
+    } catch (_) {}
+  }
+
   function PasswordLoginView({ onPasswordLogin }) {
-    const [email, setEmail] = useState('');
+    const remembered = useMemo(() => loadRememberedLogin(), []);
+    const [email, setEmail] = useState(remembered.email);
     const [password, setPassword] = useState('');
+    const [rememberMe, setRememberMe] = useState(remembered.rememberMe);
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
 
@@ -30,7 +49,8 @@
       setLoading(true);
       setError('');
       const msg = await onPasswordLogin(email, password);
-      if (msg) { setError(msg); setLoading(false); }
+      if (msg) { setError(msg); setLoading(false); return; }
+      saveRememberedLogin(email, rememberMe);
       // vid lyckad inloggning byts vyn ut av App
     }
 
@@ -53,6 +73,7 @@
               <Field label="Lösenord">
                 <Input type="password" value={password} autoComplete="current-password" placeholder="••••••••" onChange={e => setPassword(e.target.value)} />
               </Field>
+              <Checkbox checked={rememberMe} onChange={setRememberMe} label="Kom ihåg mig" />
               {error && <p className="text-sm text-rose-600">{error}</p>}
               <Button type="submit" variant="primary" className="w-full" disabled={loading || !email.trim() || !password}>
                 {loading ? 'Loggar in …' : 'Logga in'}
