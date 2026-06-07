@@ -6515,13 +6515,19 @@
               <Stat label="Sjuka pass" value={s.shiftCountSick} hint={`${s.sickPlannedHours} planerade timmar`} icon="alert-circle" tone="amber" />
               <Stat label="Avvikelser" value={s.totalIncidents} icon="alert-triangle" tone="rose" />
             </div>
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
               <Stat label="Borttagna pass" value={s.shiftCountDeleted} icon="trash" tone="slate" />
               <Stat label="Avbokade pass" value={s.shiftCountCancelled} icon="x" tone="slate" />
               <Stat label="Pausade (ledighet)" value={s.shiftCountPaused} icon="pause" tone="slate" />
               <Stat label="Väntar granskning" value={s.shiftCountPendingReview} hint="Ej i arbetade timmar" icon="eye" tone="amber" />
+            </div>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+              <Stat label="Städarbyten" value={s.totalCleanerSwaps} hint="Alla byten i perioden" icon="refresh" tone="amber" />
               <Stat label="Justerade tider" value={s.totalTimeAdjusted} hint={`${s.totalSickReports} sjukanmälan`} icon="refresh" tone="amber" />
             </div>
+            {s.statsNote && (
+              <p className="text-xs text-slate-500 mb-6">{s.statsNote}</p>
+            )}
 
             <Card padding="md" className="mb-6">
               <div className="flex flex-wrap gap-2 mb-4">
@@ -6583,6 +6589,43 @@
                 ...r,
                 plannedHours: (r.plannedHours || 0).toFixed(2),
               }))}
+            />
+            <ReportTable
+              title="Statistik per städare (miss, utfört, sjuk, förhinder)"
+              headers={[
+                { key: 'name', label: 'Städare' },
+                { key: 'assignedCount', label: 'Tilldelade pass' },
+                { key: 'workedCount', label: 'Utförda pass' },
+                { key: 'workedHours', label: 'Arbetade timmar' },
+                { key: 'sickCount', label: 'Sjukanmäld' },
+                { key: 'noShowCount', label: 'Uteblev (ej incheckad)' },
+                { key: 'obstacleCount', label: 'Förhinder' },
+                { key: 'missCount', label: 'Miss totalt' },
+                { key: 'missRate', label: 'Miss-%' },
+                { key: 'swappedOutCount', label: 'Byten bort' },
+              ]}
+              rows={(report.cleanerStats || []).map(r => ({
+                ...r,
+                workedHours: (r.workedHours || 0).toFixed(2),
+                missRate: `${r.missRate}%`,
+              }))}
+              emptyText="Inga tilldelade pass för valt urval."
+            />
+            <ReportTable
+              title="Statistik per kund (pass, timmar, avbokningar, städarbyten)"
+              headers={[
+                { key: 'name', label: 'Kund' },
+                { key: 'bookedCount', label: 'Bokade pass' },
+                { key: 'workedCount', label: 'Utförda pass' },
+                { key: 'workedHours', label: 'Arbetade timmar' },
+                { key: 'cancelledCount', label: 'Kundavbokningar' },
+                { key: 'cleanerSwapCount', label: 'Städarbyten' },
+              ]}
+              rows={(report.customerOps || []).map(r => ({
+                ...r,
+                workedHours: (r.workedHours || 0).toFixed(2),
+              }))}
+              emptyText="Inga kunder i valt urval."
             />
           </>
         )}
@@ -6745,9 +6788,8 @@
             </p>
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
               <Stat label="Bokade pass" value={s.bookedCount} hint={`${s.plannedHours} planerade timmar`} icon="calendar" tone="brand" />
-              <Stat label="Arbetade timmar" value={s.workedHours} hint="Utförda pass" icon="clock" tone="emerald" />
-              <Stat label="Sjuka / avbokade" value={`${s.sickCount} / ${s.cancelledCount}`} hint="Pass i perioden" icon="alert-circle" tone="amber" />
-              <Stat label="Reklamationer" value={s.incidentsCount} icon="alert-triangle" tone="rose" />
+              <Stat label="Utförda pass" value={s.workedPassCount} hint={`${s.workedHours} arbetade timmar`} icon="check" tone="emerald" />
+              <Stat label="Arbetade timmar" value={s.workedHours} hint={`${s.workedPassCount} utförda pass`} icon="clock" tone="emerald" />
             </div>
           </>
         )}

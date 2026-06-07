@@ -151,6 +151,8 @@
       { Mätvärde: 'Avvikelser', Värde: summary.totalIncidents },
       { Mätvärde: 'Justerade tider', Värde: summary.totalTimeAdjusted },
       { Mätvärde: 'Sjukanmälan (händelser)', Värde: summary.totalSickReports },
+      { Mätvärde: 'Städarbyten', Värde: summary.totalCleanerSwaps },
+      { Mätvärde: 'Statistiknotering', Värde: summary.statsNote || '' },
     ];
 
     const detailRows = shiftDetailExportRows(adminReport.shiftDetails || []);
@@ -223,12 +225,55 @@
         headers: SHIFT_DETAIL_HEADERS,
         rows: pendingRows,
       },
+      {
+        name: 'Statistik städare',
+        headers: [
+          'Städare', 'Tilldelade pass', 'Utförda pass', 'Arbetade timmar',
+          'Sjukanmäld', 'Uteblev', 'Förhinder', 'Miss totalt', 'Miss-%', 'Byten bort',
+        ],
+        rows: (adminReport.cleanerStats || []).map(r => ({
+          Städare: r.name,
+          'Tilldelade pass': r.assignedCount,
+          'Utförda pass': r.workedCount,
+          'Arbetade timmar': r.workedHours,
+          Sjukanmäld: r.sickCount,
+          Uteblev: r.noShowCount,
+          Förhinder: r.obstacleCount,
+          'Miss totalt': r.missCount,
+          'Miss-%': `${r.missRate}%`,
+          'Byten bort': r.swappedOutCount,
+        })),
+      },
+      {
+        name: 'Statistik kund',
+        headers: ['Kund', 'Bokade pass', 'Utförda pass', 'Arbetade timmar', 'Kundavbokningar', 'Städarbyten'],
+        rows: (adminReport.customerOps || []).map(r => ({
+          Kund: r.name,
+          'Bokade pass': r.bookedCount,
+          'Utförda pass': r.workedCount,
+          'Arbetade timmar': r.workedHours,
+          Kundavbokningar: r.cancelledCount,
+          Städarbyten: r.cleanerSwapCount,
+        })),
+      },
     ];
 
     const pdfSections = [
       { title: 'Sammanfattning', headers: ['Mätvärde', 'Värde'], rows: summaryRows },
       { title: 'Per kund', headers: ['Kund', 'Timmar', 'Pass'], rows: sheets[2].rows },
       { title: 'Per städare', headers: ['Städare', 'Timmar', 'Pass'], rows: sheets[4].rows },
+      {
+        title: 'Statistik städare',
+        headers: ['Städare', 'Tilldelade', 'Utförda', 'Miss-%', 'Sjuk', 'Förhinder'],
+        rows: (adminReport.cleanerStats || []).map(r => ({
+          Städare: r.name,
+          Tilldelade: r.assignedCount,
+          Utförda: r.workedCount,
+          'Miss-%': `${r.missRate}%`,
+          Sjuk: r.sickCount,
+          Förhinder: r.obstacleCount,
+        })),
+      },
       { title: 'Sjuka pass', headers: ['Datum', 'Kund', 'Städare', 'Timmar'], rows: sickRows.map(r => ({
         Datum: r.Datum, Kund: r.Kund, Städare: r.Städare, Timmar: r['Planerade timmar'],
       })) },
@@ -249,11 +294,8 @@
           { Mätvärde: 'Period', Värde: periodLabel },
           { Mätvärde: 'Bokade pass', Värde: summary.bookedCount },
           { Mätvärde: 'Planerade timmar', Värde: summary.plannedHours },
+          { Mätvärde: 'Utförda pass', Värde: summary.workedPassCount },
           { Mätvärde: 'Arbetade timmar', Värde: summary.workedHours },
-          { Mätvärde: 'Antal städare', Värde: summary.cleanerCount },
-          { Mätvärde: 'Sjuka pass', Värde: summary.sickCount },
-          { Mätvärde: 'Avbokade pass', Värde: summary.cancelledCount },
-          { Mätvärde: 'Reklamationer', Värde: summary.incidentsCount },
         ],
       },
     ];

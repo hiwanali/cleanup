@@ -3318,6 +3318,7 @@
       const accessibleProps = db.propertiesForUser(userId);
       return window.Reporting.buildCustomerReport(state, customer.id, filters, {
         shiftTimesFn: s => db.shiftTimes(s),
+        needsReviewFn: s => db.shiftNeedsAdminReview(s),
         propertyIds: accessibleProps.map(p => p.id),
       });
     },

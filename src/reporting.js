@@ -4,6 +4,8 @@
  */
 (function () {
   const EXCLUDED_BOOKED = new Set(['Borttaget', 'Avbokat', 'Planerat']);
+  /** Pass där städaren förväntades arbeta (exkl. admin borttaget, kund avbokat, ej godkänt, kundledighet). */
+  const EXCLUDED_CLEANER_ASSIGNED = new Set([...EXCLUDED_BOOKED, 'Pausat (kundledighet)']);
 
   function startOfDay(d) {
     const x = new Date(d);
@@ -125,6 +127,55 @@
     }
   }
 
+  function ensureCleanerStats(map, cleanerId, meta) {
+    if (!cleanerId) return null;
+    if (!map.has(cleanerId)) {
+      map.set(cleanerId, {
+        id: meta.id,
+        name: meta.name,
+        assignedCount: 0,
+        workedCount: 0,
+        workedHours: 0,
+        sickCount: 0,
+        noShowCount: 0,
+        obstacleCount: 0,
+        missCount: 0,
+        missRate: 0,
+        swappedOutCount: 0,
+        _missShiftIds: new Set(),
+        _obstacleShiftIds: new Set(),
+      });
+    }
+    return map.get(cleanerId);
+  }
+
+  function ensureCustomerOps(map, customerId, meta) {
+    if (!customerId) return null;
+    if (!map.has(customerId)) {
+      map.set(customerId, {
+        id: meta.id,
+        name: meta.name,
+        bookedCount: 0,
+        workedCount: 0,
+        workedHours: 0,
+        cancelledCount: 0,
+        cleanerSwapCount: 0,
+      });
+    }
+    return map.get(customerId);
+  }
+
+  function finalizeCleanerStats(map) {
+    return [...map.values()].map(row => {
+      const missCount = row._missShiftIds.size;
+      const missRate = row.assignedCount > 0
+        ? Math.round((missCount / row.assignedCount) * 1000) / 10
+        : 0;
+      const { _missShiftIds, _obstacleShiftIds, ...rest } = row;
+      return { ...rest, missCount, missRate, obstacleCount: _obstacleShiftIds.size };
+    });
+  }
+
   function normalizeFilters(filters = {}) {
     return {
       customerId: filters.customerId && filters.customerId !== 'all' ? filters.customerId : null,
@@ -188,6 +239,8 @@
     const byProperty = new Map();
     const byCleaner = new Map();
     const sickByCleaner = new Map();
+    const cleanerStatsMap = new Map();
+    const customerOpsMap = new Map();
 
     const shiftDetails = [];
     const sickShifts = [];
@@ -206,6 +259,7 @@
     let shiftCountPaused = 0;
     let shiftCountPendingReview = 0;
     let shiftCountBooked = 0;
+    let totalCleanerSwaps = 0;
 
     function matchesScope(shift) {
       const prop = propertyById.get(shift.property_id);
@@ -319,6 +373,82 @@
         shiftCountPendingReview += 1;
         pendingReviewShifts.push(detail);
       }
+
+      if (names.cust) {
+        const custOps = ensureCustomerOps(customerOpsMap, names.cust.id, {
+          id: names.cust.id,
+          name: names.cust.name,
+        });
+        if (!EXCLUDED_BOOKED.has(shift.status)) custOps.bookedCount += 1;
+        if (shift.status === 'Utfört' && worked > 0 && !needsReview) {
+          custOps.workedCount += 1;
+          custOps.workedHours = Math.round((custOps.workedHours + worked) * 100) / 100;
+        }
+        if (shift.status === 'Avbokat') custOps.cancelledCount += 1;
+      }
+
+      if (shift.cleaner_user_id && !EXCLUDED_CLEANER_ASSIGNED.has(shift.status)) {
+        const cStats = ensureCleanerStats(cleanerStatsMap, shift.cleaner_user_id, {
+          id: names.cleaner?.id || shift.cleaner_user_id,
+          name: names.cleanerName,
+        });
+        cStats.assignedCount += 1;
+        if (shift.status === 'Utfört' && worked > 0 && !needsReview) {
+          cStats.workedCount += 1;
+          cStats.workedHours = Math.round((cStats.workedHours + worked) * 100) / 100;
+        }
+        if (shift.status === 'Sjukanmäld') {
+          cStats.sickCount += 1;
+          cStats._missShiftIds.add(shift.id);
+        }
+        if (needsReview) {
+          cStats.noShowCount += 1;
+          cStats._missShiftIds.add(shift.id);
+        }
+      }
+    });
+
+    state.incidents.forEach(inc => {
+      if (inc.kind !== 'cleaner_issue' || !inc.shift_id) return;
+      const shift = state.shifts.find(s => s.id === inc.shift_id);
+      if (!shift || !inRange(shift.start_at, start, end) || !matchesScope(shift)) return;
+      if (EXCLUDED_CLEANER_ASSIGNED.has(shift.status)) return;
+      const cleanerId = shift.cleaner_user_id;
+      if (!cleanerId) return;
+      const names = resolveNames(shift);
+      const cStats = ensureCleanerStats(cleanerStatsMap, cleanerId, {
+        id: names.cleaner?.id || cleanerId,
+        name: names.cleanerName,
+      });
+      if (!cStats._obstacleShiftIds.has(shift.id)) {
+        cStats._obstacleShiftIds.add(shift.id);
+        cStats._missShiftIds.add(shift.id);
+      }
+    });
+
+    state.shift_events.forEach(ev => {
+      if (ev.event_type !== 'cleaner_swapped') return;
+      if (!inRange(ev.created_at, start, end)) return;
+      const shift = state.shifts.find(s => s.id === ev.shift_id);
+      if (!shift || !matchesScope(shift)) return;
+      totalCleanerSwaps += 1;
+      const names = resolveNames(shift);
+      if (names.cust) {
+        const custOps = ensureCustomerOps(customerOpsMap, names.cust.id, {
+          id: names.cust.id,
+          name: names.cust.name,
+        });
+        custOps.cleanerSwapCount += 1;
+      }
+      const fromId = ev.payload?.from;
+      if (fromId) {
+        const fromCleaner = userById.get(fromId);
+        const cStats = ensureCleanerStats(cleanerStatsMap, fromId, {
+          id: fromId,
+          name: fromCleaner?.name || 'Städare',
+        });
+        cStats.swappedOutCount += 1;
+      }
     });
 
     totalHours = Math.round(totalHours * 100) / 100;
@@ -348,7 +478,11 @@
 
     const sortByName = (a, b) => (a.name || '').localeCompare(b.name || '', 'sv');
     const sortByHours = (a, b) => b.hours - a.hours;
+    const sortByMissRate = (a, b) => b.missRate - a.missRate || sortByName(a, b);
     const sortByDate = (a, b) => (a.date || '').localeCompare(b.date || '') || (a.plannedStart || '').localeCompare(b.plannedStart || '');
+
+    const cleanerStats = finalizeCleanerStats(cleanerStatsMap).sort(sortByMissRate);
+    const customerOps = [...customerOpsMap.values()].sort(sortByName);
 
     const filterLabels = [];
     if (customerId) filterLabels.push(customerById.get(customerId)?.name || 'Kund');
@@ -386,13 +520,17 @@
         totalIncidents,
         totalTimeAdjusted,
         totalSickReports,
+        totalCleanerSwaps,
         customerNewTimes: 0,
         customerNewTimesNote: 'Kundförfrågningar (Planerat) räknas när de godkänts.',
+        statsNote: 'Miss-% = sjukanmäld + uteblev utan incheckning + förhinder (städaravvikelse). Admin borttagna pass räknas inte.',
       },
       byCustomer: [...byCustomer.values()].sort(sortByHours),
       byProperty: [...byProperty.values()].sort(sortByHours),
       byCleaner: [...byCleaner.values()].sort(sortByHours),
       sickByCleaner: [...sickByCleaner.values()].sort((a, b) => b.count - a.count || sortByName(a, b)),
+      cleanerStats,
+      customerOps,
       shiftDetails,
       sickShifts,
       deletedShifts,
@@ -414,11 +552,11 @@
         );
 
     let bookedCount = 0;
-    const cleanerIds = new Set();
+    let workedPassCount = 0;
     let workedHours = 0;
     let plannedHours = 0;
-    let sickCount = 0;
-    let cancelledCount = 0;
+    const pendingReviewStatus = window.ShiftFinalization?.PENDING_REVIEW_STATUS || 'Väntar granskning';
+    const needsReviewFn = opts.needsReviewFn || (s => s?.status === pendingReviewStatus);
 
     state.shifts.forEach(shift => {
       if (!propertyIds.has(shift.property_id)) return;
@@ -432,26 +570,20 @@
       if (!EXCLUDED_BOOKED.has(shift.status)) {
         bookedCount += 1;
         plannedHours += ph;
-        if (shift.cleaner_user_id) cleanerIds.add(shift.cleaner_user_id);
       }
 
-      if (shift.status === 'Utfört') {
+      if (shift.status === 'Utfört' && !needsReviewFn(shift)) {
         const t = shiftTimesFn(shift);
-        workedHours += hoursBetween(t.effective.start, t.effective.end);
+        const wh = hoursBetween(t.effective.start, t.effective.end);
+        if (wh > 0) {
+          workedPassCount += 1;
+          workedHours += wh;
+        }
       }
-      if (shift.status === 'Sjukanmäld') sickCount += 1;
-      if (shift.status === 'Avbokat') cancelledCount += 1;
     });
 
     workedHours = Math.round(workedHours * 100) / 100;
     plannedHours = Math.round(plannedHours * 100) / 100;
-
-    let incidentsCount = 0;
-    state.incidents.forEach(inc => {
-      if (!propertyIds.has(inc.property_id)) return;
-      if (inc.kind !== 'customer_complaint') return;
-      if (inRange(inc.created_at, start, end)) incidentsCount += 1;
-    });
 
     const customer = state.customers.find(c => c.id === customerId);
 
@@ -465,11 +597,8 @@
       summary: {
         bookedCount,
         plannedHours,
+        workedPassCount,
         workedHours,
-        cleanerCount: cleanerIds.size,
-        incidentsCount,
-        sickCount,
-        cancelledCount,
       },
     };
   }
