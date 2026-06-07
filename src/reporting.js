@@ -136,12 +136,22 @@
   function resolveCompletionNote(shift, shiftEvents) {
     if (!shift) return '—';
     const pendingStatus = window.ShiftFinalization?.PENDING_REVIEW_STATUS || 'Väntar granskning';
-    if (shift.status === pendingStatus) {
+    const events = shiftEvents || [];
+    const flagged = events.some(e =>
+      e.shift_id === shift.id && (
+        e.event_type === 'pending_review'
+        || (e.event_type === 'auto_completed' && e.payload?.reason === 'auto_no_checkin')
+      ),
+    );
+    const approved = events.some(e =>
+      e.shift_id === shift.id && (e.event_type === 'admin_approved_completion' || e.event_type === 'check_out'),
+    );
+    if (shift.status === pendingStatus || (shift.status === 'Utfört' && flagged && !approved)) {
       return 'Väntar admin-granskning (ingen incheckning)';
     }
     if (shift.status !== 'Utfört') return '—';
     const SF = window.ShiftFinalization;
-    const events = (shiftEvents || [])
+    const completionEvents = events
       .filter(e => e.shift_id === shift.id && (
         e.event_type === 'check_out'
         || e.event_type === 'auto_completed'
@@ -149,7 +159,7 @@
         || e.event_type === 'pending_review'
       ))
       .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-    const latest = events[0];
+    const latest = completionEvents[0];
     if (!latest) return 'Utfört';
     if (latest.event_type === 'admin_approved_completion') return 'Godkänd av admin';
     if (latest.event_type === 'pending_review') return 'Väntar admin-granskning (ingen incheckning)';
@@ -164,6 +174,8 @@
 
   function buildAdminReport(state, filters, opts = {}) {
     const shiftTimesFn = opts.shiftTimesFn || shiftTimes;
+    const pendingReviewStatus = window.ShiftFinalization?.PENDING_REVIEW_STATUS || 'Väntar granskning';
+    const needsReviewFn = opts.needsReviewFn || (s => s?.status === pendingReviewStatus);
     const period = parsePeriod(filters);
     const { start, end } = period;
     const { customerId, cleanerId, propertyId } = normalizeFilters(filters);
@@ -183,8 +195,6 @@
     const cancelledShifts = [];
     const pausedShifts = [];
     const pendingReviewShifts = [];
-    const pendingReviewStatus = window.ShiftFinalization?.PENDING_REVIEW_STATUS || 'Väntar granskning';
-
     let totalHours = 0;
     let totalPlannedHours = 0;
     let shiftCountWorked = 0;
@@ -247,7 +257,9 @@
       };
       shiftDetails.push(detail);
 
-      if (shift.status === 'Utfört' && worked > 0) {
+      const needsReview = needsReviewFn(shift);
+
+      if (shift.status === 'Utfört' && worked > 0 && !needsReview) {
         totalHours += worked;
         shiftCountWorked += 1;
         if (names.cust) {
@@ -303,7 +315,7 @@
         pausedShifts.push(detail);
       }
 
-      if (shift.status === pendingReviewStatus) {
+      if (needsReview) {
         shiftCountPendingReview += 1;
         pendingReviewShifts.push(detail);
       }

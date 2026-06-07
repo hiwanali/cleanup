@@ -953,6 +953,7 @@
 
     const { error: shiftErr } = await sb.from('shifts').update({
       status: 'Utfört',
+      cleaner_user_id: shift.cleaner_user_id || null,
       checked_in_at: toIso(shift.checked_in_at),
       checked_out_at: null,
       start_at: toIso(shift.start_at),
@@ -1576,6 +1577,82 @@
     return { ok: true };
   }
 
+  /** §4 admin skapar städare med valt lösenord (RPC provisionerar auth-konto). */
+  async function persistCreateCleaner({ user, password, propertyIds = [] }) {
+    if (!enabled || !sb || !isUuid(user?.id)) {
+      return { ok: true, skipped: true };
+    }
+
+    const { error } = await sb.rpc('admin_create_cleaner', {
+      p_user_id: user.id,
+      p_name: user.name,
+      p_email: user.email,
+      p_password: password,
+      p_phone: user.phone || null,
+      p_property_ids: (propertyIds || []).filter(isUuid),
+    });
+
+    if (error) {
+      console.error('[persist] createCleaner:', error.message);
+      const msg = error.message || '';
+      if (/email exists/i.test(msg) || error.code === '23505') return { ok: false, code: 'EMAIL_EXISTS', message: msg };
+      if (/weak password/i.test(msg)) return { ok: false, code: 'WEAK_PASSWORD', message: msg };
+      if (/invalid name/i.test(msg)) return { ok: false, code: 'INVALID_NAME', message: msg };
+      if (/invalid email/i.test(msg)) return { ok: false, code: 'INVALID_EMAIL', message: msg };
+      return { ok: false, message: msg };
+    }
+
+    return { ok: true };
+  }
+
+  async function persistUpdateCleaner({ userId, fields }) {
+    if (!enabled || !sb || !isUuid(userId)) {
+      return { ok: true, skipped: true };
+    }
+
+    const patch = {};
+    if (fields.name !== undefined) patch.name = fields.name;
+    if (fields.email !== undefined) patch.email = fields.email;
+    if (fields.phone !== undefined) patch.phone = fields.phone || null;
+    if (fields.active !== undefined) patch.active = fields.active;
+
+    if (Object.keys(patch).length === 0) return { ok: true };
+
+    const { error } = await sb.from('users').update(patch).eq('id', userId);
+    if (error) {
+      console.error('[persist] updateCleaner:', error.message);
+      const msg = error.message || '';
+      if (error.code === '23505' || /duplicate|unique/i.test(msg)) return { ok: false, code: 'EMAIL_EXISTS', message: msg };
+      return { ok: false, message: msg };
+    }
+
+    return { ok: true };
+  }
+
+  async function persistSetCleanerProperties({ cleanerUserId, propertyIds }) {
+    if (!enabled || !sb || !isUuid(cleanerUserId)) {
+      return { ok: true, skipped: true };
+    }
+
+    const { error: delErr } = await sb.from('property_cleaners').delete().eq('cleaner_user_id', cleanerUserId);
+    if (delErr) {
+      console.error('[persist] setCleanerProperties delete:', delErr.message);
+      return { ok: false, message: delErr.message };
+    }
+
+    const ids = (propertyIds || []).filter(isUuid);
+    if (ids.length > 0) {
+      const rows = ids.map(property_id => ({ property_id, cleaner_user_id: cleanerUserId }));
+      const { error: insErr } = await sb.from('property_cleaners').insert(rows);
+      if (insErr) {
+        console.error('[persist] setCleanerProperties insert:', insErr.message);
+        return { ok: false, message: insErr.message };
+      }
+    }
+
+    return { ok: true };
+  }
+
   window.dbPersist = {
     insertNotifications: persistInsertNotifications,
     adminDelete: persistAdminDelete,
@@ -1617,5 +1694,8 @@
     removeChecklistTemplateItem: persistRemoveChecklistTemplateItem,
     updateChecklistTemplateItem: persistUpdateChecklistTemplateItem,
     setPropertyCleaners: persistSetPropertyCleaners,
+    createCleaner: persistCreateCleaner,
+    updateCleaner: persistUpdateCleaner,
+    setCleanerProperties: persistSetCleanerProperties,
   };
 })();

@@ -867,13 +867,29 @@
     },
 
     /* —— "Kräver din åtgärd" för admin —— */
+    shiftNeedsAdminReview(shift) {
+      const pendingStatus = 'Väntar granskning';
+      if (!shift) return false;
+      if (shift.status === pendingStatus) return true;
+      if (shift.status !== 'Utfört' || shift.checked_in_at || shift.checked_out_at) return false;
+      const events = state.shift_events.filter(e => e.shift_id === shift.id);
+      const flagged = events.some(e =>
+        e.event_type === 'pending_review'
+        || (e.event_type === 'auto_completed' && e.payload?.reason === 'auto_no_checkin'),
+      );
+      const approved = events.some(e =>
+        e.event_type === 'admin_approved_completion' || e.event_type === 'check_out',
+      );
+      return flagged && !approved;
+    },
+
     adminActionables() {
-      const pendingReviewStatus = window.ShiftFinalization?.PENDING_REVIEW_STATUS || 'Väntar granskning';
+      const pendingReviewStatus = 'Väntar granskning';
       const sick = state.shifts.filter(s => s.status === 'Sjukanmäld' && !s.sick_finalized_at);
       const openIncidents = state.incidents.filter(i => i.status === 'open');
       const todayShifts = state.shifts.filter(s => sameDay(s.start_at, new Date()) && s.status === 'Godkänt' && new Date(s.start_at) < new Date() && !s.checked_in_at);
       const pendingReview = state.shifts
-        .filter(s => s.status === pendingReviewStatus)
+        .filter(s => db.shiftNeedsAdminReview(s))
         .sort((a, b) => new Date(b.start_at) - new Date(a.start_at));
       const planned = state.shifts
         .filter(s => s.status === 'Planerat')
@@ -2021,10 +2037,10 @@
     },
 
     /** Godkänn pass som väntar på granskning (ingen incheckning) → Utfört med planerad tid. */
-    async approveShiftCompletion(shiftId, actorUserId) {
+    async approveShiftCompletion(shiftId, actorUserId, { cleanerUserId } = {}) {
       const s = db.shiftById(shiftId);
-      const pendingStatus = window.ShiftFinalization?.PENDING_REVIEW_STATUS || 'Väntar granskning';
-      if (!s || s.status !== pendingStatus) return { error: 'NOT_FOUND' };
+      const pendingStatus = 'Väntar granskning';
+      if (!s || !db.shiftNeedsAdminReview(s)) return { error: 'NOT_FOUND' };
 
       const SF = window.ShiftFinalization;
       const planned = SF ? SF.getPlannedTimes(s) : { start: s.start_at, end: s.end_at };
@@ -2035,13 +2051,29 @@
         end_at: s.end_at,
         original_start_at: s.original_start_at,
         original_end_at: s.original_end_at,
+        cleaner_user_id: s.cleaner_user_id,
         last_modified_by: s.last_modified_by,
         shift_eventsLen: state.shift_events.length,
       };
 
-      s.status = 'Utfört';
-      s.start_at = planned.start instanceof Date ? planned.start : new Date(planned.start);
-      s.end_at = planned.end instanceof Date ? planned.end : new Date(planned.end);
+      if (cleanerUserId && cleanerUserId !== s.cleaner_user_id) {
+        const oldCleanerId = s.cleaner_user_id;
+        s.cleaner_user_id = cleanerUserId;
+        state.shift_events.push({
+          id: id('se'),
+          shift_id: shiftId,
+          actor_user_id: actorUserId,
+          event_type: 'cleaner_swapped',
+          payload: { from: oldCleanerId, to: cleanerUserId },
+          created_at: new Date(),
+        });
+      }
+
+      if (s.status === pendingStatus) {
+        s.status = 'Utfört';
+        s.start_at = planned.start instanceof Date ? planned.start : new Date(planned.start);
+        s.end_at = planned.end instanceof Date ? planned.end : new Date(planned.end);
+      }
       s.last_modified_by = actorUserId;
       state.shift_events.push({
         id: id('se'),
@@ -2051,6 +2083,7 @@
         payload: {
           planned: { start_at: s.original_start_at || planned.start, end_at: s.original_end_at || planned.end },
           actual: { start_at: s.start_at, end_at: s.end_at },
+          cleaner_user_id: s.cleaner_user_id,
         },
         created_at: new Date(),
       });
@@ -2065,6 +2098,7 @@
           s.end_at = snapshot.end_at;
           s.original_start_at = snapshot.original_start_at;
           s.original_end_at = snapshot.original_end_at;
+          s.cleaner_user_id = snapshot.cleaner_user_id;
           s.last_modified_by = snapshot.last_modified_by;
           state.shift_events.length = snapshot.shift_eventsLen;
           bump();
@@ -2072,6 +2106,9 @@
         }
       }
 
+      if (cleanerUserId && cleanerUserId !== snapshot.cleaner_user_id) {
+        pushNotification(cleanerUserId, 'assigned_shift', { shift_id: s.id, property_id: s.property_id, start_at: s.start_at });
+      }
       if (s.cleaner_user_id) {
         pushNotification(s.cleaner_user_id, 'shift_approved', { shift_id: s.id, property_id: s.property_id, start_at: s.start_at });
       }
@@ -3082,6 +3119,183 @@
       bump();
     },
 
+    cleanersForOrg(orgId) {
+      const oid = orgId || state.organizations[0]?.id;
+      return state.users
+        .filter(u => u.role === 'cleaner' && u.org_id === oid)
+        .sort((a, b) => a.name.localeCompare(b.name, 'sv'));
+    },
+    propertyPoolForCleaner(cleanerUserId) {
+      return state.property_cleaners
+        .filter(pc => pc.cleaner_user_id === cleanerUserId)
+        .map(pc => state.properties.find(p => p.id === pc.property_id))
+        .filter(Boolean);
+    },
+    upcomingShiftsForCleaner(cleanerUserId, limit = 10) {
+      const now = new Date();
+      return db.shiftsForCleaner(cleanerUserId, { from: now, statuses: ['Godkänt', 'Planerat'] })
+        .slice(0, limit);
+    },
+    async addCleaner({ name, email, phone = '', password = null, propertyIds = [], orgId, adminUserId, provision = false }) {
+      const oid = orgId || state.organizations[0]?.id;
+      if (!oid) return { error: 'NOT_FOUND' };
+
+      const trimmedName = (name || '').trim();
+      if (trimmedName.length < 2) return { error: 'INVALID_NAME' };
+
+      const trimmedEmail = (email || '').trim().toLowerCase();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) return { error: 'INVALID_EMAIL' };
+      if (state.users.some(u => u.email === trimmedEmail)) return { error: 'EMAIL_EXISTS' };
+
+      const persist = window.dbPersist && window.dbPersist.createCleaner;
+      const wantsPersist = !!(persist && window.SUPABASE_ENABLED && provision);
+      if (wantsPersist && (!password || password.length < 8)) return { error: 'WEAK_PASSWORD' };
+
+      const u = {
+        id: newId(), org_id: oid, role: 'cleaner',
+        name: trimmedName, email: trimmedEmail, phone: (phone || '').trim(), active: true,
+      };
+
+      const snapshot = {
+        usersLen: state.users.length,
+        pcLen: state.property_cleaners.length,
+      };
+
+      state.users.push(u);
+      (propertyIds || []).forEach(pid => {
+        state.property_cleaners.push({ property_id: pid, cleaner_user_id: u.id });
+      });
+      bump();
+
+      if (wantsPersist) {
+        const r = await persist({ user: u, password, propertyIds });
+        if (!r.ok) {
+          state.users.length = snapshot.usersLen;
+          state.property_cleaners.length = snapshot.pcLen;
+          bump();
+          if (r.code === 'EMAIL_EXISTS') return { error: 'EMAIL_EXISTS' };
+          if (r.code === 'WEAK_PASSWORD') return { error: 'WEAK_PASSWORD' };
+          if (r.code === 'INVALID_NAME') return { error: 'INVALID_NAME' };
+          if (r.code === 'INVALID_EMAIL') return { error: 'INVALID_EMAIL' };
+          return { error: 'PERSIST_FAILED', message: r.message };
+        }
+      }
+
+      return { ok: true, user: u };
+    },
+    async updateCleaner(userId, { name, email, phone }) {
+      const u = db.userById(userId);
+      if (!u || u.role !== 'cleaner') return { error: 'NOT_FOUND' };
+
+      const trimmedEmail = (email || '').trim().toLowerCase();
+      if (state.users.some(x => x.email === trimmedEmail && x.id !== userId)) {
+        return { error: 'EMAIL_EXISTS' };
+      }
+
+      const snapshot = { name: u.name, email: u.email, phone: u.phone };
+      u.name = (name || '').trim();
+      u.email = trimmedEmail;
+      u.phone = (phone || '').trim();
+      bump();
+
+      const persist = window.dbPersist && window.dbPersist.updateCleaner;
+      if (persist && window.SUPABASE_ENABLED) {
+        const r = await persist({ userId, fields: { name: u.name, email: u.email, phone: u.phone } });
+        if (!r.ok) {
+          u.name = snapshot.name;
+          u.email = snapshot.email;
+          u.phone = snapshot.phone;
+          bump();
+          if (r.code === 'EMAIL_EXISTS') return { error: 'EMAIL_EXISTS' };
+          return { error: 'PERSIST_FAILED', message: r.message };
+        }
+      }
+
+      return { ok: true };
+    },
+    async setCleanerPassword(userId, password) {
+      const u = db.userById(userId);
+      if (!u || u.role !== 'cleaner') return { error: 'NOT_FOUND' };
+      if (!password || password.length < 8) return { error: 'WEAK_PASSWORD' };
+
+      const persist = window.dbPersist && window.dbPersist.setUserPassword;
+      if (persist && window.SUPABASE_ENABLED) {
+        const r = await persist({ userId, password });
+        if (!r.ok) {
+          if (r.code === 'WEAK_PASSWORD') return { error: 'WEAK_PASSWORD' };
+          return { error: 'PERSIST_FAILED', message: r.message };
+        }
+      }
+      return { ok: true };
+    },
+    async deactivateCleaner(userId) {
+      const u = db.userById(userId);
+      if (!u || u.role !== 'cleaner') return { error: 'NOT_FOUND' };
+
+      const snapshot = u.active;
+      u.active = false;
+      bump();
+
+      const persist = window.dbPersist && window.dbPersist.updateCleaner;
+      if (persist && window.SUPABASE_ENABLED) {
+        const r = await persist({ userId, fields: { active: false } });
+        if (!r.ok) {
+          u.active = snapshot;
+          bump();
+          return { error: 'PERSIST_FAILED', message: r.message };
+        }
+      }
+
+      return { ok: true };
+    },
+    async reactivateCleaner(userId) {
+      const u = db.userById(userId);
+      if (!u || u.role !== 'cleaner') return { error: 'NOT_FOUND' };
+
+      const snapshot = u.active;
+      u.active = true;
+      bump();
+
+      const persist = window.dbPersist && window.dbPersist.updateCleaner;
+      if (persist && window.SUPABASE_ENABLED) {
+        const r = await persist({ userId, fields: { active: true } });
+        if (!r.ok) {
+          u.active = snapshot;
+          bump();
+          return { error: 'PERSIST_FAILED', message: r.message };
+        }
+      }
+
+      return { ok: true };
+    },
+    async setCleanerPropertyPool(cleanerUserId, propertyIds) {
+      const u = db.userById(cleanerUserId);
+      if (!u || u.role !== 'cleaner') return { error: 'NOT_FOUND' };
+
+      const snapshot = state.property_cleaners
+        .filter(pc => pc.cleaner_user_id === cleanerUserId)
+        .map(pc => ({ ...pc }));
+
+      state.property_cleaners = state.property_cleaners.filter(pc => pc.cleaner_user_id !== cleanerUserId);
+      (propertyIds || []).forEach(pid => {
+        state.property_cleaners.push({ property_id: pid, cleaner_user_id: cleanerUserId });
+      });
+      bump();
+
+      const persist = window.dbPersist && window.dbPersist.setCleanerProperties;
+      if (persist && window.SUPABASE_ENABLED) {
+        const r = await persist({ cleanerUserId, propertyIds });
+        if (!r.ok) {
+          state.property_cleaners = state.property_cleaners.filter(pc => pc.cleaner_user_id !== cleanerUserId);
+          state.property_cleaners.push(...snapshot);
+          bump();
+          return { error: 'PERSIST_FAILED', message: r.message };
+        }
+      }
+
+      return { ok: true };
+    },
+
     /* —— hydrering från Supabase (ersätter hela cachen) —— */
     replaceAll(next) {
       Object.keys(state).forEach(table => {
@@ -3094,6 +3308,7 @@
       if (!window.Reporting) return null;
       return window.Reporting.buildAdminReport(state, filters, {
         shiftTimesFn: s => db.shiftTimes(s),
+        needsReviewFn: s => db.shiftNeedsAdminReview(s),
       });
     },
     buildCustomerReport(userId, filters) {

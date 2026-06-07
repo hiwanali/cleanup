@@ -374,8 +374,29 @@
     const canCheckOut = isOwnerCleaner && shift.status === 'Pågående';
     const canReportSick = isOwnerCleaner && ['Godkänt', 'Planerat'].includes(shift.status);
     const canCheckItems = isOwnerCleaner && ['Pågående', 'Utfört'].includes(shift.status);
+    const needsAdminReview = role === 'admin' && db.shiftNeedsAdminReview(shift);
 
     const [sickOpen, setSickOpen] = useState(false);
+    const [approveCompletionOpen, setApproveCompletionOpen] = useState(false);
+    const [approvingCompletion, setApprovingCompletion] = useState(false);
+
+    async function handleApproveCompletion(cleanerUserId) {
+      setApprovingCompletion(true);
+      try {
+        const r = await db.approveShiftCompletion(shift.id, session.userId, { cleanerUserId });
+        if (r?.ok) {
+          toast.success('Passet godkänt och registrerat som utfört.');
+          setApproveCompletionOpen(false);
+          onBack && onBack();
+        } else if (r?.error === 'PERSIST_FAILED') {
+          toast.error('Kunde inte spara – försök igen.');
+        } else {
+          toast.error('Passet kunde inte godkännas.');
+        }
+      } finally {
+        setApprovingCompletion(false);
+      }
+    }
 
     return (
       <div>
@@ -390,6 +411,30 @@
             </div>
           }
         />
+
+        {needsAdminReview && (
+          <Card padding="md" className="mb-4 border-amber-300 bg-amber-50">
+            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <Icon name="eye" className="w-5 h-5 text-amber-700 mt-0.5 flex-shrink-0" />
+                <div>
+                  <h2 className="font-bold text-amber-900">Kräver admin-granskning</h2>
+                  <p className="text-sm text-amber-800/90 mt-1">
+                    Passet avslutades utan incheckning. Godkänn planerad tid, justera tid eller byt städare innan det räknas i lönerapporten.
+                  </p>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2 flex-shrink-0">
+                <Button variant="primary" icon="check" disabled={approvingCompletion} onClick={() => setApproveCompletionOpen(true)}>
+                  Godkänn pass
+                </Button>
+                <Button variant="outline" icon="user-plus" onClick={() => setApproveCompletionOpen(true)}>
+                  Godkänn med annan städare
+                </Button>
+              </div>
+            </div>
+          </Card>
+        )}
 
         <div className="grid lg:grid-cols-3 gap-4">
           <div className="lg:col-span-2 space-y-4">
@@ -590,6 +635,13 @@
         </div>
 
         <SickReportModal open={sickOpen} onClose={() => setSickOpen(false)} shift={shift} session={session} onDone={() => onBack && onBack()} />
+        <ApproveCompletionModal
+          open={approveCompletionOpen}
+          onClose={() => { if (!approvingCompletion) setApproveCompletionOpen(false); }}
+          shift={shift}
+          acting={approvingCompletion}
+          onApprove={handleApproveCompletion}
+        />
       </div>
     );
   }
@@ -670,11 +722,12 @@
     const [adjustOpen, setAdjustOpen] = useState(false);
     const [sickOpen, setSickOpen] = useState(false);
     const [approveOpen, setApproveOpen] = useState(false);
+    const [approveCompletionOpen, setApproveCompletionOpen] = useState(false);
     const [declineOpen, setDeclineOpen] = useState(false);
     const [acting, setActing] = useState(false);
     const isSick = shift.status === 'Sjukanmäld';
     const isAwaitingApproval = shift.status === 'Planerat';
-    const isPendingReview = shift.status === (window.ShiftFinalization?.PENDING_REVIEW_STATUS || 'Väntar granskning');
+    const needsReview = db.shiftNeedsAdminReview(shift);
     const isScheduled = shift.status === 'Godkänt';
     const isLive = shift.status === 'Pågående';
     const isBorttaget = shift.status === 'Borttaget';
@@ -779,38 +832,28 @@
       );
     }
 
-    if (isPendingReview) {
+    if (needsReview) {
       const times = db.shiftTimes(shift);
+      const cleaner = db.userById(shift.cleaner_user_id);
       return (
         <>
-          <Card padding="md" className="border-amber-200 bg-amber-50/50">
+          <Card padding="md" className="border-amber-300 bg-amber-50/80">
             <div className="flex items-start gap-2 mb-3">
               <Icon name="eye" className="w-4 h-4 text-amber-700 mt-0.5" />
               <div>
-                <h3 className="font-bold text-amber-900">Väntar granskning</h3>
+                <h3 className="font-bold text-amber-900">Åtgärder – granskning</h3>
                 <p className="text-[12px] text-amber-800/90 mt-0.5">
-                  Passet avslutades utan incheckning. Godkänn planerad tid ({formatRange(times.planned.start, times.planned.end)}) eller justera innan det räknas i lönerapporten.
+                  Planerad tid: {formatRange(times.planned.start, times.planned.end)}.
+                  {cleaner ? ` Tilldelad: ${cleaner.name}.` : ' Ingen städare tilldelad.'}
                 </p>
               </div>
             </div>
             <div className="space-y-2">
-              <Button variant="primary" icon="check" className="w-full justify-start" disabled={acting} onClick={async () => {
-                setActing(true);
-                try {
-                  const r = await db.approveShiftCompletion(shift.id, session.userId);
-                  if (r?.ok) {
-                    toast.success('Passet godkänt som utfört.');
-                    onClose && onClose();
-                  } else if (r?.error === 'PERSIST_FAILED') {
-                    toast.error('Kunde inte spara – försök igen.');
-                  } else {
-                    toast.error('Passet kunde inte godkännas.');
-                  }
-                } finally {
-                  setActing(false);
-                }
-              }}>
-                Godkänn som utfört (planerad tid)
+              <Button variant="primary" icon="check" className="w-full justify-start" disabled={acting} onClick={() => setApproveCompletionOpen(true)}>
+                Godkänn pass (välj städare)
+              </Button>
+              <Button variant="outline" icon="user-plus" className="w-full justify-start" onClick={() => setAssignOpen(true)}>
+                Byt städare (utan att godkänna än)
               </Button>
               <Button variant="outline" icon="clock" className="w-full justify-start" onClick={() => setAdjustOpen(true)}>
                 Justera tid och godkänn
@@ -821,8 +864,32 @@
             </div>
           </Card>
           <AdminDeleteShiftSection shift={shift} session={session} onClose={onClose} />
+          <AssignReplacementModal open={assignOpen} onClose={() => setAssignOpen(false)} shift={shift} session={session} onDone={onClose} />
           <AdjustShiftModal open={adjustOpen} onClose={() => setAdjustOpen(false)} shift={shift} session={session} onDone={onClose} />
           <SickReportModal open={sickOpen} onClose={() => setSickOpen(false)} shift={shift} session={session} adminActor onDone={onClose} />
+          <ApproveCompletionModal
+            open={approveCompletionOpen}
+            onClose={() => { if (!acting) setApproveCompletionOpen(false); }}
+            shift={shift}
+            acting={acting}
+            onApprove={async (cleanerUserId) => {
+              setActing(true);
+              try {
+                const r = await db.approveShiftCompletion(shift.id, session.userId, { cleanerUserId });
+                if (r?.ok) {
+                  toast.success('Passet godkänt som utfört.');
+                  setApproveCompletionOpen(false);
+                  onClose && onClose();
+                } else if (r?.error === 'PERSIST_FAILED') {
+                  toast.error('Kunde inte spara – försök igen.');
+                } else {
+                  toast.error('Passet kunde inte godkännas.');
+                }
+              } finally {
+                setActing(false);
+              }
+            }}
+          />
         </>
       );
     }
@@ -930,6 +997,63 @@
         </Card>
         <AdminDeleteShiftSection shift={shift} session={session} onClose={onClose} />
       </>
+    );
+  }
+
+  /* ============================================================
+   * ApproveCompletionModal – godkänn pass utan incheckning (välj städare)
+   * ============================================================ */
+  function ApproveCompletionModal({ open, onClose, shift, acting, onApprove }) {
+    const [cleanerId, setCleanerId] = useState('');
+    useEffect(() => {
+      if (open) setCleanerId(shift?.cleaner_user_id || '');
+    }, [open, shift?.id, shift?.cleaner_user_id]);
+    if (!open || !shift) return null;
+
+    const times = db.shiftTimes(shift);
+    const candidates = db.availableCleanersFor(shift.id)
+      .sort((a, b) => (a.conflict - b.conflict) || (b.inPool - a.inPool) || a.user.name.localeCompare(b.user.name, 'sv'));
+    const poolDefault = candidates.find(c => c.inPool)?.user.id || candidates[0]?.user.id || '';
+    const effectiveCleanerId = cleanerId || poolDefault;
+
+    return (
+      <Modal
+        open={open}
+        onClose={onClose}
+        title="Godkänn pass som utfört"
+        size="md"
+        footer={
+          <>
+            <Button variant="ghost" onClick={onClose} disabled={acting}>Avbryt</Button>
+            <Button
+              variant="primary"
+              icon="check"
+              disabled={acting || !effectiveCleanerId}
+              onClick={() => onApprove(effectiveCleanerId)}
+            >
+              {acting ? 'Godkänner…' : 'Godkänn med vald städare'}
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-slate-600 mb-4">
+          Passet registreras som <strong>Utfört</strong> med planerad tid{' '}
+          <strong>{formatRange(times.planned.start, times.planned.end)}</strong> och räknas i lönerapporten.
+        </p>
+        <Field label="Städare som utförde passet">
+          <Select value={effectiveCleanerId} onChange={e => setCleanerId(e.target.value)}>
+            <option value="">Välj städare…</option>
+            {candidates.map(c => (
+              <option key={c.user.id} value={c.user.id} disabled={c.conflict}>
+                {c.user.name}{c.inPool ? ' (i poolen)' : ''}{c.conflict ? ' – krock' : ''}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <p className="text-xs text-slate-500 mt-2">
+          Du kan välja en annan städare än den som var tilldelad från början.
+        </p>
+      </Modal>
     );
   }
 
@@ -2428,6 +2552,7 @@
                 <option value="Planerat">Planerat</option>
                 <option value="Pågående">Pågående</option>
                 <option value="Utfört">Utfört</option>
+                <option value="Väntar granskning">Väntar granskning</option>
                 <option value="Sjukanmäld">Sjukanmäld</option>
                 <option value="Pausat (kundledighet)">Pausat (kundledighet)</option>
                 <option value="Avbokat">Avbokat</option>
@@ -4327,6 +4452,616 @@
     );
   }
 
+  function AdminUserPasswordModal({ open, onClose, user, onReset }) {
+    const [password, setPassword] = useState('');
+    const [saving, setSaving] = useState(false);
+    const [error, setError] = useState('');
+
+    useEffect(() => {
+      if (!open) return;
+      setPassword(cleanupGeneratePassword());
+      setError('');
+      setSaving(false);
+    }, [open, user?.id]);
+
+    const valid = (password || '').length >= 8;
+
+    async function submit() {
+      if (!user) return;
+      setSaving(true);
+      setError('');
+      try {
+        const r = await onReset(user.id, password);
+        if (r?.ok) {
+          toast.success(`Nytt lösenord satt för ${user.name || 'användaren'}.`);
+          onClose();
+        } else if (r?.error === 'WEAK_PASSWORD') {
+          setError('Lösenordet måste vara minst 8 tecken.');
+        } else {
+          setError('Kunde inte uppdatera lösenordet. Försök igen.');
+        }
+      } finally {
+        setSaving(false);
+      }
+    }
+
+    return (
+      <Modal
+        open={open}
+        onClose={onClose}
+        title="Återställ lösenord"
+        size="sm"
+        footer={
+          <>
+            <Button variant="ghost" onClick={onClose} disabled={saving}>Avbryt</Button>
+            <Button variant="primary" icon="key" disabled={!valid || saving} loading={saving} onClick={submit}>Spara lösenord</Button>
+          </>
+        }
+      >
+        <p className="text-xs text-slate-500 mb-4">
+          Sätter ett nytt lösenord för <span className="font-semibold text-slate-700">{user?.name}</span> ({user?.email}).
+          Personen kan byta det själv efteråt.
+        </p>
+        <Field label="Nytt lösenord *" hint="Minst 8 tecken">
+          <PasswordInput
+            value={password}
+            onChange={e => { setPassword(e.target.value); setError(''); }}
+            onGenerate={() => { setPassword(cleanupGeneratePassword()); setError(''); }}
+          />
+        </Field>
+        {error && <p className="text-xs text-rose-600 mt-3">{error}</p>}
+      </Modal>
+    );
+  }
+
+  function AddCleanerModal({ open, onClose, session, onCreated }) {
+    const provisioning = session?.user?.role === 'admin' && !!window.SUPABASE_ENABLED;
+    const org = db.organizationForUser(session.userId);
+    const customers = db.state.customers.filter(c => c.org_id === org?.id);
+    const allProperties = customers.flatMap(c => {
+      const props = db.state.properties.filter(p => p.customer_id === c.id);
+      return props.map(p => ({ ...p, customerName: c.name }));
+    });
+
+    const [name, setName] = useState('');
+    const [email, setEmail] = useState('');
+    const [phone, setPhone] = useState('');
+    const [password, setPassword] = useState('');
+    const [propertyIds, setPropertyIds] = useState([]);
+    const [saving, setSaving] = useState(false);
+    const [error, setError] = useState('');
+
+    useEffect(() => {
+      if (!open) return;
+      setName('');
+      setEmail('');
+      setPhone('');
+      setPassword(provisioning ? cleanupGeneratePassword() : '');
+      setPropertyIds([]);
+      setError('');
+      setSaving(false);
+    }, [open, provisioning]);
+
+    function toggleProperty(pid) {
+      setPropertyIds(prev => prev.includes(pid) ? prev.filter(x => x !== pid) : [...prev, pid]);
+    }
+
+    const validName = name.trim().length >= 2;
+    const validEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+    const validPwd = !provisioning || (password || '').length >= 8;
+    const canSubmit = validName && validEmail && validPwd;
+
+    function errorLabel(code) {
+      switch (code) {
+        case 'EMAIL_EXISTS': return 'Mejladressen används redan.';
+        case 'INVALID_EMAIL': return 'Ogiltig mejladress.';
+        case 'INVALID_NAME': return 'Namn måste vara minst 2 tecken.';
+        case 'WEAK_PASSWORD': return 'Lösenordet måste vara minst 8 tecken.';
+        case 'PERSIST_FAILED': return 'Kunde inte spara till databasen.';
+        default: return 'Kunde inte spara.';
+      }
+    }
+
+    async function submit() {
+      setError('');
+      setSaving(true);
+      try {
+        const r = await db.addCleaner({
+          name, email, phone, password,
+          propertyIds,
+          orgId: org?.id,
+          adminUserId: session.userId,
+          provision: provisioning,
+        });
+        if (r?.ok) {
+          toast.success(provisioning
+            ? `${name.trim()} skapad med inloggning.`
+            : `${name.trim()} tillagd.`);
+          onClose();
+          if (onCreated) onCreated(r.user.id);
+        } else {
+          setError(errorLabel(r?.error));
+        }
+      } finally {
+        setSaving(false);
+      }
+    }
+
+    return (
+      <Modal
+        open={open}
+        onClose={onClose}
+        title="Ny städare"
+        size="lg"
+        footer={
+          <>
+            <Button variant="ghost" onClick={onClose} disabled={saving}>Avbryt</Button>
+            <Button variant="primary" disabled={!canSubmit || saving} loading={saving} onClick={submit}>Skapa städare</Button>
+          </>
+        }
+      >
+        <p className="text-xs text-slate-500 mb-4">
+          Städare loggar in med mejl och lösenord och ser sina egna pass.
+          {provisioning
+            ? ' Ange ett lösenord – städaren kan byta det själv efter första inloggningen.'
+            : ' Inloggning hanteras av admin.'}
+        </p>
+        <div className="grid sm:grid-cols-2 gap-3">
+          <Field label="Namn *">
+            <Input value={name} onChange={e => { setName(e.target.value); setError(''); }} placeholder="För- och efternamn" />
+          </Field>
+          <Field label="Mejl *" hint="Används som inloggning">
+            <Input type="email" value={email} onChange={e => { setEmail(e.target.value); setError(''); }} placeholder="namn@foretag.se" />
+          </Field>
+        </div>
+        <div className="grid sm:grid-cols-2 gap-3 mt-3">
+          <Field label="Telefon">
+            <Input type="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="+46 70 123 45 67" />
+          </Field>
+          {provisioning && (
+            <Field label="Lösenord *" hint="Minst 8 tecken">
+              <PasswordInput
+                value={password}
+                onChange={e => { setPassword(e.target.value); setError(''); }}
+                onGenerate={() => { setPassword(cleanupGeneratePassword()); setError(''); }}
+              />
+            </Field>
+          )}
+        </div>
+        {allProperties.length > 0 && (
+          <Field label="Objekt i baspool" hint="Valfritt – förslag vid schemaläggning" className="mt-3">
+            <div className="space-y-3 max-h-48 overflow-y-auto border border-slate-200 rounded-xl p-3">
+              {customers.map(c => {
+                const props = allProperties.filter(p => p.customer_id === c.id);
+                if (props.length === 0) return null;
+                return (
+                  <div key={c.id}>
+                    <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-1.5">{c.name}</p>
+                    <div className="space-y-1.5">
+                      {props.map(p => (
+                        <Checkbox
+                          key={p.id}
+                          checked={propertyIds.includes(p.id)}
+                          onChange={() => toggleProperty(p.id)}
+                          label={p.name}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </Field>
+        )}
+        {error && <p className="text-sm text-rose-600 mt-4">{error}</p>}
+      </Modal>
+    );
+  }
+
+  function EditCleanerModal({ open, onClose, cleaner }) {
+    const [name, setName] = useState('');
+    const [email, setEmail] = useState('');
+    const [phone, setPhone] = useState('');
+    const [saving, setSaving] = useState(false);
+    const [error, setError] = useState('');
+
+    useEffect(() => {
+      if (!open || !cleaner) return;
+      setName(cleaner.name || '');
+      setEmail(cleaner.email || '');
+      setPhone(cleaner.phone || '');
+      setError('');
+      setSaving(false);
+    }, [open, cleaner?.id]);
+
+    const valid = name.trim().length >= 2 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+
+    async function submit() {
+      setSaving(true);
+      setError('');
+      try {
+        const r = await db.updateCleaner(cleaner.id, { name, email, phone });
+        if (r?.ok) {
+          toast.success('Städare uppdaterad.');
+          onClose();
+        } else if (r?.error === 'EMAIL_EXISTS') {
+          setError('Mejladressen används redan.');
+        } else {
+          setError('Kunde inte spara.');
+        }
+      } finally {
+        setSaving(false);
+      }
+    }
+
+    return (
+      <Modal
+        open={open}
+        onClose={onClose}
+        title="Redigera städare"
+        size="md"
+        footer={
+          <>
+            <Button variant="ghost" onClick={onClose} disabled={saving}>Avbryt</Button>
+            <Button variant="primary" disabled={!valid || saving} loading={saving} onClick={submit}>Spara</Button>
+          </>
+        }
+      >
+        <div className="grid sm:grid-cols-2 gap-3">
+          <Field label="Namn *">
+            <Input value={name} onChange={e => { setName(e.target.value); setError(''); }} />
+          </Field>
+          <Field label="Mejl *">
+            <Input type="email" value={email} onChange={e => { setEmail(e.target.value); setError(''); }} />
+          </Field>
+        </div>
+        <Field label="Telefon" className="mt-3">
+          <Input type="tel" value={phone} onChange={e => setPhone(e.target.value)} />
+        </Field>
+        {error && <p className="text-xs text-rose-600 mt-3">{error}</p>}
+      </Modal>
+    );
+  }
+
+  function AdminCleanersListView({ session, onNavigate }) {
+    useDb();
+    const [createOpen, setCreateOpen] = useState(false);
+    const [filter, setFilter] = useState('active');
+    const org = db.organizationForUser(session.userId);
+    const allCleaners = db.cleanersForOrg(org?.id);
+    const cleaners = allCleaners.filter(c => {
+      if (filter === 'active') return c.active;
+      if (filter === 'inactive') return !c.active;
+      return true;
+    });
+
+    return (
+      <div>
+        <PageHeader
+          title="Städare"
+          subtitle={`${allCleaners.filter(c => c.active).length} aktiva · ${allCleaners.length} totalt`}
+          actions={<Button variant="primary" icon="plus" onClick={() => setCreateOpen(true)}>Ny städare</Button>}
+        />
+        <AddCleanerModal
+          open={createOpen}
+          onClose={() => setCreateOpen(false)}
+          session={session}
+          onCreated={(id) => onNavigate(`/admin/stadare/${id}`)}
+        />
+        <div className="flex gap-2 mb-4">
+          {[
+            { id: 'active', label: 'Aktiva' },
+            { id: 'inactive', label: 'Inaktiva' },
+            { id: 'all', label: 'Alla' },
+          ].map(f => (
+            <Button
+              key={f.id}
+              variant={filter === f.id ? 'primary' : 'outline'}
+              size="sm"
+              onClick={() => setFilter(f.id)}
+            >
+              {f.label}
+            </Button>
+          ))}
+        </div>
+        {cleaners.length === 0 ? (
+          <Card padding="md">
+            <EmptyState
+              icon="users"
+              title={filter === 'inactive' ? 'Inga inaktiva städare' : 'Inga städare än'}
+              description="Lägg till städare som ska kunna logga in och se sina pass."
+              action={<Button icon="plus" onClick={() => setCreateOpen(true)}>Ny städare</Button>}
+            />
+          </Card>
+        ) : (
+          <div className="grid md:grid-cols-2 gap-3">
+            {cleaners.map(c => {
+              const pool = db.propertyPoolForCleaner(c.id);
+              const upcoming = db.upcomingShiftsForCleaner(c.id).length;
+              return (
+                <button
+                  key={c.id}
+                  onClick={() => onNavigate(`/admin/stadare/${c.id}`)}
+                  className={cx(
+                    'text-left bg-white rounded-2xl border p-5 hover:border-brand-300 hover:shadow-sm transition-all',
+                    c.active ? 'border-slate-200' : 'border-slate-200 opacity-60',
+                  )}
+                >
+                  <div className="flex items-start gap-3">
+                    <Avatar size="md" name={c.name} />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <p className="font-bold text-slate-900">{c.name}</p>
+                        {!c.active && <Badge variant="slate">Inaktiv</Badge>}
+                      </div>
+                      <p className="text-xs text-slate-500 truncate">{c.email}</p>
+                      {c.phone && <p className="text-xs text-slate-400">{c.phone}</p>}
+                    </div>
+                    <Icon name="chevron-right" className="w-5 h-5 text-slate-300" />
+                  </div>
+                  <div className="mt-4 grid grid-cols-2 gap-2 text-center">
+                    <div className="bg-slate-50 rounded-lg py-2">
+                      <p className="text-xl font-extrabold text-slate-900">{pool.length}</p>
+                      <p className="text-[11px] uppercase text-slate-500">objekt</p>
+                    </div>
+                    <div className="bg-slate-50 rounded-lg py-2">
+                      <p className="text-xl font-extrabold text-slate-900">{upcoming}</p>
+                      <p className="text-[11px] uppercase text-slate-500">kommande pass</p>
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  function AdminCleanerView({ session, onNavigate, cleanerId }) {
+    useDb();
+    const cleaner = db.userById(cleanerId);
+    const [editOpen, setEditOpen] = useState(false);
+    const [pwOpen, setPwOpen] = useState(false);
+    const [deactivateOpen, setDeactivateOpen] = useState(false);
+    const [reactivateOpen, setReactivateOpen] = useState(false);
+    const canManagePasswords = session?.user?.role === 'admin' && !!window.SUPABASE_ENABLED;
+
+    const org = db.organizationForUser(session.userId);
+    const customers = db.state.customers.filter(c => c.org_id === org?.id);
+    const allProperties = customers.flatMap(c => {
+      const props = db.state.properties.filter(p => p.customer_id === c.id);
+      return props.map(p => ({ ...p, customerName: c.name }));
+    });
+
+    const assignedIds = db.propertyPoolForCleaner(cleanerId).map(p => p.id);
+    const assignedKey = [...assignedIds].sort().join(',');
+    const [propertyIds, setPropertyIds] = useState(assignedIds);
+    const poolDirty = JSON.stringify([...propertyIds].sort()) !== JSON.stringify([...assignedIds].sort());
+
+    useEffect(() => {
+      setPropertyIds(assignedIds);
+    }, [cleanerId, assignedKey]);
+
+    if (!cleaner || cleaner.role !== 'cleaner') {
+      return <ComingSoonView title="Städare saknas" section="—" description="Städaren kunde inte hittas." />;
+    }
+
+    const upcoming = db.upcomingShiftsForCleaner(cleanerId);
+
+    function toggleProperty(pid) {
+      setPropertyIds(prev => prev.includes(pid) ? prev.filter(x => x !== pid) : [...prev, pid]);
+    }
+
+    return (
+      <div>
+        <PageHeader
+          breadcrumbs={[{ label: 'Städare', href: '#/admin/stadare' }, { label: cleaner.name }]}
+          title={cleaner.name}
+          subtitle={cleaner.email}
+          actions={
+            <>
+              {!cleaner.active && <Badge variant="slate">Inaktiv</Badge>}
+              <Button variant="outline" icon="edit" onClick={() => setEditOpen(true)}>Redigera</Button>
+              {cleaner.active ? (
+                <Button variant="danger-ghost" icon="user-x" onClick={() => setDeactivateOpen(true)}>Deaktivera</Button>
+              ) : (
+                <Button variant="outline" icon="user-check" onClick={() => setReactivateOpen(true)}>Återaktivera</Button>
+              )}
+            </>
+          }
+        />
+
+        <EditCleanerModal open={editOpen} onClose={() => setEditOpen(false)} cleaner={cleaner} />
+
+        <AdminUserPasswordModal
+          open={pwOpen}
+          onClose={() => setPwOpen(false)}
+          user={cleaner}
+          onReset={(userId, password) => db.setCleanerPassword(userId, password)}
+        />
+
+        <ConfirmDialog
+          open={deactivateOpen}
+          onClose={() => setDeactivateOpen(false)}
+          title="Deaktivera städare?"
+          message={`${cleaner.name} kan inte längre logga in och visas inte i schemaläggningslistor. Befintliga pass påverkas inte.`}
+          confirmLabel="Deaktivera"
+          danger
+          onConfirm={async () => {
+            const r = await db.deactivateCleaner(cleanerId);
+            if (r?.error) {
+              toast.error('Kunde inte deaktivera städaren.');
+              return;
+            }
+            toast.success('Städare deaktiverad.');
+            setDeactivateOpen(false);
+          }}
+        />
+
+        <ConfirmDialog
+          open={reactivateOpen}
+          onClose={() => setReactivateOpen(false)}
+          title="Återaktivera städare?"
+          message={`${cleaner.name} kan logga in igen och tilldelas nya pass.`}
+          confirmLabel="Återaktivera"
+          onConfirm={async () => {
+            const r = await db.reactivateCleaner(cleanerId);
+            if (r?.error) {
+              toast.error('Kunde inte återaktivera städaren.');
+              return;
+            }
+            toast.success('Städare återaktiverad.');
+            setReactivateOpen(false);
+          }}
+        />
+
+        <div className="grid lg:grid-cols-3 gap-4">
+          <div className="lg:col-span-2 space-y-4">
+            <Card padding="md">
+              <h3 className="font-bold text-slate-900 mb-3">Profil</h3>
+              <dl className="grid sm:grid-cols-2 gap-3 text-sm">
+                <div>
+                  <dt className="text-xs text-slate-500">Namn</dt>
+                  <dd className="font-medium text-slate-900">{cleaner.name}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-slate-500">Mejl</dt>
+                  <dd className="font-medium text-slate-900">{cleaner.email}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-slate-500">Telefon</dt>
+                  <dd className="font-medium text-slate-900">{cleaner.phone || '—'}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-slate-500">Status</dt>
+                  <dd><Badge variant={cleaner.active ? 'emerald' : 'slate'}>{cleaner.active ? 'Aktiv' : 'Inaktiv'}</Badge></dd>
+                </div>
+              </dl>
+            </Card>
+
+            <Card padding="md">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-bold text-slate-900">Objekttilldelningar (baspool)</h3>
+              </div>
+              <p className="text-xs text-slate-500 mb-4">Förslag vid schemaläggning – admin kan tilldela vem som helst per pass.</p>
+              {allProperties.length === 0 ? (
+                <p className="text-sm text-slate-500">Inga objekt i organisationen ännu.</p>
+              ) : (
+                <div className="space-y-3 max-h-64 overflow-y-auto">
+                  {customers.map(c => {
+                    const props = allProperties.filter(p => p.customer_id === c.id);
+                    if (props.length === 0) return null;
+                    return (
+                      <div key={c.id}>
+                        <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-1.5">{c.name}</p>
+                        <div className="space-y-1.5">
+                          {props.map(p => (
+                            <Checkbox
+                              key={p.id}
+                              checked={propertyIds.includes(p.id)}
+                              onChange={() => toggleProperty(p.id)}
+                              label={p.name}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              {poolDirty && (
+                <Button variant="primary" size="sm" className="mt-4" onClick={async () => {
+                  const r = await db.setCleanerPropertyPool(cleanerId, propertyIds);
+                  if (r?.error) {
+                    toast.error(r.message || 'Kunde inte spara tilldelningar.');
+                    return;
+                  }
+                  toast.success('Objekttilldelningar sparade.');
+                }}>Spara tilldelningar</Button>
+              )}
+            </Card>
+
+            <Card padding="md">
+              <h3 className="font-bold text-slate-900 mb-3">Kommande pass</h3>
+              {upcoming.length === 0 ? (
+                <p className="text-sm text-slate-500">Inga kommande pass tilldelade.</p>
+              ) : (
+                <ul className="divide-y divide-slate-100 -mx-2">
+                  {upcoming.map(s => {
+                    const prop = db.propertyById(s.property_id);
+                    const cust = prop ? db.customerById(prop.customer_id) : null;
+                    return (
+                      <li key={s.id} className="px-2 py-3">
+                        <button
+                          type="button"
+                          onClick={() => onNavigate(`/admin/schema/${s.id}`)}
+                          className="w-full text-left flex items-center gap-3 hover:bg-slate-50 rounded-lg -mx-1 px-1 py-0.5"
+                        >
+                          <span className="text-sm font-semibold text-slate-900">{formatDate(s.start_at)}</span>
+                          <span className="text-xs text-slate-500">{formatTime(s.start_at)}–{formatTime(s.end_at)}</span>
+                          <span className="text-xs text-slate-600 flex-1 truncate">{cust?.name} · {prop?.name}</span>
+                          <Badge variant={s.status === 'Godkänt' ? 'emerald' : 'brand'}>{s.status}</Badge>
+                          <Icon name="chevron-right" className="w-4 h-4 text-slate-300" />
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </Card>
+          </div>
+
+          <div className="space-y-4">
+            <Card padding="md">
+              <h3 className="font-bold text-slate-900 mb-1">Inloggning</h3>
+              <p className="text-xs text-slate-500 mb-3">Städaren loggar in med mejl och lösenord.</p>
+              <dl className="text-sm mb-4">
+                <dt className="text-xs text-slate-500">Mejl</dt>
+                <dd className="font-medium text-slate-900">{cleaner.email}</dd>
+              </dl>
+              {canManagePasswords && (
+                <Button variant="outline" size="sm" icon="key" onClick={() => setPwOpen(true)}>Återställ lösenord</Button>
+              )}
+            </Card>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function CleanerSettingsView({ session }) {
+    useDb();
+    const user = session.user;
+
+    return (
+      <div>
+        <PageHeader title="Inställningar" subtitle="Din profil och inloggning" />
+        <div className="grid lg:grid-cols-2 gap-4 max-w-3xl">
+          <Card padding="md">
+            <h3 className="font-bold text-slate-900 mb-1">Min profil</h3>
+            <p className="text-xs text-slate-500 mb-4">Kontaktuppgifter ändras av din administratör.</p>
+            <dl className="space-y-3 text-sm">
+              <div>
+                <dt className="text-xs text-slate-500">Namn</dt>
+                <dd className="font-medium text-slate-900">{user.name}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-slate-500">Mejl</dt>
+                <dd className="font-medium text-slate-900">{user.email}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-slate-500">Telefon</dt>
+                <dd className="font-medium text-slate-900">{user.phone || '—'}</dd>
+              </div>
+            </dl>
+          </Card>
+          <ChangePasswordCard />
+        </div>
+      </div>
+    );
+  }
+
   function AdminCustomersListView({ session, onNavigate }) {
     useDb();
     const [createOpen, setCreateOpen] = useState(false);
@@ -5416,6 +6151,9 @@
   window.CleanerShiftDetailView = CleanerShiftDetailView;
   window.CustomerOverviewView = CustomerOverviewView;
   window.CustomerShiftDetailView = CustomerShiftDetailView;
+  window.AdminCleanersListView = AdminCleanersListView;
+  window.AdminCleanerView = AdminCleanerView;
+  window.CleanerSettingsView = CleanerSettingsView;
   window.AdminCustomersListView = AdminCustomersListView;
   window.AdminCustomerView = AdminCustomerView;
   window.AdminPropertyView = AdminPropertyView;
