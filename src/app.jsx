@@ -534,6 +534,18 @@
       return window.subscribeRealtimeSync(session.userId);
     }, [session?.userId]);
 
+    useEffect(() => {
+      if (!session?.userId || typeof db.runShiftFinalization !== 'function') {
+        return undefined;
+      }
+      const tick = () => {
+        db.runShiftFinalization(session.userId).catch(() => {});
+      };
+      tick();
+      const intervalId = setInterval(tick, 60_000);
+      return () => clearInterval(intervalId);
+    }, [session?.userId]);
+
     if (booting) return <BootScreen />;
 
     if (!session) {

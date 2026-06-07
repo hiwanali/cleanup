@@ -674,6 +674,7 @@
     const [acting, setActing] = useState(false);
     const isSick = shift.status === 'Sjukanmäld';
     const isAwaitingApproval = shift.status === 'Planerat';
+    const isPendingReview = shift.status === (window.ShiftFinalization?.PENDING_REVIEW_STATUS || 'Väntar granskning');
     const isScheduled = shift.status === 'Godkänt';
     const isLive = shift.status === 'Pågående';
     const isBorttaget = shift.status === 'Borttaget';
@@ -774,6 +775,54 @@
           <AdminDeleteShiftSection shift={shift} session={session} onClose={onClose} />
           <AssignReplacementModal open={assignOpen} onClose={() => setAssignOpen(false)} shift={shift} session={session} onDone={onClose} />
           <AdjustShiftModal open={adjustOpen} onClose={() => setAdjustOpen(false)} shift={shift} session={session} onDone={onClose} />
+        </>
+      );
+    }
+
+    if (isPendingReview) {
+      const times = db.shiftTimes(shift);
+      return (
+        <>
+          <Card padding="md" className="border-amber-200 bg-amber-50/50">
+            <div className="flex items-start gap-2 mb-3">
+              <Icon name="eye" className="w-4 h-4 text-amber-700 mt-0.5" />
+              <div>
+                <h3 className="font-bold text-amber-900">Väntar granskning</h3>
+                <p className="text-[12px] text-amber-800/90 mt-0.5">
+                  Passet avslutades utan incheckning. Godkänn planerad tid ({formatRange(times.planned.start, times.planned.end)}) eller justera innan det räknas i lönerapporten.
+                </p>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Button variant="primary" icon="check" className="w-full justify-start" disabled={acting} onClick={async () => {
+                setActing(true);
+                try {
+                  const r = await db.approveShiftCompletion(shift.id, session.userId);
+                  if (r?.ok) {
+                    toast.success('Passet godkänt som utfört.');
+                    onClose && onClose();
+                  } else if (r?.error === 'PERSIST_FAILED') {
+                    toast.error('Kunde inte spara – försök igen.');
+                  } else {
+                    toast.error('Passet kunde inte godkännas.');
+                  }
+                } finally {
+                  setActing(false);
+                }
+              }}>
+                Godkänn som utfört (planerad tid)
+              </Button>
+              <Button variant="outline" icon="clock" className="w-full justify-start" onClick={() => setAdjustOpen(true)}>
+                Justera tid och godkänn
+              </Button>
+              <Button variant="danger-ghost" icon="alert-circle" className="w-full justify-start" onClick={() => setSickOpen(true)}>
+                Sjukanmäl / markera som uteblivet
+              </Button>
+            </div>
+          </Card>
+          <AdminDeleteShiftSection shift={shift} session={session} onClose={onClose} />
+          <AdjustShiftModal open={adjustOpen} onClose={() => setAdjustOpen(false)} shift={shift} session={session} onDone={onClose} />
+          <SickReportModal open={sickOpen} onClose={() => setSickOpen(false)} shift={shift} session={session} adminActor onDone={onClose} />
         </>
       );
     }
@@ -2127,6 +2176,7 @@
     'Planerat': 'bg-slate-200 text-slate-700 hover:bg-slate-300',
     'Pågående': 'bg-accent-100 text-accent-700 hover:bg-accent-200',
     'Utfört': 'bg-slate-100 text-slate-600 hover:bg-slate-200',
+    'Väntar granskning': 'bg-amber-100 text-amber-800 hover:bg-amber-200',
     'Sjukanmäld': 'bg-amber-100 text-amber-800 hover:bg-amber-200',
     'Pausat (kundledighet)': 'bg-sky-100 text-sky-800 hover:bg-sky-200',
     'Avbokat': 'bg-rose-100 text-rose-700 hover:bg-rose-200 line-through',
@@ -5073,7 +5123,7 @@
   function AdminDashboardView({ session, onNavigate }) {
     const [createShiftOpen, setCreateShiftOpen] = useState(false);
     useDb();
-    const { sick, openIncidents, todayShifts, planned } = db.adminActionables();
+    const { sick, openIncidents, todayShifts, pendingReview, planned } = db.adminActionables();
     const totalCleaners = db.state.users.filter(u => u.role === 'cleaner' && u.active).length;
     const totalCustomers = db.state.customers.length;
     const todayAll = db.state.shifts.filter(s => formatDateShort(s.start_at) === formatDateShort(new Date()));
@@ -5104,12 +5154,38 @@
           Kräver din åtgärd
         </h2>
 
-        {sick.length === 0 && openIncidents.length === 0 && planned.length === 0 ? (
+        {sick.length === 0 && openIncidents.length === 0 && planned.length === 0 && pendingReview.length === 0 && todayShifts.length === 0 ? (
           <Card padding="lg">
             <EmptyState icon="check-circle" title="Allt är under kontroll" description="Inga väntande godkännanden, sjukanmälda pass eller öppna avvikelser just nu." />
           </Card>
         ) : (
           <div className="space-y-6">
+            {pendingReview.length > 0 && (
+              <section>
+                <h3 className="text-sm font-bold text-slate-700 mb-2 flex items-center gap-2">
+                  <Icon name="eye" className="w-4 h-4 text-amber-600" />
+                  Pass utan incheckning – granska <Badge variant="amber">{pendingReview.length}</Badge>
+                </h3>
+                <div className="grid md:grid-cols-2 gap-3">
+                  {pendingReview.map(s => (
+                    <ShiftCard key={s.id} shift={s} viewerRole="admin" viewerUserId={session.userId} onClick={() => onNavigate(`/admin/schema/${s.id}`)} />
+                  ))}
+                </div>
+              </section>
+            )}
+            {todayShifts.length > 0 && (
+              <section>
+                <h3 className="text-sm font-bold text-slate-700 mb-2 flex items-center gap-2">
+                  <Icon name="clock" className="w-4 h-4 text-rose-600" />
+                  Dagens pass utan incheckning <Badge variant="rose">{todayShifts.length}</Badge>
+                </h3>
+                <div className="grid md:grid-cols-2 gap-3">
+                  {todayShifts.map(s => (
+                    <ShiftCard key={s.id} shift={s} viewerRole="admin" viewerUserId={session.userId} onClick={() => onNavigate(`/admin/schema/${s.id}`)} />
+                  ))}
+                </div>
+              </section>
+            )}
             {planned.length > 0 && (
               <section>
                 <h3 className="text-sm font-bold text-slate-700 mb-2 flex items-center gap-2">
@@ -5474,6 +5550,10 @@
       await window.hydrateFromSupabase(userId);
       return new Date();
     }
+    if (typeof db.runShiftFinalization === 'function') {
+      await db.runShiftFinalization(userId);
+      return new Date();
+    }
     return null;
   }
 
@@ -5610,6 +5690,7 @@
       { key: 'actualEnd', label: 'Fakt. slut' },
       { key: 'plannedHours', label: 'Plan. tim' },
       { key: 'workedHours', label: 'Arb. tim' },
+      { key: 'completionNote', label: 'Klarmarkering' },
     ];
     const detailTabs = [
       { id: 'all', label: 'Alla pass', rows: report?.shiftDetails || [] },
@@ -5618,6 +5699,7 @@
       { id: 'deleted', label: 'Borttagna', rows: report?.deletedShifts || [] },
       { id: 'cancelled', label: 'Avbokade', rows: report?.cancelledShifts || [] },
       { id: 'paused', label: 'Pausade', rows: report?.pausedShifts || [] },
+      { id: 'pending', label: 'Väntar granskning', rows: report?.pendingReviewShifts || [] },
     ];
     const activeDetail = detailTabs.find(t => t.id === detailTab) || detailTabs[0];
 
@@ -5625,7 +5707,7 @@
       <div>
         <PageHeader
           title="Rapporter"
-          subtitle="KPI:er och löneunderlag för revisor. Arbetade timmar = utförda pass (faktisk in/utcheckning). Filtrera på kund, städare och period."
+          subtitle="KPI:er och löneunderlag för revisor. Arbetade timmar = utförda pass (manuell utcheckning eller automatisk klarmarkering efter sluttid). Filtrera på kund, städare och period."
           actions={
             <div className="flex flex-wrap gap-2">
               <Button variant="primary" icon="file-text" disabled={generating} onClick={generate}>
@@ -5699,6 +5781,7 @@
               <Stat label="Borttagna pass" value={s.shiftCountDeleted} icon="trash" tone="slate" />
               <Stat label="Avbokade pass" value={s.shiftCountCancelled} icon="x" tone="slate" />
               <Stat label="Pausade (ledighet)" value={s.shiftCountPaused} icon="pause" tone="slate" />
+              <Stat label="Väntar granskning" value={s.shiftCountPendingReview} hint="Ej i arbetade timmar" icon="eye" tone="amber" />
               <Stat label="Justerade tider" value={s.totalTimeAdjusted} hint={`${s.totalSickReports} sjukanmälan`} icon="refresh" tone="amber" />
             </div>
 
@@ -5878,7 +5961,7 @@
       <div>
         <PageHeader
           title="Rapporter"
-          subtitle={scopeHint || 'Översikt av bokade pass och arbetade timmar. Städare visas som ”Städare” enligt era visningsregler.'}
+          subtitle={scopeHint || 'Översikt av bokade pass och arbetade timmar (inkl. automatiskt klarmarkerade pass efter sluttid). Städare visas som ”Städare” enligt era visningsregler.'}
           actions={
             <div className="flex flex-wrap gap-2">
               <Button variant="primary" icon="file-text" disabled={generating} onClick={generate}>

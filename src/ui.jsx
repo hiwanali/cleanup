@@ -178,6 +178,7 @@
     Godkänt: { variant: 'emerald', icon: 'check-circle', label: 'Godkänt' },
     Pågående: { variant: 'accent', icon: 'play', label: 'Pågående' },
     Utfört: { variant: 'slate', icon: 'check', label: 'Utfört' },
+    'Väntar granskning': { variant: 'amber', icon: 'eye', label: 'Väntar granskning' },
     Sjukanmäld: { variant: 'amber', icon: 'alert-circle', label: 'Sjukanmäld' },
     'Pausat (kundledighet)': { variant: 'sky', icon: 'pause', label: 'Pausad – ledighet' },
     Avbokat: { variant: 'rose', icon: 'x', label: 'Avbokat' },

@@ -166,6 +166,9 @@
     const data = await loadAllFromSupabase(authUserId);
     if (window.db && typeof window.db.replaceAll === 'function') {
       window.db.replaceAll(data);
+      if (typeof window.db.runShiftFinalization === 'function') {
+        await window.db.runShiftFinalization(authUserId);
+      }
       return true;
     }
     return false;
@@ -900,6 +903,87 @@
     return { ok: true };
   }
 
+  async function persistAutoCompleteShift({ shiftId, shift, actorUserId, reason }) {
+    if (!enabled || !sb || !isUuid(shiftId)) {
+      return { ok: true, skipped: true };
+    }
+
+    const eventType = shift.status === 'Väntar granskning'
+      ? 'pending_review'
+      : 'auto_completed';
+
+    const { error: shiftErr } = await sb.from('shifts').update({
+      status: shift.status,
+      checked_in_at: toIso(shift.checked_in_at),
+      checked_out_at: null,
+      start_at: toIso(shift.start_at),
+      end_at: toIso(shift.end_at),
+      original_start_at: toIso(shift.original_start_at),
+      original_end_at: toIso(shift.original_end_at),
+      last_modified_by: actorUserId || shift.cleaner_user_id || null,
+    }).eq('id', shiftId);
+
+    if (shiftErr) {
+      console.error('[persist] autoCompleteShift:', shiftErr.message);
+      return { ok: false, message: shiftErr.message };
+    }
+
+    const { error: evErr } = await sb.from('shift_events').insert({
+      shift_id: shiftId,
+      actor_user_id: actorUserId || shift.cleaner_user_id || null,
+      event_type: eventType,
+      payload: {
+        reason: reason || null,
+        planned: {
+          start_at: toIso(shift.original_start_at),
+          end_at: toIso(shift.original_end_at),
+        },
+        actual: { start_at: toIso(shift.start_at), end_at: toIso(shift.end_at) },
+      },
+    });
+
+    if (evErr) return { ok: false, message: evErr.message };
+    return { ok: true };
+  }
+
+  async function persistApproveShiftCompletion({ shiftId, shift, actorUserId }) {
+    if (!enabled || !sb || !isUuid(shiftId)) {
+      return { ok: true, skipped: true };
+    }
+
+    const { error: shiftErr } = await sb.from('shifts').update({
+      status: 'Utfört',
+      checked_in_at: toIso(shift.checked_in_at),
+      checked_out_at: null,
+      start_at: toIso(shift.start_at),
+      end_at: toIso(shift.end_at),
+      original_start_at: toIso(shift.original_start_at),
+      original_end_at: toIso(shift.original_end_at),
+      last_modified_by: actorUserId,
+    }).eq('id', shiftId);
+
+    if (shiftErr) {
+      console.error('[persist] approveShiftCompletion:', shiftErr.message);
+      return { ok: false, message: shiftErr.message };
+    }
+
+    const { error: evErr } = await sb.from('shift_events').insert({
+      shift_id: shiftId,
+      actor_user_id: actorUserId,
+      event_type: 'admin_approved_completion',
+      payload: {
+        planned: {
+          start_at: toIso(shift.original_start_at),
+          end_at: toIso(shift.original_end_at),
+        },
+        actual: { start_at: toIso(shift.start_at), end_at: toIso(shift.end_at) },
+      },
+    });
+
+    if (evErr) return { ok: false, message: evErr.message };
+    return { ok: true };
+  }
+
   function isoWeekdayFromDate(d) {
     return (d.getDay() + 6) % 7;
   }
@@ -1244,7 +1328,7 @@
     return { ok: true };
   }
 
-  async function persistAdjustTime({ shiftId, actorUserId, shift, wasSick }) {
+  async function persistAdjustTime({ shiftId, actorUserId, shift, wasSick, wasPendingReview }) {
     if (!enabled || !sb || !isUuid(shiftId)) {
       return { ok: true, skipped: true };
     }
@@ -1257,6 +1341,7 @@
       last_modified_by: actorUserId,
     };
     if (wasSick) update.status = 'Godkänt';
+    if (wasPendingReview) update.status = 'Utfört';
 
     const { error: shiftErr } = await sb.from('shifts').update(update).eq('id', shiftId);
     if (shiftErr) {
@@ -1509,6 +1594,8 @@
     cancelByCustomer: persistCancelByCustomer,
     checkIn: persistCheckIn,
     checkOut: persistCheckOut,
+    autoCompleteShift: persistAutoCompleteShift,
+    approveShiftCompletion: persistApproveShiftCompletion,
     createRecurringSchedule: persistCreateRecurringSchedule,
     deleteRecurringSchedule: persistDeleteRecurringSchedule,
     sendMessage: persistSendMessage,

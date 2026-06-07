@@ -24,6 +24,7 @@ const DIST_SRC = path.join(DIST, 'src');
 
 // JS-filer (ingen JSX) – laddas före mock.
 const JS_FILES = [
+  'shiftFinalization.js',
   'reporting.js',
   'reportExport.js',
 ];

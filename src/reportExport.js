@@ -119,13 +119,14 @@
       'Faktisk slut': r.actualEnd,
       'Planerade timmar': r.plannedHours,
       'Arbetade timmar': r.workedHours,
+      'Klarmarkering': r.completionNote || '—',
     }));
   }
 
   const SHIFT_DETAIL_HEADERS = [
     'Datum', 'Kund', 'Objekt', 'Städare', 'Status',
     'Planerad start', 'Planerad slut', 'Faktisk start', 'Faktisk slut',
-    'Planerade timmar', 'Arbetade timmar',
+    'Planerade timmar', 'Arbetade timmar', 'Klarmarkering',
   ];
 
   function adminReportToExport(adminReport) {
@@ -146,6 +147,7 @@
       { Mätvärde: 'Avbokade pass', Värde: summary.shiftCountCancelled },
       { Mätvärde: 'Borttagna pass', Värde: summary.shiftCountDeleted },
       { Mätvärde: 'Pausade (ledighet)', Värde: summary.shiftCountPaused },
+      { Mätvärde: 'Väntar admin-granskning', Värde: summary.shiftCountPendingReview },
       { Mätvärde: 'Avvikelser', Värde: summary.totalIncidents },
       { Mätvärde: 'Justerade tider', Värde: summary.totalTimeAdjusted },
       { Mätvärde: 'Sjukanmälan (händelser)', Värde: summary.totalSickReports },
@@ -155,6 +157,7 @@
     const sickRows = shiftDetailExportRows(adminReport.sickShifts || []);
     const deletedRows = shiftDetailExportRows(adminReport.deletedShifts || []);
     const cancelledRows = shiftDetailExportRows(adminReport.cancelledShifts || []);
+    const pendingRows = shiftDetailExportRows(adminReport.pendingReviewShifts || []);
 
     const sheets = [
       { name: 'Sammanfattning', headers: ['Mätvärde', 'Värde'], rows: summaryRows },
@@ -214,6 +217,11 @@
         name: 'Avbokade pass',
         headers: SHIFT_DETAIL_HEADERS,
         rows: cancelledRows,
+      },
+      {
+        name: 'Väntar granskning',
+        headers: SHIFT_DETAIL_HEADERS,
+        rows: pendingRows,
       },
     ];
 

@@ -868,13 +868,17 @@
 
     /* —— "Kräver din åtgärd" för admin —— */
     adminActionables() {
+      const pendingReviewStatus = window.ShiftFinalization?.PENDING_REVIEW_STATUS || 'Väntar granskning';
       const sick = state.shifts.filter(s => s.status === 'Sjukanmäld' && !s.sick_finalized_at);
       const openIncidents = state.incidents.filter(i => i.status === 'open');
       const todayShifts = state.shifts.filter(s => sameDay(s.start_at, new Date()) && s.status === 'Godkänt' && new Date(s.start_at) < new Date() && !s.checked_in_at);
+      const pendingReview = state.shifts
+        .filter(s => s.status === pendingReviewStatus)
+        .sort((a, b) => new Date(b.start_at) - new Date(a.start_at));
       const planned = state.shifts
         .filter(s => s.status === 'Planerat')
         .sort((a, b) => new Date(a.start_at) - new Date(b.start_at));
-      return { sick, openIncidents, todayShifts, planned };
+      return { sick, openIncidents, todayShifts, pendingReview, planned };
     },
 
     /* —— Förhandsvisning kundledighet —— */
@@ -1009,6 +1013,7 @@
       if (!s) return { error: 'NOT_FOUND' };
 
       const wasSick = s.status === 'Sjukanmäld';
+      const wasPendingReview = s.status === (window.ShiftFinalization?.PENDING_REVIEW_STATUS || 'Väntar granskning');
       const snapshot = {
         start_at: s.start_at,
         end_at: s.end_at,
@@ -1027,13 +1032,14 @@
       s.start_at = new Date(newStart);
       s.end_at = new Date(newEnd);
       if (wasSick) s.status = 'Godkänt';
+      if (wasPendingReview) s.status = 'Utfört';
       s.last_modified_by = actorUserId;
       state.shift_events.push({ id: id('se'), shift_id: shiftId, actor_user_id: actorUserId, event_type: 'time_adjusted', payload: { start_at: s.start_at, end_at: s.end_at }, created_at: new Date() });
       bump();
 
       const persist = window.dbPersist && window.dbPersist.adjustTime;
       if (persist) {
-        const r = await persist({ shiftId, actorUserId, shift: s, wasSick });
+        const r = await persist({ shiftId, actorUserId, shift: s, wasSick, wasPendingReview });
         if (!r.ok) {
           s.start_at = snapshot.start_at;
           s.end_at = snapshot.end_at;
@@ -1908,6 +1914,173 @@
         }
       }
 
+      return { ok: true };
+    },
+
+    /**
+     * Auto-klarmarkera passerade pass (Godkänt/Pågående) enligt ShiftFinalization-regler.
+     * @returns {{ finalized: number, shiftIds: string[] }}
+     */
+    finalizeEligibleShifts({ now = new Date(), actorUserId = null } = {}) {
+      const SF = window.ShiftFinalization;
+      if (!SF) return { finalized: 0, shiftIds: [] };
+
+      const finalizedIds = [];
+      state.shifts.forEach(s => {
+        const result = SF.evaluateShiftFinalization(s, now);
+        if (!result) return;
+
+        const snapshot = {
+          status: s.status,
+          start_at: s.start_at,
+          end_at: s.end_at,
+          original_start_at: s.original_start_at,
+          original_end_at: s.original_end_at,
+          checked_in_at: s.checked_in_at,
+          checked_out_at: s.checked_out_at,
+        };
+
+        s.status = result.status;
+        s.start_at = result.start_at instanceof Date ? result.start_at : new Date(result.start_at);
+        s.end_at = result.end_at instanceof Date ? result.end_at : new Date(result.end_at);
+        s.original_start_at = result.original_start_at
+          ? (result.original_start_at instanceof Date ? result.original_start_at : new Date(result.original_start_at))
+          : null;
+        s.original_end_at = result.original_end_at
+          ? (result.original_end_at instanceof Date ? result.original_end_at : new Date(result.original_end_at))
+          : null;
+        s.checked_in_at = result.checked_in_at
+          ? (result.checked_in_at instanceof Date ? result.checked_in_at : new Date(result.checked_in_at))
+          : null;
+        s.checked_out_at = null;
+        if (actorUserId) s.last_modified_by = actorUserId;
+
+        const eventId = id('se');
+        const eventType = SF.eventTypeForResult(result) || SF.AUTO_COMPLETE_EVENT;
+        state.shift_events.push({
+          id: eventId,
+          shift_id: s.id,
+          actor_user_id: actorUserId || s.cleaner_user_id || null,
+          event_type: eventType,
+          payload: {
+            reason: result.reason,
+            planned: {
+              start_at: snapshot.original_start_at || snapshot.start_at,
+              end_at: snapshot.original_end_at || snapshot.end_at,
+            },
+            actual: { start_at: s.start_at, end_at: s.end_at },
+          },
+          created_at: new Date(),
+        });
+        finalizedIds.push({ shiftId: s.id, shift: s, reason: result.reason, snapshot, eventId });
+      });
+
+      if (finalizedIds.length) bump();
+      return {
+        finalized: finalizedIds.length,
+        shiftIds: finalizedIds.map(x => x.shiftId),
+        items: finalizedIds,
+      };
+    },
+
+    async runShiftFinalization(actorUserId) {
+      const batch = db.finalizeEligibleShifts({ now: new Date(), actorUserId });
+      if (!batch.finalized) return batch;
+
+      const persist = window.dbPersist && window.dbPersist.autoCompleteShift;
+      if (!persist) return batch;
+
+      const errors = [];
+      for (const item of batch.items) {
+        const r = await persist({
+          shiftId: item.shiftId,
+          shift: item.shift,
+          actorUserId: actorUserId || item.shift.cleaner_user_id,
+          reason: item.reason,
+        });
+        if (!r.ok) {
+          errors.push({ shiftId: item.shiftId, message: r.message });
+          const s = db.shiftById(item.shiftId);
+          if (s) {
+            s.status = item.snapshot.status;
+            s.start_at = item.snapshot.start_at;
+            s.end_at = item.snapshot.end_at;
+            s.original_start_at = item.snapshot.original_start_at;
+            s.original_end_at = item.snapshot.original_end_at;
+            s.checked_in_at = item.snapshot.checked_in_at;
+            s.checked_out_at = item.snapshot.checked_out_at;
+          }
+          state.shift_events = state.shift_events.filter(e => e.id !== item.eventId);
+        }
+      }
+      if (errors.length) {
+        bump();
+        return { ...batch, errors, finalized: batch.finalized - errors.length };
+      }
+      return batch;
+    },
+
+    /** Godkänn pass som väntar på granskning (ingen incheckning) → Utfört med planerad tid. */
+    async approveShiftCompletion(shiftId, actorUserId) {
+      const s = db.shiftById(shiftId);
+      const pendingStatus = window.ShiftFinalization?.PENDING_REVIEW_STATUS || 'Väntar granskning';
+      if (!s || s.status !== pendingStatus) return { error: 'NOT_FOUND' };
+
+      const SF = window.ShiftFinalization;
+      const planned = SF ? SF.getPlannedTimes(s) : { start: s.start_at, end: s.end_at };
+
+      const snapshot = {
+        status: s.status,
+        start_at: s.start_at,
+        end_at: s.end_at,
+        original_start_at: s.original_start_at,
+        original_end_at: s.original_end_at,
+        last_modified_by: s.last_modified_by,
+        shift_eventsLen: state.shift_events.length,
+      };
+
+      s.status = 'Utfört';
+      s.start_at = planned.start instanceof Date ? planned.start : new Date(planned.start);
+      s.end_at = planned.end instanceof Date ? planned.end : new Date(planned.end);
+      s.last_modified_by = actorUserId;
+      state.shift_events.push({
+        id: id('se'),
+        shift_id: shiftId,
+        actor_user_id: actorUserId,
+        event_type: 'admin_approved_completion',
+        payload: {
+          planned: { start_at: s.original_start_at || planned.start, end_at: s.original_end_at || planned.end },
+          actual: { start_at: s.start_at, end_at: s.end_at },
+        },
+        created_at: new Date(),
+      });
+      bump();
+
+      const persist = window.dbPersist && window.dbPersist.approveShiftCompletion;
+      if (persist) {
+        const r = await persist({ shiftId, shift: s, actorUserId });
+        if (!r.ok) {
+          s.status = snapshot.status;
+          s.start_at = snapshot.start_at;
+          s.end_at = snapshot.end_at;
+          s.original_start_at = snapshot.original_start_at;
+          s.original_end_at = snapshot.original_end_at;
+          s.last_modified_by = snapshot.last_modified_by;
+          state.shift_events.length = snapshot.shift_eventsLen;
+          bump();
+          return { error: 'PERSIST_FAILED', message: r.message };
+        }
+      }
+
+      if (s.cleaner_user_id) {
+        pushNotification(s.cleaner_user_id, 'shift_approved', { shift_id: s.id, property_id: s.property_id, start_at: s.start_at });
+      }
+      const prop = db.propertyById(s.property_id);
+      const cust = state.customers.find(c => c.id === prop?.customer_id);
+      if (cust) {
+        pushNotification(cust.primary_contact_user_id, 'shift_approved', { shift_id: s.id, property_id: s.property_id, start_at: s.start_at });
+      }
+      bump();
       return { ok: true };
     },
 

@@ -133,6 +133,35 @@
     };
   }
 
+  function resolveCompletionNote(shift, shiftEvents) {
+    if (!shift) return '—';
+    const pendingStatus = window.ShiftFinalization?.PENDING_REVIEW_STATUS || 'Väntar granskning';
+    if (shift.status === pendingStatus) {
+      return 'Väntar admin-granskning (ingen incheckning)';
+    }
+    if (shift.status !== 'Utfört') return '—';
+    const SF = window.ShiftFinalization;
+    const events = (shiftEvents || [])
+      .filter(e => e.shift_id === shift.id && (
+        e.event_type === 'check_out'
+        || e.event_type === 'auto_completed'
+        || e.event_type === 'admin_approved_completion'
+        || e.event_type === 'pending_review'
+      ))
+      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    const latest = events[0];
+    if (!latest) return 'Utfört';
+    if (latest.event_type === 'admin_approved_completion') return 'Godkänd av admin';
+    if (latest.event_type === 'pending_review') return 'Väntar admin-granskning (ingen incheckning)';
+    if (latest.event_type === 'auto_completed') {
+      const reason = latest.payload?.reason;
+      if (SF && reason) return SF.completionNoteFromReason(reason) || 'Automatisk klarmarkering';
+      return 'Automatisk klarmarkering';
+    }
+    if (latest.event_type === 'check_out') return 'Manuell utcheckning';
+    return 'Utfört';
+  }
+
   function buildAdminReport(state, filters, opts = {}) {
     const shiftTimesFn = opts.shiftTimesFn || shiftTimes;
     const period = parsePeriod(filters);
@@ -153,6 +182,8 @@
     const deletedShifts = [];
     const cancelledShifts = [];
     const pausedShifts = [];
+    const pendingReviewShifts = [];
+    const pendingReviewStatus = window.ShiftFinalization?.PENDING_REVIEW_STATUS || 'Väntar granskning';
 
     let totalHours = 0;
     let totalPlannedHours = 0;
@@ -163,6 +194,7 @@
     let shiftCountCancelled = 0;
     let shiftCountDeleted = 0;
     let shiftCountPaused = 0;
+    let shiftCountPendingReview = 0;
     let shiftCountBooked = 0;
 
     function matchesScope(shift) {
@@ -211,6 +243,7 @@
         actualEnd: shift.status === 'Utfört' ? formatTimeShort(times.effective.end) : '—',
         plannedHours: planned.toFixed(2),
         workedHours: worked > 0 ? worked.toFixed(2) : '—',
+        completionNote: resolveCompletionNote(shift, state.shift_events),
       };
       shiftDetails.push(detail);
 
@@ -269,6 +302,11 @@
         shiftCountPaused += 1;
         pausedShifts.push(detail);
       }
+
+      if (shift.status === pendingReviewStatus) {
+        shiftCountPendingReview += 1;
+        pendingReviewShifts.push(detail);
+      }
     });
 
     totalHours = Math.round(totalHours * 100) / 100;
@@ -310,6 +348,7 @@
     deletedShifts.sort(sortByDate);
     cancelledShifts.sort(sortByDate);
     pausedShifts.sort(sortByDate);
+    pendingReviewShifts.sort(sortByDate);
 
     return {
       meta: {
@@ -331,6 +370,7 @@
         shiftCountCancelled,
         shiftCountDeleted,
         shiftCountPaused,
+        shiftCountPendingReview,
         totalIncidents,
         totalTimeAdjusted,
         totalSickReports,
@@ -346,6 +386,7 @@
       deletedShifts,
       cancelledShifts,
       pausedShifts,
+      pendingReviewShifts,
     };
   }
 
@@ -426,6 +467,7 @@
     shiftHours: shiftWorkedHours,
     shiftPlannedHours,
     shiftTimes,
+    resolveCompletionNote,
     buildAdminReport,
     buildCustomerReport,
     formatDateShort,
