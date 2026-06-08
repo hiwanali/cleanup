@@ -867,34 +867,18 @@
     },
 
     /* —— "Kräver din åtgärd" för admin —— */
-    shiftNeedsAdminReview(shift) {
-      const pendingStatus = 'Väntar granskning';
-      if (!shift) return false;
-      if (shift.status === pendingStatus) return true;
-      if (shift.status !== 'Utfört' || shift.checked_in_at || shift.checked_out_at) return false;
-      const events = state.shift_events.filter(e => e.shift_id === shift.id);
-      const flagged = events.some(e =>
-        e.event_type === 'pending_review'
-        || (e.event_type === 'auto_completed' && e.payload?.reason === 'auto_no_checkin'),
-      );
-      const approved = events.some(e =>
-        e.event_type === 'admin_approved_completion' || e.event_type === 'check_out',
-      );
-      return flagged && !approved;
+    shiftNeedsAdminReview() {
+      return false;
     },
 
     adminActionables() {
-      const pendingReviewStatus = 'Väntar granskning';
       const sick = state.shifts.filter(s => s.status === 'Sjukanmäld' && !s.sick_finalized_at);
       const openIncidents = state.incidents.filter(i => i.status === 'open');
       const todayShifts = state.shifts.filter(s => sameDay(s.start_at, new Date()) && s.status === 'Godkänt' && new Date(s.start_at) < new Date() && !s.checked_in_at);
-      const pendingReview = state.shifts
-        .filter(s => db.shiftNeedsAdminReview(s))
-        .sort((a, b) => new Date(b.start_at) - new Date(a.start_at));
       const planned = state.shifts
         .filter(s => s.status === 'Planerat')
         .sort((a, b) => new Date(a.start_at) - new Date(b.start_at));
-      return { sick, openIncidents, todayShifts, pendingReview, planned };
+      return { sick, openIncidents, todayShifts, planned };
     },
 
     /* —— Förhandsvisning kundledighet —— */

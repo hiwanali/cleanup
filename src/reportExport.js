@@ -147,7 +147,6 @@
       { Mätvärde: 'Avbokade pass', Värde: summary.shiftCountCancelled },
       { Mätvärde: 'Borttagna pass', Värde: summary.shiftCountDeleted },
       { Mätvärde: 'Pausade (ledighet)', Värde: summary.shiftCountPaused },
-      { Mätvärde: 'Väntar admin-granskning', Värde: summary.shiftCountPendingReview },
       { Mätvärde: 'Avvikelser', Värde: summary.totalIncidents },
       { Mätvärde: 'Justerade tider', Värde: summary.totalTimeAdjusted },
       { Mätvärde: 'Sjukanmälan (händelser)', Värde: summary.totalSickReports },
@@ -159,7 +158,6 @@
     const sickRows = shiftDetailExportRows(adminReport.sickShifts || []);
     const deletedRows = shiftDetailExportRows(adminReport.deletedShifts || []);
     const cancelledRows = shiftDetailExportRows(adminReport.cancelledShifts || []);
-    const pendingRows = shiftDetailExportRows(adminReport.pendingReviewShifts || []);
 
     const sheets = [
       { name: 'Sammanfattning', headers: ['Mätvärde', 'Värde'], rows: summaryRows },
@@ -219,11 +217,6 @@
         name: 'Avbokade pass',
         headers: SHIFT_DETAIL_HEADERS,
         rows: cancelledRows,
-      },
-      {
-        name: 'Väntar granskning',
-        headers: SHIFT_DETAIL_HEADERS,
-        rows: pendingRows,
       },
       {
         name: 'Statistik städare',

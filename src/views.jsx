@@ -395,29 +395,7 @@
     const canCheckOut = isOwnerCleaner && shift.status === 'Pågående';
     const canReportSick = isOwnerCleaner && ['Godkänt', 'Planerat'].includes(shift.status);
     const canCheckItems = isOwnerCleaner && ['Pågående', 'Utfört'].includes(shift.status);
-    const needsAdminReview = role === 'admin' && db.shiftNeedsAdminReview(shift);
-
     const [sickOpen, setSickOpen] = useState(false);
-    const [approveCompletionOpen, setApproveCompletionOpen] = useState(false);
-    const [approvingCompletion, setApprovingCompletion] = useState(false);
-
-    async function handleApproveCompletion(cleanerUserId) {
-      setApprovingCompletion(true);
-      try {
-        const r = await db.approveShiftCompletion(shift.id, session.userId, { cleanerUserId });
-        if (r?.ok) {
-          toast.success('Passet godkänt och registrerat som utfört.');
-          setApproveCompletionOpen(false);
-          onBack && onBack();
-        } else if (r?.error === 'PERSIST_FAILED') {
-          toast.error('Kunde inte spara – försök igen.');
-        } else {
-          toast.error('Passet kunde inte godkännas.');
-        }
-      } finally {
-        setApprovingCompletion(false);
-      }
-    }
 
     return (
       <div>
@@ -432,30 +410,6 @@
             </div>
           }
         />
-
-        {needsAdminReview && (
-          <Card padding="md" className="mb-4 border-amber-300 bg-amber-50">
-            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-              <div className="flex items-start gap-3">
-                <Icon name="eye" className="w-5 h-5 text-amber-700 mt-0.5 flex-shrink-0" />
-                <div>
-                  <h2 className="font-bold text-amber-900">Kräver admin-granskning</h2>
-                  <p className="text-sm text-amber-800/90 mt-1">
-                    Passet avslutades utan incheckning. Godkänn planerad tid, justera tid eller byt städare innan det räknas i lönerapporten.
-                  </p>
-                </div>
-              </div>
-              <div className="flex flex-wrap gap-2 flex-shrink-0">
-                <Button variant="primary" icon="check" disabled={approvingCompletion} onClick={() => setApproveCompletionOpen(true)}>
-                  Godkänn pass
-                </Button>
-                <Button variant="outline" icon="user-plus" onClick={() => setApproveCompletionOpen(true)}>
-                  Godkänn med annan städare
-                </Button>
-              </div>
-            </div>
-          </Card>
-        )}
 
         <div className="grid lg:grid-cols-3 gap-4">
           <div className="lg:col-span-2 space-y-4">
@@ -656,13 +610,6 @@
         </div>
 
         <SickReportModal open={sickOpen} onClose={() => setSickOpen(false)} shift={shift} session={session} onDone={() => onBack && onBack()} />
-        <ApproveCompletionModal
-          open={approveCompletionOpen}
-          onClose={() => { if (!approvingCompletion) setApproveCompletionOpen(false); }}
-          shift={shift}
-          acting={approvingCompletion}
-          onApprove={handleApproveCompletion}
-        />
       </div>
     );
   }
@@ -743,12 +690,11 @@
     const [adjustOpen, setAdjustOpen] = useState(false);
     const [sickOpen, setSickOpen] = useState(false);
     const [approveOpen, setApproveOpen] = useState(false);
-    const [approveCompletionOpen, setApproveCompletionOpen] = useState(false);
     const [declineOpen, setDeclineOpen] = useState(false);
     const [acting, setActing] = useState(false);
     const isSick = shift.status === 'Sjukanmäld';
     const isAwaitingApproval = shift.status === 'Planerat';
-    const needsReview = db.shiftNeedsAdminReview(shift);
+    const isCompleted = shift.status === 'Utfört';
     const isScheduled = shift.status === 'Godkänt';
     const isLive = shift.status === 'Pågående';
     const isBorttaget = shift.status === 'Borttaget';
@@ -853,64 +799,31 @@
       );
     }
 
-    if (needsReview) {
+    if (isCompleted) {
       const times = db.shiftTimes(shift);
-      const cleaner = db.userById(shift.cleaner_user_id);
+      const hasCheckInOut = shift.checked_in_at && shift.checked_out_at;
       return (
         <>
-          <Card padding="md" className="border-amber-300 bg-amber-50/80">
-            <div className="flex items-start gap-2 mb-3">
-              <Icon name="eye" className="w-4 h-4 text-amber-700 mt-0.5" />
-              <div>
-                <h3 className="font-bold text-amber-900">Åtgärder – granskning</h3>
-                <p className="text-[12px] text-amber-800/90 mt-0.5">
-                  Planerad tid: {formatRange(times.planned.start, times.planned.end)}.
-                  {cleaner ? ` Tilldelad: ${cleaner.name}.` : ' Ingen städare tilldelad.'}
-                </p>
-              </div>
-            </div>
+          <Card padding="md">
+            <h3 className="font-bold text-slate-900 mb-1">Utfört pass</h3>
+            <p className="text-xs text-slate-500 mb-3">
+              {hasCheckInOut
+                ? `Registrerad tid: ${formatRange(shift.checked_in_at, shift.checked_out_at)}.`
+                : `Klarmarkerad med planerad tid: ${formatRange(times.planned.start, times.planned.end)}.`}
+              {' '}Justera tid nedan om städaren missat incheckning eller utcheckning.
+            </p>
             <div className="space-y-2">
-              <Button variant="primary" icon="check" className="w-full justify-start" disabled={acting} onClick={() => setApproveCompletionOpen(true)}>
-                Godkänn pass (välj städare)
+              <Button variant="outline" icon="clock" className="w-full justify-start" onClick={() => setAdjustOpen(true)}>
+                Justera tid
               </Button>
               <Button variant="outline" icon="user-plus" className="w-full justify-start" onClick={() => setAssignOpen(true)}>
-                Byt städare (utan att godkänna än)
-              </Button>
-              <Button variant="outline" icon="clock" className="w-full justify-start" onClick={() => setAdjustOpen(true)}>
-                Justera tid och godkänn
-              </Button>
-              <Button variant="danger-ghost" icon="alert-circle" className="w-full justify-start" onClick={() => setSickOpen(true)}>
-                Sjukanmäl / markera som uteblivet
+                Byt städare
               </Button>
             </div>
           </Card>
           <AdminDeleteShiftSection shift={shift} session={session} onClose={onClose} />
           <AssignReplacementModal open={assignOpen} onClose={() => setAssignOpen(false)} shift={shift} session={session} onDone={onClose} />
           <AdjustShiftModal open={adjustOpen} onClose={() => setAdjustOpen(false)} shift={shift} session={session} onDone={onClose} />
-          <SickReportModal open={sickOpen} onClose={() => setSickOpen(false)} shift={shift} session={session} adminActor onDone={onClose} />
-          <ApproveCompletionModal
-            open={approveCompletionOpen}
-            onClose={() => { if (!acting) setApproveCompletionOpen(false); }}
-            shift={shift}
-            acting={acting}
-            onApprove={async (cleanerUserId) => {
-              setActing(true);
-              try {
-                const r = await db.approveShiftCompletion(shift.id, session.userId, { cleanerUserId });
-                if (r?.ok) {
-                  toast.success('Passet godkänt som utfört.');
-                  setApproveCompletionOpen(false);
-                  onClose && onClose();
-                } else if (r?.error === 'PERSIST_FAILED') {
-                  toast.error('Kunde inte spara – försök igen.');
-                } else {
-                  toast.error('Passet kunde inte godkännas.');
-                }
-              } finally {
-                setActing(false);
-              }
-            }}
-          />
         </>
       );
     }
@@ -1018,63 +931,6 @@
         </Card>
         <AdminDeleteShiftSection shift={shift} session={session} onClose={onClose} />
       </>
-    );
-  }
-
-  /* ============================================================
-   * ApproveCompletionModal – godkänn pass utan incheckning (välj städare)
-   * ============================================================ */
-  function ApproveCompletionModal({ open, onClose, shift, acting, onApprove }) {
-    const [cleanerId, setCleanerId] = useState('');
-    useEffect(() => {
-      if (open) setCleanerId(shift?.cleaner_user_id || '');
-    }, [open, shift?.id, shift?.cleaner_user_id]);
-    if (!open || !shift) return null;
-
-    const times = db.shiftTimes(shift);
-    const candidates = db.availableCleanersFor(shift.id)
-      .sort((a, b) => (a.conflict - b.conflict) || (b.inPool - a.inPool) || a.user.name.localeCompare(b.user.name, 'sv'));
-    const poolDefault = candidates.find(c => c.inPool)?.user.id || candidates[0]?.user.id || '';
-    const effectiveCleanerId = cleanerId || poolDefault;
-
-    return (
-      <Modal
-        open={open}
-        onClose={onClose}
-        title="Godkänn pass som utfört"
-        size="md"
-        footer={
-          <>
-            <Button variant="ghost" onClick={onClose} disabled={acting}>Avbryt</Button>
-            <Button
-              variant="primary"
-              icon="check"
-              disabled={acting || !effectiveCleanerId}
-              onClick={() => onApprove(effectiveCleanerId)}
-            >
-              {acting ? 'Godkänner…' : 'Godkänn med vald städare'}
-            </Button>
-          </>
-        }
-      >
-        <p className="text-sm text-slate-600 mb-4">
-          Passet registreras som <strong>Utfört</strong> med planerad tid{' '}
-          <strong>{formatRange(times.planned.start, times.planned.end)}</strong> och räknas i lönerapporten.
-        </p>
-        <Field label="Städare som utförde passet">
-          <Select value={effectiveCleanerId} onChange={e => setCleanerId(e.target.value)}>
-            <option value="">Välj städare…</option>
-            {candidates.map(c => (
-              <option key={c.user.id} value={c.user.id} disabled={c.conflict}>
-                {c.user.name}{c.inPool ? ' (i poolen)' : ''}{c.conflict ? ' – krock' : ''}
-              </option>
-            ))}
-          </Select>
-        </Field>
-        <p className="text-xs text-slate-500 mt-2">
-          Du kan välja en annan städare än den som var tilldelad från början.
-        </p>
-      </Modal>
     );
   }
 
@@ -5879,7 +5735,7 @@
   function AdminDashboardView({ session, onNavigate }) {
     const [createShiftOpen, setCreateShiftOpen] = useState(false);
     useDb();
-    const { sick, openIncidents, todayShifts, pendingReview, planned } = db.adminActionables();
+    const { sick, openIncidents, todayShifts, planned } = db.adminActionables();
     const totalCleaners = db.state.users.filter(u => u.role === 'cleaner' && u.active).length;
     const totalCustomers = db.state.customers.length;
     const todayAll = db.state.shifts.filter(s => formatDateShort(s.start_at) === formatDateShort(new Date()));
@@ -5910,25 +5766,12 @@
           Kräver din åtgärd
         </h2>
 
-        {sick.length === 0 && openIncidents.length === 0 && planned.length === 0 && pendingReview.length === 0 && todayShifts.length === 0 ? (
+        {sick.length === 0 && openIncidents.length === 0 && planned.length === 0 && todayShifts.length === 0 ? (
           <Card padding="lg">
             <EmptyState icon="check-circle" title="Allt är under kontroll" description="Inga väntande godkännanden, sjukanmälda pass eller öppna avvikelser just nu." />
           </Card>
         ) : (
           <div className="space-y-6">
-            {pendingReview.length > 0 && (
-              <section>
-                <h3 className="text-sm font-bold text-slate-700 mb-2 flex items-center gap-2">
-                  <Icon name="eye" className="w-4 h-4 text-amber-600" />
-                  Pass utan incheckning – granska <Badge variant="amber">{pendingReview.length}</Badge>
-                </h3>
-                <div className="grid md:grid-cols-2 gap-3">
-                  {pendingReview.map(s => (
-                    <ShiftCard key={s.id} shift={s} viewerRole="admin" viewerUserId={session.userId} onClick={() => onNavigate(`/admin/schema/${s.id}`)} />
-                  ))}
-                </div>
-              </section>
-            )}
             {todayShifts.length > 0 && (
               <section>
                 <h3 className="text-sm font-bold text-slate-700 mb-2 flex items-center gap-2">
@@ -6458,7 +6301,6 @@
       { id: 'deleted', label: 'Borttagna', rows: report?.deletedShifts || [] },
       { id: 'cancelled', label: 'Avbokade', rows: report?.cancelledShifts || [] },
       { id: 'paused', label: 'Pausade', rows: report?.pausedShifts || [] },
-      { id: 'pending', label: 'Väntar granskning', rows: report?.pendingReviewShifts || [] },
     ];
     const activeDetail = detailTabs.find(t => t.id === detailTab) || detailTabs[0];
 
@@ -6540,7 +6382,6 @@
               <Stat label="Borttagna pass" value={s.shiftCountDeleted} icon="trash" tone="slate" />
               <Stat label="Avbokade pass" value={s.shiftCountCancelled} icon="x" tone="slate" />
               <Stat label="Pausade (ledighet)" value={s.shiftCountPaused} icon="pause" tone="slate" />
-              <Stat label="Väntar granskning" value={s.shiftCountPendingReview} hint="Ej i arbetade timmar" icon="eye" tone="amber" />
             </div>
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
               <Stat label="Städarbyten" value={s.totalCleanerSwaps} hint="Alla byten i perioden" icon="refresh" tone="amber" />

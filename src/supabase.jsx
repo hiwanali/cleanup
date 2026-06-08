@@ -908,9 +908,7 @@
       return { ok: true, skipped: true };
     }
 
-    const eventType = shift.status === 'Väntar granskning'
-      ? 'pending_review'
-      : 'auto_completed';
+    const eventType = 'auto_completed';
 
     const { error: shiftErr } = await sb.from('shifts').update({
       status: shift.status,

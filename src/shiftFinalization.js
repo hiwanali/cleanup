@@ -24,9 +24,8 @@
     };
   }
 
-  function eventTypeForResult(result) {
-    if (!result) return null;
-    return result.reason === 'auto_no_checkin' ? PENDING_REVIEW_EVENT : AUTO_COMPLETE_EVENT;
+  function eventTypeForResult() {
+    return AUTO_COMPLETE_EVENT;
   }
 
   /**
@@ -56,7 +55,7 @@
 
     if (!checkedIn) {
       return {
-        status: PENDING_REVIEW_STATUS,
+        status: 'Utfört',
         start_at: planned.start,
         end_at: planned.end,
         original_start_at: shift.original_start_at ?? null,
@@ -98,7 +97,7 @@
   function completionNoteFromReason(reason) {
     switch (reason) {
       case 'auto_no_checkin':
-        return 'Väntar admin-granskning (ingen incheckning)';
+        return 'Automatisk klarmarkering (planerad tid, ingen incheckning)';
       case 'auto_after_end':
         return 'Auto-klarmarkerad (incheckning → planerad slut)';
       case 'abandoned_checkin_12h':
@@ -151,10 +150,10 @@
     assert('already Utfört → null', evaluateShiftFinalization(manual, d('2026-06-06T12:30:00')) === null);
 
     const noCheckin = evaluateShiftFinalization(base, d('2026-06-06T12:30:00'));
-    assert('no check-in → Väntar granskning', noCheckin?.status === PENDING_REVIEW_STATUS);
+    assert('no check-in → Utfört', noCheckin?.status === 'Utfört');
     assert('no check-in uses planned times', toMs(noCheckin?.start_at) === toMs(base.start_at) && toMs(noCheckin?.end_at) === toMs(base.end_at));
     assert('no check-in reason', noCheckin?.reason === 'auto_no_checkin');
-    assert('no check-in event', eventTypeForResult(noCheckin) === PENDING_REVIEW_EVENT);
+    assert('no check-in event', eventTypeForResult(noCheckin) === AUTO_COMPLETE_EVENT);
 
     assert('already Väntar granskning → null', evaluateShiftFinalization({ ...base, status: PENDING_REVIEW_STATUS }, d('2026-06-06T13:00:00')) === null);
 

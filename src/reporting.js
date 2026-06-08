@@ -186,34 +186,21 @@
 
   function resolveCompletionNote(shift, shiftEvents) {
     if (!shift) return '—';
-    const pendingStatus = window.ShiftFinalization?.PENDING_REVIEW_STATUS || 'Väntar granskning';
-    const events = shiftEvents || [];
-    const flagged = events.some(e =>
-      e.shift_id === shift.id && (
-        e.event_type === 'pending_review'
-        || (e.event_type === 'auto_completed' && e.payload?.reason === 'auto_no_checkin')
-      ),
-    );
-    const approved = events.some(e =>
-      e.shift_id === shift.id && (e.event_type === 'admin_approved_completion' || e.event_type === 'check_out'),
-    );
-    if (shift.status === pendingStatus || (shift.status === 'Utfört' && flagged && !approved)) {
-      return 'Väntar admin-granskning (ingen incheckning)';
-    }
     if (shift.status !== 'Utfört') return '—';
     const SF = window.ShiftFinalization;
+    const events = shiftEvents || [];
     const completionEvents = events
       .filter(e => e.shift_id === shift.id && (
         e.event_type === 'check_out'
         || e.event_type === 'auto_completed'
         || e.event_type === 'admin_approved_completion'
-        || e.event_type === 'pending_review'
+        || e.event_type === 'time_adjusted'
       ))
       .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
     const latest = completionEvents[0];
     if (!latest) return 'Utfört';
+    if (latest.event_type === 'time_adjusted') return 'Tid justerad av admin';
     if (latest.event_type === 'admin_approved_completion') return 'Godkänd av admin';
-    if (latest.event_type === 'pending_review') return 'Väntar admin-granskning (ingen incheckning)';
     if (latest.event_type === 'auto_completed') {
       const reason = latest.payload?.reason;
       if (SF && reason) return SF.completionNoteFromReason(reason) || 'Automatisk klarmarkering';
