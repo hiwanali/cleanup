@@ -3,7 +3,7 @@
  * Depends on: window.Icon (icons.jsx) and React/ReactDOM (CDN).
  */
 (function () {
-  const { useState, useEffect, useRef, useMemo, useCallback, useSyncExternalStore } = React;
+  const { useState, useEffect, useRef, useMemo, useCallback, useSyncExternalStore, useId } = React;
 
   /* ============================================================
    * Date / number helpers (sv-SE)
@@ -372,15 +372,29 @@
       >{children}</select>
     );
   }
-  function Checkbox({ label, checked, onChange, disabled, className = '' }) {
+  function Checkbox({ label, checked, onChange, disabled, className = '', id }) {
+    const autoId = useId();
+    const inputId = id || autoId;
     return (
-      <label className={cx('inline-flex items-start gap-2.5 cursor-pointer select-none', disabled && 'opacity-50 cursor-not-allowed', className)}>
+      <label
+        htmlFor={inputId}
+        className={cx('inline-flex items-center gap-2.5 cursor-pointer select-none', disabled && 'opacity-50 cursor-not-allowed', className)}
+      >
+        <input
+          id={inputId}
+          type="checkbox"
+          className="sr-only peer"
+          checked={!!checked}
+          disabled={disabled}
+          onChange={e => onChange && onChange(e.target.checked)}
+        />
         <span
           className={cx(
-            'mt-0.5 inline-flex items-center justify-center w-5 h-5 rounded-md border transition-colors flex-shrink-0',
-            checked ? 'bg-brand-600 border-brand-600 text-white' : 'bg-white border-slate-300 hover:border-brand-400',
+            'inline-flex items-center justify-center w-5 h-5 rounded-md border transition-colors flex-shrink-0',
+            checked ? 'bg-brand-600 border-brand-600 text-white' : 'bg-white border-slate-300 peer-focus-visible:ring-2 peer-focus-visible:ring-brand-400 peer-focus-visible:ring-offset-1',
+            !disabled && !checked && 'hover:border-brand-400',
           )}
-          onClick={() => !disabled && onChange && onChange(!checked)}
+          aria-hidden="true"
         >
           {checked && <Icon name="check" className="w-3.5 h-3.5" strokeWidth={3} />}
         </span>

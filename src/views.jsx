@@ -43,6 +43,17 @@
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
 
+    function handleRememberChange(next) {
+      setRememberMe(next);
+      if (next && email.trim()) saveRememberedLogin(email, true);
+      else saveRememberedLogin(email, false);
+    }
+
+    function handleEmailChange(next) {
+      setEmail(next);
+      if (rememberMe && next.trim()) saveRememberedLogin(next, true);
+    }
+
     async function submit(e) {
       e.preventDefault();
       if (!email.trim() || !password) return;
@@ -68,12 +79,21 @@
           <Card padding="lg">
             <form onSubmit={submit} className="space-y-4">
               <Field label="Mejl">
-                <Input type="email" value={email} autoComplete="username" placeholder="namn@foretag.se" onChange={e => setEmail(e.target.value)} />
+                <Input type="email" value={email} autoComplete="username" placeholder="namn@foretag.se" onChange={e => handleEmailChange(e.target.value)} />
               </Field>
               <Field label="Lösenord">
                 <Input type="password" value={password} autoComplete="current-password" placeholder="••••••••" onChange={e => setPassword(e.target.value)} />
               </Field>
-              <Checkbox checked={rememberMe} onChange={setRememberMe} label="Kom ihåg mig" />
+              <div className="rounded-xl border border-slate-200 bg-slate-50/80 px-3 py-2.5">
+                <Checkbox
+                  id="login-remember-me"
+                  checked={rememberMe}
+                  onChange={handleRememberChange}
+                  label="Kom ihåg mig"
+                  className="w-full"
+                />
+                <p className="text-xs text-slate-500 mt-1.5 ml-7">Sparar din mejladress på den här enheten.</p>
+              </div>
               {error && <p className="text-sm text-rose-600">{error}</p>}
               <Button type="submit" variant="primary" className="w-full" disabled={loading || !email.trim() || !password}>
                 {loading ? 'Loggar in …' : 'Logga in'}
