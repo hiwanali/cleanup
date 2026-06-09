@@ -809,7 +809,7 @@
       const text = (body || '').trim();
       if (!text) return { error: 'EMPTY' };
       const user = db.userById(createdByUserId);
-      if (!user || (user.role !== 'customer' && user.role !== 'customer_employee')) return { error: 'FORBIDDEN' };
+      if (!user || user.role !== 'customer') return { error: 'FORBIDDEN' };
       const prop = db.propertyById(propertyId);
       if (!prop) return { error: 'NO_PROPERTY' };
 
@@ -999,7 +999,10 @@
         }
       }
 
-      pushNotification(newCleanerId, 'assigned_shift', { shift_id: s.id, property_id: s.property_id, start_at: s.start_at });
+      if (newCleanerId) pushNotification(newCleanerId, 'assigned_shift', { shift_id: s.id, property_id: s.property_id, start_at: s.start_at });
+      if (oldCleanerId && oldCleanerId !== newCleanerId) {
+        pushNotification(oldCleanerId, 'unassigned_shift', { shift_id: s.id, property_id: s.property_id, start_at: s.start_at });
+      }
       const prop = db.propertyById(s.property_id);
       const cust = state.customers.find(c => c.id === prop.customer_id);
       if (cust) pushNotification(cust.primary_contact_user_id, 'cleaner_swapped', { shift_id: s.id, property_id: s.property_id, start_at: s.start_at });
@@ -1694,6 +1697,8 @@
 
     // Kund/kundanställd begär nytt pass (Planerat, utan städare – admin tilldelar vid godkännande)
     async createCustomerShiftRequest({ propertyId, startAt, endAt, actorUserId, notes = '' }) {
+      const actor = db.userById(actorUserId);
+      if (!actor || actor.role !== 'customer') return { error: 'FORBIDDEN' };
       const accessible = db.propertiesForUser(actorUserId);
       if (!accessible.some(p => p.id === propertyId)) return { error: 'FORBIDDEN' };
       const start_at = new Date(startAt);

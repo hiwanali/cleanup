@@ -73,6 +73,20 @@
       end = endOfDay(start);
       end.setDate(end.getDate() + 6);
       label = 'Denna vecka';
+    } else if (preset === 'last_week') {
+      const day = isoWeekdayMon0(now);
+      start = startOfDay(now);
+      start.setDate(start.getDate() - day - 7);
+      end = endOfDay(start);
+      end.setDate(end.getDate() + 6);
+      label = 'Förra veckan';
+    } else if (preset === 'next_week') {
+      const day = isoWeekdayMon0(now);
+      start = startOfDay(now);
+      start.setDate(start.getDate() - day + 7);
+      end = endOfDay(start);
+      end.setDate(end.getDate() + 6);
+      label = 'Nästa vecka';
     } else if (preset === 'this_month') {
       start = new Date(now.getFullYear(), now.getMonth(), 1);
       end = endOfDay(new Date(now.getFullYear(), now.getMonth() + 1, 0));
@@ -81,6 +95,10 @@
       start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
       end = endOfDay(new Date(now.getFullYear(), now.getMonth(), 0));
       label = 'Föregående månad';
+    } else if (preset === 'next_month') {
+      start = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+      end = endOfDay(new Date(now.getFullYear(), now.getMonth() + 2, 0));
+      label = 'Nästa månad';
     } else {
       start = from ? startOfDay(from) : startOfDay(now);
       end = to ? endOfDay(to) : endOfDay(now);

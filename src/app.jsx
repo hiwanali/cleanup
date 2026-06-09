@@ -259,6 +259,8 @@
           return { title: 'Pass sjukanmält', body: prop ? `${prop.name} · ${formatDateTime(n.payload.start_at)}` : '', icon: 'alert-circle', tone: 'amber' };
         case 'assigned_shift':
           return { title: 'Du har tilldelats ett pass', body: prop ? `${prop.name} · ${formatDateTime(n.payload.start_at)}` : '', icon: 'sparkles', tone: 'brand' };
+        case 'unassigned_shift':
+          return { title: 'Du togs bort från ett pass', body: prop ? `${prop.name} · ${formatDateTime(n.payload.start_at)}` : '', icon: 'user-x', tone: 'amber' };
         case 'cleaner_swapped':
           return { title: 'Städare ombokad', body: prop ? `${prop.name} · ${formatDateTime(n.payload.start_at)}` : '', icon: 'swap', tone: 'brand' };
         case 'time_adjusted':

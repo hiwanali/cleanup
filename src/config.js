@@ -1,7 +1,7 @@
-/* Manual config - används om Vercel env vars inte fungerar */
+/* Auto-genererad – redigera inte för hand. Värden kommer från miljövariabler. */
 (function () {
   window.__CLEANUP_CONFIG__ = {
-    url: 'https://bkmnlcdsbvpucpqmaycx.supabase.co',
-    anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJrbW5sY2RzYnZwdWNwcW1heWN4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAwMzIxNTMsImV4cCI6MjA5NTYwODE1M30.KI30f-J4OFjUTyGGlLKEX51XamjbuYRspMzvWZwFTcQ',
+    url: "https://bkmnlcdsbvpucpqmaycx.supabase.co",
+    anonKey: "sb_publishable_9aBjY9t3Xax797XuFINPNA_9aElZZgu",
   };
 })();
