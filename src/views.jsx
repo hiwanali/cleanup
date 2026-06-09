@@ -9,13 +9,43 @@
   const { useState, useMemo, useEffect } = React;
 
   /* ============================================================
-   * LOGIN (mock — auth kommer via Supabase senare)
+   * LOGIN (Supabase Auth)
    * ============================================================ */
-  function LoginView({ onLogin, onPasswordLogin }) {
-    if (window.SUPABASE_ENABLED) {
-      return <PasswordLoginView onPasswordLogin={onPasswordLogin} />;
+  function LoginView({ onPasswordLogin }) {
+    if (!window.SUPABASE_ENABLED) {
+      return <SupabaseConfigMissingView />;
     }
-    return <DevLoginView onLogin={onLogin} />;
+    return <PasswordLoginView onPasswordLogin={onPasswordLogin} />;
+  }
+
+  function SupabaseConfigMissingView() {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-brand-50 via-white to-accent-50 flex items-center justify-center p-4">
+        <div className="w-full max-w-md">
+          <div className="text-center mb-8">
+            <div className="inline-flex items-center gap-3 mb-3">
+              <BrandLogo size="lg" />
+              <h1 className="text-3xl font-extrabold tracking-tight text-slate-900">CleanUp</h1>
+            </div>
+          </div>
+          <Card padding="lg" className="border-amber-200 bg-amber-50/40">
+            <div className="flex items-start gap-3">
+              <Icon name="alert-circle" className="w-5 h-5 text-amber-700 mt-0.5 flex-shrink-0" />
+              <div>
+                <h2 className="font-bold text-amber-900 mb-1">Supabase är inte konfigurerat</h2>
+                <p className="text-sm text-amber-800/90">
+                  Appen kan inte ansluta till databasen. Sätt miljövariablerna{' '}
+                  <code className="text-xs bg-white/80 px-1 py-0.5 rounded">SUPABASE_URL</code> och{' '}
+                  <code className="text-xs bg-white/80 px-1 py-0.5 rounded">SUPABASE_ANON_KEY</code>{' '}
+                  (eller publishable key) i Vercel, eller kör lokalt:{' '}
+                  <code className="text-xs bg-white/80 px-1 py-0.5 rounded">node scripts/generate-config.js</code>
+                </p>
+              </div>
+            </div>
+          </Card>
+        </div>
+      </div>
+    );
   }
 
   const LOGIN_REMEMBER_KEY = 'cleanup_login_remember_v1';
@@ -100,73 +130,6 @@
               </Button>
             </form>
           </Card>
-        </div>
-      </div>
-    );
-  }
-
-  function DevLoginView({ onLogin }) {
-    const profiles = useMemo(() => {
-      // Snabb-login som visar separationsregeln tydligt
-      const u = db.state.users;
-      return [
-        { kind: 'role', userId: u.find(x => x.role === 'admin').id, label: 'Sara Lindqvist', sub: 'Admin · CleanUp', tone: 'brand', icon: 'shield' },
-        { kind: 'role', userId: u.find(x => x.name === 'Anna Berg').id, label: 'Anna Berg', sub: 'Städare · Acme + Lab', tone: 'accent', icon: 'sparkles' },
-        { kind: 'role', userId: u.find(x => x.name === 'David Nilsson').id, label: 'David Nilsson', sub: 'Städare · Acme + NorthCo', tone: 'accent', icon: 'sparkles' },
-        { kind: 'role', userId: u.find(x => x.name === 'Maria Karlsson').id, label: 'Maria Karlsson', sub: 'Städare · NorthCo + Lager', tone: 'accent', icon: 'sparkles' },
-        { kind: 'role', userId: u.find(x => x.name === 'Erik Holm').id, label: 'Erik Holm', sub: 'Kund · Acme AB (huvudkontakt)', tone: 'emerald', icon: 'briefcase' },
-        { kind: 'role', userId: u.find(x => x.name === 'Lisa Ek').id, label: 'Lisa Ek', sub: 'Kundanställd · Acme AB (endast Acme HQ)', tone: 'emerald', icon: 'user' },
-        { kind: 'role', userId: u.find(x => x.name === 'Per Sundberg').id, label: 'Per Sundberg', sub: 'Kund · NorthCo AB', tone: 'emerald', icon: 'briefcase' },
-      ];
-    }, []);
-
-    const toneClasses = {
-      brand: 'bg-brand-50 text-brand-700 border-brand-100',
-      accent: 'bg-accent-50 text-accent-700 border-accent-100',
-      emerald: 'bg-emerald-50 text-emerald-700 border-emerald-100',
-    };
-
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-brand-50 via-white to-accent-50 flex items-center justify-center p-4">
-        <div className="w-full max-w-4xl">
-          <div className="text-center mb-8">
-            <div className="inline-flex items-center gap-3 mb-3">
-              <BrandLogo size="lg" />
-              <h1 className="text-3xl font-extrabold tracking-tight text-slate-900">CleanUp</h1>
-            </div>
-            <p className="text-slate-600">Plattform för städ — admin, städare och kund.</p>
-          </div>
-
-          <Card padding="lg" className="mb-4">
-            <h2 className="text-lg font-bold text-slate-900 mb-1">Logga in (utvecklingsläge)</h2>
-            <p className="text-sm text-slate-500 mb-5">Auth kommer senare via Supabase. Välj profil för att se vyn för respektive roll.</p>
-            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {profiles.map(p => (
-                <button
-                  key={p.userId}
-                  onClick={() => onLogin(p.userId)}
-                  className={cx(
-                    'text-left p-4 rounded-2xl border-2 transition-all hover:shadow-md hover:-translate-y-0.5',
-                    'bg-white border-slate-200 hover:border-brand-300',
-                  )}
-                >
-                  <div className="flex items-start gap-3">
-                    <span className={cx('w-10 h-10 rounded-xl flex items-center justify-center border', toneClasses[p.tone])}>
-                      <Icon name={p.icon} className="w-5 h-5" />
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <p className="font-semibold text-slate-900 truncate">{p.label}</p>
-                      <p className="text-xs text-slate-500 mt-0.5">{p.sub}</p>
-                    </div>
-                  </div>
-                </button>
-              ))}
-            </div>
-          </Card>
-
-          <p className="text-center text-xs text-slate-400">
-            Roll-väljare i toppraden låter dig snabbt byta profil under utvecklingen.
-          </p>
         </div>
       </div>
     );
@@ -2449,7 +2412,6 @@
                 <option value="Planerat">Planerat</option>
                 <option value="Pågående">Pågående</option>
                 <option value="Utfört">Utfört</option>
-                <option value="Väntar granskning">Väntar granskning</option>
                 <option value="Sjukanmäld">Sjukanmäld</option>
                 <option value="Pausat (kundledighet)">Pausat (kundledighet)</option>
                 <option value="Avbokat">Avbokat</option>

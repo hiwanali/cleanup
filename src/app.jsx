@@ -207,7 +207,6 @@
     useDb();
     const unread = db.unreadCountForUser(session.userId);
     const [bellOpen, setBellOpen] = useState(false);
-    const [switchOpen, setSwitchOpen] = useState(false);
 
     return (
       <header className="sticky top-0 z-40 bg-white/90 backdrop-blur border-b border-slate-200">
@@ -223,17 +222,6 @@
           </div>
 
           <div className="flex items-center gap-1.5">
-            {!window.SUPABASE_ENABLED && (
-              <button
-                onClick={() => setSwitchOpen(true)}
-                className="hidden sm:inline-flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-xs font-semibold hover:bg-amber-100 transition-colors"
-                title="Endast under utveckling — försvinner med Supabase Auth"
-              >
-                <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
-                DEV · Byt profil
-              </button>
-            )}
-
             <button
               onClick={() => { setBellOpen(o => !o); }}
               className="relative w-9 h-9 rounded-lg text-slate-600 hover:bg-slate-100 flex items-center justify-center"
@@ -250,7 +238,6 @@
         </div>
 
         {bellOpen && <NotificationsDropdown session={session} onClose={() => setBellOpen(false)} />}
-        {switchOpen && <RoleSwitcherModal onClose={() => setSwitchOpen(false)} />}
       </header>
     );
   }
@@ -351,37 +338,6 @@
           )}
         </div>
       </div>
-    );
-  }
-
-  function RoleSwitcherModal({ onClose }) {
-    const users = db.state.users;
-    return (
-      <Modal open onClose={onClose} title="Byt profil (utvecklingsläge)" size="md">
-        <p className="text-sm text-slate-500 mb-4">
-          Endast under utveckling. När Supabase Auth läggs på försvinner det här valet och varje användare loggar in via mejl.
-        </p>
-        <div className="space-y-1.5">
-          {users.map(u => (
-            <button
-              key={u.id}
-              onClick={() => {
-                sessionStore.login(u.id);
-                router.navigate(defaultPathForRole(u.role));
-                onClose();
-              }}
-              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border border-slate-200 hover:border-brand-300 hover:bg-brand-50/40 transition-colors text-left"
-            >
-              <Avatar name={u.name} size="sm" />
-              <div className="flex-1 min-w-0">
-                <p className="font-semibold text-slate-900 text-sm truncate">{u.name}</p>
-                <p className="text-xs text-slate-500 truncate">{u.email}</p>
-              </div>
-              <Badge variant={u.role === 'admin' ? 'brand' : u.role === 'cleaner' ? 'accent' : 'emerald'}>{roleLabel(u.role)}</Badge>
-            </button>
-          ))}
-        </div>
-      </Modal>
     );
   }
 
@@ -487,6 +443,9 @@
   }
 
   async function handlePasswordLogin(email, password) {
+    if (!window.SUPABASE_ENABLED || !sb) {
+      return 'Supabase är inte konfigurerat. Kontakta administratören.';
+    }
     const { data, error } = await sb.auth.signInWithPassword({ email: email.trim(), password });
     if (error) {
       // Generiskt felmeddelande för säkerhet
@@ -507,7 +466,10 @@
     const [booting, setBooting] = useState(!!window.SUPABASE_ENABLED);
 
     useEffect(() => {
-      if (!window.SUPABASE_ENABLED) return;
+      if (!window.SUPABASE_ENABLED) {
+        sessionStore.logout();
+        return;
+      }
       let active = true;
       (async () => {
         try {
@@ -554,14 +516,7 @@
     if (!session) {
       return (
         <>
-          <LoginView
-            onLogin={userId => {
-              const user = db.userById(userId);
-              sessionStore.login(userId);
-              router.navigate(defaultPathForRole(user.role));
-            }}
-            onPasswordLogin={handlePasswordLogin}
-          />
+          <LoginView onPasswordLogin={handlePasswordLogin} />
           <TweaksPanel />
           <ToastContainer />
         </>

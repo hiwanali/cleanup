@@ -867,7 +867,7 @@
     },
 
     /* —— "Kräver din åtgärd" för admin —— */
-    shiftNeedsAdminReview() {
+    shiftNeedsAdminReview(_shift) {
       return false;
     },
 
