@@ -562,6 +562,12 @@
       return db.shiftTimes(shift).planned.start;
     },
 
+    canCleanerCheckOut(shift) {
+      const fn = window.ShiftFinalization?.canCleanerCheckOut;
+      if (fn) return fn(shift);
+      return !!(shift?.checked_in_at && !shift.checked_out_at && ['Pågående', 'Utfört'].includes(shift?.status));
+    },
+
     // Avvikelser
     incidents(opts = {}) {
       let list = [...state.incidents];
@@ -1755,7 +1761,10 @@
     async createOneOffShift({ propertyId, cleanerUserId, startAt, endAt, actorUserId, notes = '', status = 'Godkänt' }) {
       const start_at = new Date(startAt);
       const end_at = new Date(endAt);
-      const shiftStatus = status === 'Planerat' ? 'Planerat' : 'Godkänt';
+      const isHistorical = end_at.getTime() <= Date.now();
+      const shiftStatus = isHistorical
+        ? 'Utfört'
+        : (status === 'Planerat' ? 'Planerat' : 'Godkänt');
       const shift = {
         id: id('s'),
         property_id: propertyId,
@@ -1774,7 +1783,28 @@
       };
       state.shifts.push(shift);
       const shiftIndex = state.shifts.length - 1;
-      state.shift_events.push({ id: id('se'), shift_id: shift.id, actor_user_id: actorUserId, event_type: 'shift_created', payload: { source: 'one_off', status: shiftStatus }, created_at: new Date() });
+      state.shift_events.push({
+        id: id('se'),
+        shift_id: shift.id,
+        actor_user_id: actorUserId,
+        event_type: 'shift_created',
+        payload: { source: 'one_off', status: shiftStatus, historical: isHistorical },
+        created_at: new Date(),
+      });
+      if (isHistorical) {
+        state.shift_events.push({
+          id: id('se'),
+          shift_id: shift.id,
+          actor_user_id: actorUserId,
+          event_type: 'auto_completed',
+          payload: {
+            reason: 'admin_historical',
+            planned: { start_at, end_at },
+            actual: { start_at, end_at },
+          },
+          created_at: new Date(),
+        });
+      }
       bump();
 
       const persist = window.dbPersist && window.dbPersist.createOneOffShift;
@@ -1854,6 +1884,7 @@
     async checkOut(shiftId, cleanerUserId) {
       const s = db.shiftById(shiftId);
       if (!s) return { error: 'NOT_FOUND' };
+      if (!db.canCleanerCheckOut(s)) return { error: 'NOT_ELIGIBLE' };
 
       const snapshot = {
         checked_out_at: s.checked_out_at,
@@ -1870,20 +1901,13 @@
       s.checked_out_at = new Date();
       s.status = 'Utfört';
 
-      if (s.checked_in_at) {
-        const inT = new Date(s.checked_in_at).getTime();
-        const outT = new Date(s.checked_out_at).getTime();
-        const ps = new Date(plannedStart).getTime();
-        const pe = new Date(plannedEnd).getTime();
-        if (inT !== ps || outT !== pe) {
-          if (!s.original_start_at) {
-            s.original_start_at = s.start_at;
-            s.original_end_at = s.end_at;
-          }
-          s.start_at = s.checked_in_at;
-          s.end_at = s.checked_out_at;
-        }
+      if (!s.original_start_at) {
+        s.original_start_at = plannedStart;
+        s.original_end_at = plannedEnd;
       }
+      // Rapport: alltid faktisk incheckning → utcheckning (aldrig planerad start + incheckning).
+      s.start_at = s.checked_in_at;
+      s.end_at = s.checked_out_at;
 
       state.shift_events.push({
         id: id('se'),

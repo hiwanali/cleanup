@@ -375,7 +375,8 @@
     const pct = total === 0 ? 0 : Math.round((done / total) * 100);
 
     const canCheckIn = isOwnerCleaner && ['Godkänt', 'Planerat'].includes(shift.status);
-    const canCheckOut = isOwnerCleaner && shift.status === 'Pågående';
+    const canCheckOut = isOwnerCleaner && db.canCleanerCheckOut(shift);
+    const isLateCheckout = canCheckOut && shift.status === 'Utfört';
     const canReportSick = isOwnerCleaner && ['Godkänt', 'Planerat'].includes(shift.status);
     const canCheckItems = isOwnerCleaner && ['Pågående', 'Utfört'].includes(shift.status);
     const [sickOpen, setSickOpen] = useState(false);
@@ -402,10 +403,14 @@
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <p className="text-sm font-semibold text-slate-900">
-                      {canCheckIn ? 'Redo att börja' : 'Pågående pass'}
+                      {canCheckIn ? 'Redo att börja' : isLateCheckout ? 'Pass klarmarkerat' : 'Pågående pass'}
                     </p>
                     <p className="text-xs text-slate-500 mt-0.5">
-                      {canCheckIn ? 'Checka in när du är på plats för att starta passet.' : `Incheckad ${shift.checked_in_at ? formatTime(shift.checked_in_at) : ''}`}
+                      {canCheckIn
+                        ? 'Checka in när du är på plats för att starta passet.'
+                        : isLateCheckout
+                          ? `Incheckad ${shift.checked_in_at ? formatTime(shift.checked_in_at) : ''}. Checka ut för att spara faktisk sluttid i rapporten.`
+                          : `Incheckad ${shift.checked_in_at ? formatTime(shift.checked_in_at) : ''}`}
                     </p>
                   </div>
                   {canCheckIn && (
@@ -419,6 +424,7 @@
                     <Button variant="success" icon="check" onClick={async () => {
                       const r = await db.checkOut(shift.id, session.userId);
                       if (r?.ok) toast.success('Utcheckad. Tack för idag!');
+                      else if (r?.error === 'NOT_ELIGIBLE') toast.error('Passet kan inte checkas ut.');
                       else if (r?.error === 'PERSIST_FAILED') toast.error('Kunde inte spara – försök igen.');
                     }}>Checka ut</Button>
                   )}
@@ -2494,11 +2500,13 @@
 
     const validTime = startTime && endTime && startTime < endTime;
     const canSubmit = propertyId && cleanerId && date && validTime;
+    const endAtPreview = date && endTime && validTime ? combineDateTime(date, endTime) : null;
+    const isHistorical = endAtPreview ? new Date(endAtPreview).getTime() <= Date.now() : false;
 
     async function submit() {
       const startAt = combineDateTime(date, startTime);
       const endAt = combineDateTime(date, endTime);
-      const status = requiresApproval ? 'Planerat' : 'Godkänt';
+      const status = isHistorical ? 'Utfört' : (requiresApproval ? 'Planerat' : 'Godkänt');
       const r = await db.createOneOffShift({
         propertyId, cleanerUserId: cleanerId,
         startAt, endAt,
@@ -2511,9 +2519,11 @@
         return;
       }
       toast.success(
-        requiresApproval
-          ? 'Pass skapat som Planerat – godkänn det i dashboarden innan städare och kund meddelas.'
-          : 'Nytt pass skapat. Städare och kund notifieras.',
+        isHistorical
+          ? 'Historiskt pass registrerat som utfört och ingår i rapporten.'
+          : requiresApproval
+            ? 'Pass skapat som Planerat – godkänn det i dashboarden innan städare och kund meddelas.'
+            : 'Nytt pass skapat. Städare och kund notifieras.',
       );
       onClose();
     }
@@ -2559,18 +2569,24 @@
             <Input type="time" value={endTime} onChange={e => setEndTime(e.target.value)} />
           </Field>
         </div>
-        <label className="mt-4 flex items-start gap-2 cursor-pointer">
-          <input
-            type="checkbox"
-            className="mt-1 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
-            checked={requiresApproval}
-            onChange={e => setRequiresApproval(e.target.checked)}
-          />
-          <span className="text-sm text-slate-700">
-            <span className="font-medium text-slate-900">Kräver godkännande (Planerat)</span>
-            <span className="block text-xs text-slate-500 mt-0.5">Städare och kund meddelas först när du godkänner passet.</span>
-          </span>
-        </label>
+        {isHistorical ? (
+          <p className="mt-4 text-sm text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+            Pass i det förflutna registreras som <span className="font-medium text-slate-900">utfört</span> direkt och ingår i rapporten utan godkännande eller granskning.
+          </p>
+        ) : (
+          <label className="mt-4 flex items-start gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              className="mt-1 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+              checked={requiresApproval}
+              onChange={e => setRequiresApproval(e.target.checked)}
+            />
+            <span className="text-sm text-slate-700">
+              <span className="font-medium text-slate-900">Kräver godkännande (Planerat)</span>
+              <span className="block text-xs text-slate-500 mt-0.5">Städare och kund meddelas först när du godkänner passet.</span>
+            </span>
+          </label>
+        )}
         <div className="mt-3">
           <Field label="Interna anteckningar" hint="Visas för admin och städare.">
             <Textarea rows={2} value={notes} onChange={e => setNotes(e.target.value)} placeholder="T.ex. extrastädning efter event." />

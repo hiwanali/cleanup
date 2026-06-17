@@ -774,6 +774,7 @@
     }
 
     const cleanerId = isUuid(shift.cleaner_user_id) ? shift.cleaner_user_id : null;
+    const isHistorical = shift.status === 'Utfört';
     const { data, error } = await sb.from('shifts').insert({
       property_id: shift.property_id,
       cleaner_user_id: cleanerId,
@@ -792,12 +793,26 @@
 
     const shiftId = data.id;
 
-    const { error: evErr } = await sb.from('shift_events').insert({
+    const events = [{
       shift_id: shiftId,
       actor_user_id: actorUserId,
       event_type: 'shift_created',
-      payload: { source: 'one_off', status: shift.status },
-    });
+      payload: { source: 'one_off', status: shift.status, historical: isHistorical },
+    }];
+    if (isHistorical) {
+      events.push({
+        shift_id: shiftId,
+        actor_user_id: actorUserId,
+        event_type: 'auto_completed',
+        payload: {
+          reason: 'admin_historical',
+          planned: { start_at: toIso(shift.start_at), end_at: toIso(shift.end_at) },
+          actual: { start_at: toIso(shift.start_at), end_at: toIso(shift.end_at) },
+        },
+      });
+    }
+
+    const { error: evErr } = await sb.from('shift_events').insert(events);
 
     if (evErr) {
       return { ok: false, message: evErr.message };

@@ -28,6 +28,12 @@
     return AUTO_COMPLETE_EVENT;
   }
 
+  /** Städare kan checka ut medan passet pågår, eller efter auto-klarmarkering om utcheckning saknas. */
+  function canCleanerCheckOut(shift) {
+    if (!shift?.checked_in_at || shift.checked_out_at) return false;
+    return ['Pågående', 'Utfört'].includes(shift.status);
+  }
+
   /**
    * @returns {null | {
    *   status: string,
@@ -102,6 +108,8 @@
         return 'Auto-klarmarkerad (incheckning → planerad slut)';
       case 'abandoned_checkin_12h':
         return 'Auto-klarmarkerad (12 h utan utcheckning, planerad tid)';
+      case 'admin_historical':
+        return 'Registrerat retroaktivt av admin';
       default:
         return null;
     }
@@ -185,6 +193,19 @@
     assert('12h uses planned end', toMs(after12h?.end_at) === toMs(abandoned.end_at));
     assert('12h reason', after12h?.reason === 'abandoned_checkin_12h');
 
+    assert('can check out while Pågående', canCleanerCheckOut({ ...checkinOnly, checked_out_at: null }));
+    assert('can late check out after auto Utfört', canCleanerCheckOut({
+      ...checkinOnly,
+      status: 'Utfört',
+      start_at: checkinOnly.checked_in_at,
+      end_at: base.end_at,
+      original_start_at: base.start_at,
+      original_end_at: base.end_at,
+      checked_out_at: null,
+    }));
+    assert('cannot check out without check-in', !canCleanerCheckOut({ ...base, status: 'Utfört' }));
+    assert('cannot check out twice', !canCleanerCheckOut({ ...manual, status: 'Utfört' }));
+
     const failed = results.filter(r => !r.ok);
     if (failed.length) {
       console.error('[ShiftFinalization] Tests failed:', failed.map(f => f.name));
@@ -202,6 +223,7 @@
     TWELVE_HOURS_MS,
     getPlannedTimes,
     evaluateShiftFinalization,
+    canCleanerCheckOut,
     eventTypeForResult,
     completionNoteFromReason,
     completionNoteFromEventType,
