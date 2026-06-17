@@ -4684,19 +4684,24 @@
     useDb();
     const [createOpen, setCreateOpen] = useState(false);
     const [filter, setFilter] = useState('active');
+    const [query, setQuery] = useState('');
     const org = db.organizationForUser(session.userId);
     const allCleaners = db.cleanersForOrg(org?.id);
+    const q = query.trim().toLowerCase();
     const cleaners = allCleaners.filter(c => {
-      if (filter === 'active') return c.active;
-      if (filter === 'inactive') return !c.active;
-      return true;
+      if (filter === 'active' && !c.active) return false;
+      if (filter === 'inactive' && c.active) return false;
+      if (!q) return true;
+      return (c.name || '').toLowerCase().includes(q)
+        || (c.email || '').toLowerCase().includes(q)
+        || (c.phone || '').toLowerCase().includes(q);
     });
 
     return (
       <div>
         <PageHeader
           title="Städare"
-          subtitle={`${allCleaners.filter(c => c.active).length} aktiva · ${allCleaners.length} totalt`}
+          subtitle="Lista över städare, profiler och tilldelningar till objekt."
           actions={<Button variant="primary" icon="plus" onClick={() => setCreateOpen(true)}>Ny städare</Button>}
         />
         <AddCleanerModal
@@ -4705,71 +4710,102 @@
           session={session}
           onCreated={(id) => onNavigate(`/admin/stadare/${id}`)}
         />
-        <div className="flex gap-2 mb-4">
-          {[
-            { id: 'active', label: 'Aktiva' },
-            { id: 'inactive', label: 'Inaktiva' },
-            { id: 'all', label: 'Alla' },
-          ].map(f => (
-            <Button
-              key={f.id}
-              variant={filter === f.id ? 'primary' : 'outline'}
-              size="sm"
-              onClick={() => setFilter(f.id)}
-            >
-              {f.label}
-            </Button>
-          ))}
-        </div>
+
+        <Card padding="md" className="mb-4">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+            <div className="flex-1">
+              <Input
+                type="search"
+                value={query}
+                onChange={e => setQuery(e.target.value)}
+                placeholder="Sök namn, mejl eller telefon…"
+              />
+            </div>
+            <div className="flex gap-2 flex-wrap">
+              {[
+                { id: 'active', label: 'Aktiva' },
+                { id: 'inactive', label: 'Inaktiva' },
+                { id: 'all', label: 'Alla' },
+              ].map(f => (
+                <Button
+                  key={f.id}
+                  variant={filter === f.id ? 'primary' : 'outline'}
+                  size="sm"
+                  onClick={() => setFilter(f.id)}
+                >
+                  {f.label}
+                </Button>
+              ))}
+            </div>
+          </div>
+          <p className="text-xs text-slate-500 mt-3">
+            {allCleaners.filter(c => c.active).length} aktiva · {allCleaners.length} totalt
+          </p>
+        </Card>
+
         {cleaners.length === 0 ? (
           <Card padding="md">
             <EmptyState
               icon="users"
-              title={filter === 'inactive' ? 'Inga inaktiva städare' : 'Inga städare än'}
-              description="Lägg till städare som ska kunna logga in och se sina pass."
-              action={<Button icon="plus" onClick={() => setCreateOpen(true)}>Ny städare</Button>}
+              title={q ? 'Inga träffar' : filter === 'inactive' ? 'Inga inaktiva städare' : 'Inga städare än'}
+              description={q
+                ? 'Prova ett annat sökord.'
+                : 'Lägg till städare som ska kunna logga in och se sina pass.'}
+              action={!q && filter !== 'inactive' ? <Button icon="plus" onClick={() => setCreateOpen(true)}>Ny städare</Button> : null}
             />
           </Card>
         ) : (
-          <div className="grid md:grid-cols-2 gap-3">
-            {cleaners.map(c => {
-              const pool = db.propertyPoolForCleaner(c.id);
-              const upcoming = db.upcomingShiftsForCleaner(c.id).length;
-              return (
-                <button
-                  key={c.id}
-                  onClick={() => onNavigate(`/admin/stadare/${c.id}`)}
-                  className={cx(
-                    'text-left bg-white rounded-2xl border p-5 hover:border-brand-300 hover:shadow-sm transition-all',
-                    c.active ? 'border-slate-200' : 'border-slate-200 opacity-60',
-                  )}
-                >
-                  <div className="flex items-start gap-3">
-                    <Avatar size="md" name={c.name} />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <p className="font-bold text-slate-900">{c.name}</p>
-                        {!c.active && <Badge variant="slate">Inaktiv</Badge>}
-                      </div>
-                      <p className="text-xs text-slate-500 truncate">{c.email}</p>
-                      {c.phone && <p className="text-xs text-slate-400">{c.phone}</p>}
-                    </div>
-                    <Icon name="chevron-right" className="w-5 h-5 text-slate-300" />
-                  </div>
-                  <div className="mt-4 grid grid-cols-2 gap-2 text-center">
-                    <div className="bg-slate-50 rounded-lg py-2">
-                      <p className="text-xl font-extrabold text-slate-900">{pool.length}</p>
-                      <p className="text-[11px] uppercase text-slate-500">objekt</p>
-                    </div>
-                    <div className="bg-slate-50 rounded-lg py-2">
-                      <p className="text-xl font-extrabold text-slate-900">{upcoming}</p>
-                      <p className="text-[11px] uppercase text-slate-500">kommande pass</p>
-                    </div>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
+          <Card padding="none" className="overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+                    <th className="px-4 py-3 font-semibold">Städare</th>
+                    <th className="px-4 py-3 font-semibold hidden md:table-cell">Kontakt</th>
+                    <th className="px-4 py-3 font-semibold text-center">Objekt</th>
+                    <th className="px-4 py-3 font-semibold text-center">Kommande</th>
+                    <th className="px-4 py-3 font-semibold hidden sm:table-cell">Status</th>
+                    <th className="px-4 py-3 w-10" aria-label="Öppna" />
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {cleaners.map(c => {
+                    const pool = db.propertyPoolForCleaner(c.id);
+                    const upcoming = db.upcomingShiftsForCleaner(c.id).length;
+                    return (
+                      <tr
+                        key={c.id}
+                        onClick={() => onNavigate(`/admin/stadare/${c.id}`)}
+                        className="hover:bg-brand-50/40 cursor-pointer transition-colors"
+                      >
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-3">
+                            <Avatar size="sm" name={c.name} />
+                            <div className="min-w-0">
+                              <p className="font-semibold text-slate-900 truncate">{c.name}</p>
+                              <p className="text-xs text-slate-500 truncate md:hidden">{c.email}</p>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 hidden md:table-cell">
+                          <p className="text-slate-700 truncate">{c.email}</p>
+                          <p className="text-xs text-slate-400">{c.phone || '—'}</p>
+                        </td>
+                        <td className="px-4 py-3 text-center font-semibold text-slate-900">{pool.length}</td>
+                        <td className="px-4 py-3 text-center font-semibold text-slate-900">{upcoming}</td>
+                        <td className="px-4 py-3 hidden sm:table-cell">
+                          <Badge variant={c.active ? 'emerald' : 'slate'}>{c.active ? 'Aktiv' : 'Inaktiv'}</Badge>
+                        </td>
+                        <td className="px-4 py-3">
+                          <Icon name="chevron-right" className="w-4 h-4 text-slate-300" />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </Card>
         )}
       </div>
     );
@@ -6732,290 +6768,213 @@
     return <CustomerReportsMain session={session} />;
   }
 
-  function customerPropertyShiftSummary(propertyId) {
-    const isActive = s => !['Avbokat', 'Borttaget'].includes(s.status);
-    const all = db.shiftsForProperty(propertyId);
-    const upcoming = all.filter(s => new Date(s.end_at) >= Date.now() && isActive(s));
-    const next = upcoming.sort((a, b) => new Date(a.start_at) - new Date(b.start_at))[0] || null;
-    const lastDone = all
-      .filter(s => s.status === 'Utfört' && new Date(s.end_at) < Date.now())
-      .sort((a, b) => new Date(b.end_at) - new Date(a.end_at))[0] || null;
-    return { next, lastDone, upcomingCount: upcoming.length };
-  }
-
-  function checklistCompletionForShift(shiftId) {
-    const items = db.checklistForShift(shiftId);
-    const done = items.filter(i => i.done_at).length;
-    const total = items.length;
-    return { done, total, pct: total ? Math.round((done / total) * 100) : null };
-  }
-
-  function CustomerPropertyCard({ property, session, onNavigate }) {
-    useDb();
-    const { next, lastDone, upcomingCount } = customerPropertyShiftSummary(property.id);
-    const checklistCount = db.listChecklistTemplate(property.id, { includeInactive: false }).length;
-    const recurringCount = db.listRecurringSchedules(property.id).filter(r => r.active !== false).length;
-    const lastCompletion = lastDone ? checklistCompletionForShift(lastDone.id) : null;
-
-    return (
-      <Card
-        as="button"
-        type="button"
-        padding="md"
-        className="text-left w-full hover:border-brand-300 hover:shadow-sm transition-all cursor-pointer"
-        onClick={() => onNavigate(`/kund/objekt/${property.id}`)}
-      >
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0 flex-1">
-            <p className="font-semibold text-slate-900 truncate">{property.name}</p>
-            <p className="text-xs text-slate-500 mt-0.5 truncate">{property.address || 'Ingen adress angiven'}</p>
-            {property.area_sqm && (
-              <p className="text-[11px] text-slate-400 mt-1">{property.area_sqm} m²</p>
-            )}
-          </div>
-          <Icon name="building" className="w-5 h-5 text-slate-300 flex-shrink-0" />
-        </div>
-
-        <div className="mt-3 pt-3 border-t border-slate-100 grid grid-cols-2 gap-2 text-[11px]">
-          <div>
-            <span className="text-slate-500 block">Kommande</span>
-            <span className="font-semibold text-slate-800">{upcomingCount} pass</span>
-          </div>
-          <div>
-            <span className="text-slate-500 block">Städschema</span>
-            <span className="font-semibold text-slate-800">{checklistCount} punkter</span>
-          </div>
-        </div>
-
-        {next && (
-          <div className="mt-3 pt-3 border-t border-slate-100 text-xs text-slate-600 flex items-center gap-2 flex-wrap">
-            <Icon name="calendar" className="w-3.5 h-3.5 text-brand-500 flex-shrink-0" />
-            <span>
-              Nästa: <span className="font-medium text-slate-800">{relativeDay(next.start_at)} {formatRange(next.start_at, next.end_at)}</span>
-            </span>
-            <StatusBadge status={next.status} />
-          </div>
-        )}
-
-        {lastDone && (
-          <div className="mt-2 text-xs text-slate-500 flex items-center gap-2 flex-wrap">
-            <Icon name="check-circle" className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0" />
-            <span>
-              Senast utfört: {formatDateShort(lastDone.end_at)}
-              {lastCompletion?.pct != null && (
-                <span className="text-emerald-700 font-medium"> · {lastCompletion.pct}% av städschemat</span>
-              )}
-            </span>
-          </div>
-        )}
-
-        {recurringCount > 0 && !next && (
-          <p className="mt-2 text-[11px] text-slate-400">{recurringCount} återkommande {recurringCount === 1 ? 'schema' : 'scheman'}</p>
-        )}
-      </Card>
-    );
-  }
-
-  function CustomerChecklistReadonly({ propertyId }) {
-    useDb();
-    const items = db.listChecklistTemplate(propertyId, { includeInactive: false });
-    return (
-      <Card padding="md">
-        <div className="mb-4">
-          <h3 className="font-bold text-slate-900">Städschema</h3>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Det här är mallen som städaren följer vid varje pass. I pass-detaljen ser du vad som faktiskt utförts.
-          </p>
-        </div>
-        {items.length === 0 ? (
-          <EmptyState icon="list" title="Inget städschema upplagt" description="Kontakta CleanUp om ni vill lägga till checklistpunkter." className="py-6" />
-        ) : (
-          <ol className="space-y-2">
-            {items.map((it, idx) => (
-              <li key={it.id} className="flex items-start gap-3 p-3 rounded-xl bg-slate-50 border border-slate-100">
-                <span className="w-7 h-7 rounded-lg bg-white border border-slate-200 text-xs font-bold text-slate-500 flex items-center justify-center flex-shrink-0">
-                  {idx + 1}
-                </span>
-                <p className="text-sm text-slate-800 pt-0.5">{it.title}</p>
-              </li>
-            ))}
-          </ol>
-        )}
-      </Card>
-    );
-  }
-
-  function CustomerRecurringReadonly({ propertyId }) {
-    useDb();
-    const items = db.listRecurringSchedules(propertyId).filter(r => r.active !== false);
-    return (
-      <Card padding="md">
-        <div className="mb-4">
-          <h3 className="font-bold text-slate-900">Återkommande städning</h3>
-          <p className="text-xs text-slate-500 mt-0.5">Fasta tider som CleanUp planerar in automatiskt.</p>
-        </div>
-        {items.length === 0 ? (
-          <EmptyState icon="refresh" title="Inget återkommande schema" description="Pass bokas manuellt eller via förfrågan." className="py-6" />
-        ) : (
-          <ul className="divide-y divide-slate-100 -mx-2">
-            {items.map(rs => (
-              <li key={rs.id} className="px-2 py-3 flex items-center gap-3">
-                <span className="w-10 h-10 rounded-xl bg-brand-50 text-brand-700 text-xs font-bold flex items-center justify-center flex-shrink-0">
-                  {WEEKDAYS_SHORT[rs.weekday]}
-                </span>
-                <div className="min-w-0 flex-1">
-                  <p className="font-semibold text-slate-900 text-sm">
-                    {recurringScheduleTitle(rs)} · {rs.start_time}–{rs.end_time}
-                    {rs.label ? <span className="text-slate-500 font-normal"> · {rs.label}</span> : null}
-                  </p>
-                  {(rs.valid_from || rs.valid_to) && (
-                    <p className="text-[11px] text-slate-500 mt-0.5">
-                      Giltig {rs.valid_from ? formatDateShort(rs.valid_from) : '–'}
-                      {rs.valid_to ? ` → ${formatDateShort(rs.valid_to)}` : ' → tills vidare'}
-                    </p>
-                  )}
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </Card>
-    );
-  }
-
-  function PropertyStandingRequestsSection({ propertyId, session }) {
-    useDb();
-    const requests = db.standingRequestsForProperty(propertyId);
-    const canAdd = session.user.role === 'customer';
-    const [body, setBody] = useState('');
+  function CustomerPropertyFormModal({ open, onClose, session, property, onSaved }) {
+    const isEdit = !!property;
+    const [name, setName] = useState('');
+    const [address, setAddress] = useState('');
+    const [wishes, setWishes] = useState('');
+    const [notes, setNotes] = useState('');
+    const [error, setError] = useState('');
     const [saving, setSaving] = useState(false);
 
+    useEffect(() => {
+      if (!open) return;
+      setName(property?.name || '');
+      setAddress(property?.address || '');
+      setWishes(property ? db.standingWishesText(property.id) : '');
+      setNotes(property?.notes || '');
+      setError('');
+    }, [open, property?.id]);
+
     async function submit() {
-      const text = body.trim();
-      if (text.length < 3 || saving) return;
+      setError('');
       setSaving(true);
-      const r = await db.createShiftRequest({
-        propertyId,
-        shiftId: null,
-        scope: 'standing',
-        body: text,
-        createdByUserId: session.userId,
-      });
-      setSaving(false);
-      if (r?.ok) {
-        setBody('');
-        toast.success('Stående önskemål sparat.');
-      } else if (r?.error === 'PERSIST_FAILED') {
-        toast.error('Kunde inte spara – försök igen.');
-      } else if (r?.error === 'FORBIDDEN') {
-        toast.error('Du har inte behörighet att lägga till önskemål.');
+      try {
+        const payload = {
+          userId: session.userId,
+          name,
+          address,
+          notes,
+          wishes,
+        };
+        const r = isEdit
+          ? await db.updateCustomerProperty({ ...payload, propertyId: property.id })
+          : await db.createCustomerProperty(payload);
+
+        if (r?.ok) {
+          toast.success(isEdit ? 'Objektet uppdaterat.' : 'Objektet tillagt.');
+          onClose();
+          onSaved && onSaved(r.property?.id || property?.id);
+        } else if (r?.error === 'INVALID_NAME') {
+          setError('Namnet måste vara minst 2 tecken.');
+        } else if (r?.error === 'INVALID_ADDRESS') {
+          setError('Adressen måste vara minst 3 tecken.');
+        } else if (r?.error === 'FORBIDDEN') {
+          setError('Du har inte behörighet att spara objekt.');
+        } else if (r?.error === 'PERSIST_FAILED') {
+          setError('Kunde inte spara – försök igen.');
+        } else {
+          setError('Något gick fel – försök igen.');
+        }
+      } finally {
+        setSaving(false);
       }
     }
 
+    const valid = address.trim().length >= 3;
+
     return (
-      <Card padding="md">
-        <div className="mb-3">
-          <h3 className="font-bold text-slate-900">Stående önskemål</h3>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Gäller alla framtida pass på det här objektet tills ni tar bort dem.
-          </p>
-        </div>
-        {requests.length === 0 ? (
-          <EmptyState icon="message-square" title="Inga stående önskemål" description={canAdd ? 'Lägg till instruktioner som städaren ska följa löpande.' : 'Huvudkontakten kan lägga till önskemål här.'} className="py-6" />
-        ) : (
-          <ul className="space-y-2 mb-1">
-            {requests.map(r => (
-              <li key={r.id} className="flex items-start gap-3 p-3 rounded-xl bg-slate-50 border border-slate-100">
-                <div className="flex-1 min-w-0">
-                  <p className="text-[11px] text-slate-400 mb-1">{formatDateTime(r.created_at)}</p>
-                  <p className="text-sm text-slate-800 whitespace-pre-wrap break-words">{r.body}</p>
-                </div>
-                {canAdd && (
-                  <button
-                    onClick={async () => {
-                      const res = await db.deleteShiftRequest(r.id);
-                      if (res?.ok) toast.success('Önskemål borttaget.');
-                      else if (res?.error === 'PERSIST_FAILED') toast.error('Kunde inte ta bort – försök igen.');
-                    }}
-                    className="text-slate-400 hover:text-rose-600 p-1 rounded-lg flex-shrink-0"
-                    aria-label="Ta bort önskemål"
-                  >
-                    <Icon name="trash" className="w-4 h-4" />
-                  </button>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-        {canAdd && (
-          <div className="mt-4 pt-4 border-t border-slate-100">
-            <Field label="Nytt stående önskemål" hint="Minst 3 tecken.">
-              <Textarea
-                rows={2}
-                value={body}
-                onChange={e => setBody(e.target.value)}
-                placeholder="T.ex. Använd alltid den gröna moppen i konferensrummet."
-              />
-            </Field>
-            <Button variant="primary" icon="send" className="mt-2" disabled={body.trim().length < 3 || saving} onClick={submit}>
-              Lägg till
+      <Modal
+        open={open}
+        onClose={onClose}
+        title={isEdit ? 'Redigera objekt' : 'Lägg till objekt'}
+        size="md"
+        footer={
+          <>
+            <Button variant="ghost" onClick={onClose} disabled={saving}>Avbryt</Button>
+            <Button variant="primary" icon="check" disabled={!valid || saving} onClick={submit}>
+              {saving ? 'Sparar…' : isEdit ? 'Spara' : 'Lägg till'}
             </Button>
+          </>
+        }
+      >
+        <p className="text-xs text-slate-500 mb-4">
+          Fyll i adress och eventuella önskemål. CleanUp planerar städning utifrån detta.
+        </p>
+        <Field label="Namn (valfritt)" hint="Om tomt används adressen." className="mb-3">
+          <Input value={name} onChange={e => setName(e.target.value)} placeholder="T.ex. Huvudkontor" />
+        </Field>
+        <Field label="Adress *" className="mb-3">
+          <Input value={address} onChange={e => setAddress(e.target.value)} placeholder="Gatuadress, postort" />
+        </Field>
+        <Field label="Önskemål" hint="Instruktioner som gäller löpande vid städning." className="mb-3">
+          <Textarea rows={3} value={wishes} onChange={e => setWishes(e.target.value)} placeholder="T.ex. Använd alltid den gröna moppen i konferensrummet." />
+        </Field>
+        <Field label="Anteckningar" className="mb-1">
+          <Textarea rows={2} value={notes} onChange={e => setNotes(e.target.value)} placeholder="Övrig info till CleanUp." />
+        </Field>
+        {error && <p className="text-xs text-rose-600 mt-3">{error}</p>}
+      </Modal>
+    );
+  }
+
+  function CustomerPropertyCard({ property, session, onNavigate, onEdit }) {
+    useDb();
+    const wishes = db.standingWishesText(property.id);
+    const canEdit = session.user.role === 'customer';
+
+    return (
+      <Card padding="md" className="h-full flex flex-col">
+        <div className="flex items-start justify-between gap-3">
+          <button
+            type="button"
+            className="min-w-0 flex-1 text-left"
+            onClick={() => onNavigate(`/kund/objekt/${property.id}`)}
+          >
+            <p className="font-semibold text-slate-900 truncate">{property.name}</p>
+            <p className="text-xs text-slate-500 mt-0.5">{property.address || 'Ingen adress angiven'}</p>
+          </button>
+          <Icon name="building" className="w-5 h-5 text-slate-300 flex-shrink-0" />
+        </div>
+
+        {(wishes || property.notes) && (
+          <div className="mt-3 pt-3 border-t border-slate-100 space-y-2 text-xs text-slate-600 flex-1">
+            {wishes && (
+              <p><span className="font-semibold text-slate-700">Önskemål:</span> {wishes.length > 120 ? `${wishes.slice(0, 120)}…` : wishes}</p>
+            )}
+            {property.notes && (
+              <p><span className="font-semibold text-slate-700">Anteckningar:</span> {property.notes.length > 120 ? `${property.notes.slice(0, 120)}…` : property.notes}</p>
+            )}
           </div>
         )}
+
+        <div className="mt-4 flex gap-2">
+          <Button variant="outline" size="sm" className="flex-1" onClick={() => onNavigate(`/kund/objekt/${property.id}`)}>
+            Visa
+          </Button>
+          {canEdit && onEdit && (
+            <Button variant="ghost" size="sm" icon="edit" onClick={() => onEdit(property)}>
+              Redigera
+            </Button>
+          )}
+        </div>
       </Card>
     );
   }
 
   function CustomerPropertiesView({ session, onNavigate }) {
     useDb();
-    const [requestOpen, setRequestOpen] = useState(false);
+    const [formOpen, setFormOpen] = useState(false);
+    const [editProperty, setEditProperty] = useState(null);
     const props = db.propertiesForUser(session.userId).slice().sort((a, b) => a.name.localeCompare(b.name, 'sv'));
     const isEmployee = session.user.role === 'customer_employee';
-    const totalUpcoming = props.reduce((n, p) => n + customerPropertyShiftSummary(p.id).upcomingCount, 0);
+    const canEdit = session.user.role === 'customer';
+
+    function openCreate() {
+      setEditProperty(null);
+      setFormOpen(true);
+    }
+
+    function openEdit(property) {
+      setEditProperty(property);
+      setFormOpen(true);
+    }
 
     return (
       <div>
         <PageHeader
           title="Objekt"
           subtitle={isEmployee
-            ? 'Objekt du har läsåtkomst till – klicka för schema och historik.'
-            : 'Era lokaler – kommande pass, städschema och senaste utförda städning.'}
-          actions={
-            session.user.role === 'customer' ? (
-              <Button icon="plus" onClick={() => setRequestOpen(true)}>Begär städning</Button>
-            ) : null
-          }
+            ? 'Objekt du har läsåtkomst till.'
+            : 'Lägg till och hantera era lokaler med adress, önskemål och anteckningar.'}
+          actions={canEdit ? (
+            <Button icon="plus" onClick={openCreate}>Lägg till objekt</Button>
+          ) : null}
         />
 
-        {props.length > 0 && (
-          <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 mb-6">
-            <Stat label="Objekt" value={props.length} icon="building" tone="brand" />
-            <Stat label="Kommande pass" value={totalUpcoming} icon="calendar" tone="accent" />
-            {isEmployee && <Stat label="Åtkomst" value="Läsbehörighet" icon="eye" tone="slate" />}
-          </div>
-        )}
-
         {props.length === 0 ? (
-          <Card padding="lg"><EmptyState icon="building" title="Inga objekt" description="Kontakta admin om du saknar åtkomst." /></Card>
+          <Card padding="lg">
+            <EmptyState
+              icon="building"
+              title="Inga objekt än"
+              description={canEdit
+                ? 'Lägg till ert första objekt med adress och eventuella önskemål.'
+                : 'Huvudkontakten kan lägga till objekt här.'}
+              action={canEdit ? <Button icon="plus" onClick={openCreate}>Lägg till objekt</Button> : null}
+            />
+          </Card>
         ) : (
           <div className="grid md:grid-cols-2 gap-3">
             {props.map(p => (
-              <CustomerPropertyCard key={p.id} property={p} session={session} onNavigate={onNavigate} />
+              <CustomerPropertyCard
+                key={p.id}
+                property={p}
+                session={session}
+                onNavigate={onNavigate}
+                onEdit={canEdit ? openEdit : null}
+              />
             ))}
           </div>
         )}
-        <CustomerShiftRequestModal open={requestOpen} onClose={() => setRequestOpen(false)} session={session} />
+
+        <CustomerPropertyFormModal
+          open={formOpen}
+          onClose={() => setFormOpen(false)}
+          session={session}
+          property={editProperty}
+          onSaved={id => id && onNavigate(`/kund/objekt/${id}`)}
+        />
       </div>
     );
   }
 
   function CustomerPropertyView({ session, onNavigate, propertyId }) {
     useDb();
-    const [requestOpen, setRequestOpen] = useState(false);
-    const [tab, setTab] = useState('oversikt');
+    const [formOpen, setFormOpen] = useState(false);
     const allowed = db.propertiesForUser(session.userId).some(p => p.id === propertyId);
     const prop = db.propertyById(propertyId);
-    const isMainContact = session.user.role === 'customer';
+    const canEdit = session.user.role === 'customer';
+    const wishes = prop ? db.standingWishesText(propertyId) : '';
 
     if (!prop || !allowed) {
       return (
@@ -7026,112 +6985,39 @@
       );
     }
 
-    const shifts = db.shiftsForProperty(propertyId);
-    const isActive = s => !['Avbokat', 'Borttaget'].includes(s.status);
-    const upcoming = shifts.filter(s => new Date(s.end_at) >= Date.now() && isActive(s))
-      .sort((a, b) => new Date(a.start_at) - new Date(b.start_at));
-    const { lastDone } = customerPropertyShiftSummary(propertyId);
-    const lastCompletion = lastDone ? checklistCompletionForShift(lastDone.id) : null;
-    const checklistCount = db.listChecklistTemplate(propertyId, { includeInactive: false }).length;
-    const standingCount = db.standingRequestsForProperty(propertyId).length;
-
-    const tabs = [
-      { id: 'oversikt', label: 'Översikt', icon: 'home' },
-      { id: 'schema', label: 'Schema', icon: 'calendar', count: upcoming.length },
-      { id: 'stadschema', label: 'Städschema', icon: 'list', count: checklistCount },
-      { id: 'onskemal', label: 'Önskemål', icon: 'message-square', count: standingCount },
-    ];
-
     return (
       <div>
         <PageHeader
           breadcrumbs={[{ label: 'Objekt', href: '#/kund/objekt' }, { label: prop.name }]}
           title={prop.name}
-          subtitle={[prop.address, prop.area_sqm ? `${prop.area_sqm} m²` : null].filter(Boolean).join(' · ') || 'Ingen adress angiven'}
-          actions={
-            <div className="flex flex-wrap gap-2">
-              <Button variant="outline" icon="calendar" onClick={() => onNavigate('/kund/schema')}>Hela schemat</Button>
-              {isMainContact && (
-                <Button icon="plus" onClick={() => setRequestOpen(true)}>Begär städning</Button>
-              )}
-            </div>
-          }
+          subtitle={prop.address || 'Ingen adress angiven'}
+          actions={canEdit ? (
+            <Button icon="edit" onClick={() => setFormOpen(true)}>Redigera</Button>
+          ) : null}
         />
 
-        <Tabs tabs={tabs} value={tab} onChange={setTab} className="mb-5" />
+        <div className="grid md:grid-cols-2 gap-3">
+          <Card padding="md">
+            <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Adress</h3>
+            <p className="text-sm text-slate-800 whitespace-pre-wrap">{prop.address || '—'}</p>
+          </Card>
+          <Card padding="md">
+            <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Anteckningar</h3>
+            <p className="text-sm text-slate-800 whitespace-pre-wrap">{prop.notes || 'Inga anteckningar.'}</p>
+          </Card>
+        </div>
 
-        {tab === 'oversikt' && (
-          <div className="space-y-6">
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-              <Stat label="Kommande pass" value={upcoming.length} icon="calendar" tone="brand" />
-              <Stat label="Städschema" value={checklistCount} hint="Checklistpunkter" icon="list" tone="accent" />
-              <Stat label="Stående önskemål" value={standingCount} icon="message-square" tone="slate" />
-              {prop.area_sqm && <Stat label="Yta" value={`${prop.area_sqm} m²`} icon="building" tone="emerald" />}
-            </div>
+        <Card padding="md" className="mt-3">
+          <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Önskemål</h3>
+          <p className="text-sm text-slate-800 whitespace-pre-wrap">{wishes || 'Inga önskemål angivna.'}</p>
+        </Card>
 
-            <CustomerRecurringReadonly propertyId={propertyId} />
-
-            {lastDone && (
-              <Card padding="md">
-                <h3 className="font-bold text-slate-900 mb-3">Senaste utförda städning</h3>
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-semibold text-slate-900">{formatDateLong(lastDone.end_at)}</p>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      {formatRange(lastDone.start_at, lastDone.end_at)}
-                      {lastCompletion?.pct != null && (
-                        <span className="text-emerald-700 font-medium"> · {lastCompletion.done}/{lastCompletion.total} punkter ({lastCompletion.pct}%)</span>
-                      )}
-                    </p>
-                  </div>
-                  <Button variant="outline" size="sm" onClick={() => onNavigate(`/kund/pass/${lastDone.id}`)}>Visa pass</Button>
-                </div>
-              </Card>
-            )}
-
-            {upcoming.length > 0 && (
-              <section>
-                <h3 className="text-sm font-bold text-slate-700 mb-2">Nästa pass</h3>
-                <div className="grid md:grid-cols-2 gap-3">
-                  {upcoming.slice(0, 4).map(s => (
-                    <ShiftCard key={s.id} shift={s} viewerRole={session.user.role} viewerUserId={session.userId} onClick={() => onNavigate(`/kund/pass/${s.id}`)} />
-                  ))}
-                </div>
-                {upcoming.length > 4 && (
-                  <Button variant="ghost" size="sm" className="mt-3" onClick={() => setTab('schema')}>Visa alla {upcoming.length} pass</Button>
-                )}
-              </section>
-            )}
-          </div>
-        )}
-
-        {tab === 'schema' && (
-          <div className="space-y-6">
-            <ScheduleCalendar
-              shifts={shifts}
-              viewerRole={session.user.role}
-              onSelectShift={s => onNavigate(`/kund/pass/${s.id}`)}
-            />
-            <section>
-              <h3 className="text-lg font-bold text-slate-900 mb-3">Kommande pass</h3>
-              {upcoming.length === 0 ? (
-                <Card padding="md"><EmptyState icon="calendar" title="Inga kommande pass" description={isMainContact ? 'Begär städning om ni behöver ett nytt tillfälle.' : 'Kontakta huvudkontakten om ni behöver boka städning.'} /></Card>
-              ) : (
-                <div className="grid md:grid-cols-2 gap-3">
-                  {upcoming.map(s => (
-                    <ShiftCard key={s.id} shift={s} viewerRole={session.user.role} viewerUserId={session.userId} onClick={() => onNavigate(`/kund/pass/${s.id}`)} />
-                  ))}
-                </div>
-              )}
-            </section>
-          </div>
-        )}
-
-        {tab === 'stadschema' && <CustomerChecklistReadonly propertyId={propertyId} />}
-
-        {tab === 'onskemal' && <PropertyStandingRequestsSection propertyId={propertyId} session={session} />}
-
-        <CustomerShiftRequestModal open={requestOpen} onClose={() => setRequestOpen(false)} session={session} preselectPropertyId={propertyId} />
+        <CustomerPropertyFormModal
+          open={formOpen}
+          onClose={() => setFormOpen(false)}
+          session={session}
+          property={prop}
+        />
       </div>
     );
   }

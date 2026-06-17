@@ -2596,6 +2596,96 @@
       return { ok: true };
     },
 
+    standingWishesText(propertyId) {
+      return db.standingRequestsForProperty(propertyId).map(r => r.body).join('\n\n');
+    },
+
+    async setPropertyStandingWishes(propertyId, userId, text) {
+      const user = db.userById(userId);
+      if (!user || user.role !== 'customer') return { error: 'FORBIDDEN' };
+      if (!db.propertiesForUser(userId).some(p => p.id === propertyId)) return { error: 'FORBIDDEN' };
+
+      const trimmed = (text || '').trim();
+      const existing = db.standingRequestsForProperty(propertyId);
+      for (const r of existing) {
+        const del = await db.deleteShiftRequest(r.id);
+        if (del?.error) return del;
+      }
+      if (trimmed.length >= 3) {
+        return db.createShiftRequest({
+          propertyId,
+          shiftId: null,
+          scope: 'standing',
+          body: trimmed,
+          createdByUserId: userId,
+        });
+      }
+      return { ok: true };
+    },
+
+    async createCustomerProperty({ userId, name, address, notes = '', wishes = '' }) {
+      const user = db.userById(userId);
+      if (!user || user.role !== 'customer') return { error: 'FORBIDDEN' };
+      const customer = db.customerForUser(userId);
+      if (!customer) return { error: 'NOT_FOUND' };
+
+      const trimmedAddress = (address || '').trim();
+      if (trimmedAddress.length < 3) return { error: 'INVALID_ADDRESS' };
+
+      const trimmedName = (name || '').trim()
+        || trimmedAddress.split(',')[0].trim()
+        || trimmedAddress;
+      if (trimmedName.length < 2) return { error: 'INVALID_NAME' };
+
+      const r = await db.createProperty({
+        customerId: customer.id,
+        name: trimmedName,
+        address: trimmedAddress,
+        notes: (notes || '').trim(),
+      });
+      if (!r.ok) return r;
+
+      const wishText = (wishes || '').trim();
+      if (wishText.length >= 3) {
+        const wr = await db.createShiftRequest({
+          propertyId: r.property.id,
+          shiftId: null,
+          scope: 'standing',
+          body: wishText,
+          createdByUserId: userId,
+        });
+        if (wr?.error) return wr;
+      }
+
+      return r;
+    },
+
+    async updateCustomerProperty({ userId, propertyId, name, address, notes, wishes }) {
+      const user = db.userById(userId);
+      if (!user || user.role !== 'customer') return { error: 'FORBIDDEN' };
+      if (!db.propertiesForUser(userId).some(p => p.id === propertyId)) return { error: 'FORBIDDEN' };
+
+      const fields = {};
+      if (name !== undefined) fields.name = name;
+      if (address !== undefined) fields.address = address;
+      if (notes !== undefined) fields.notes = notes;
+
+      if (Object.keys(fields).length > 0) {
+        const trimmedAddress = fields.address != null ? (fields.address || '').trim() : null;
+        if (trimmedAddress != null && trimmedAddress.length < 3) return { error: 'INVALID_ADDRESS' };
+
+        const r = await db.updateProperty(propertyId, fields);
+        if (r?.error) return r;
+      }
+
+      if (wishes !== undefined) {
+        const wr = await db.setPropertyStandingWishes(propertyId, userId, wishes);
+        if (wr?.error) return wr;
+      }
+
+      return { ok: true, property: db.propertyById(propertyId) };
+    },
+
     countFutureShiftsForProperty(propertyId) {
       const now = Date.now();
       return state.shifts.filter(s =>
