@@ -568,6 +568,12 @@
       return !!(shift?.checked_in_at && !shift.checked_out_at && ['Pågående', 'Utfört'].includes(shift?.status));
     },
 
+    canCleanerCheckIn(shift, now = new Date()) {
+      const fn = window.ShiftFinalization?.canCleanerCheckIn;
+      if (fn) return fn(shift, now);
+      return !!(shift && !shift.checked_in_at && ['Godkänt', 'Planerat'].includes(shift.status));
+    },
+
     // Avvikelser
     incidents(opts = {}) {
       let list = [...state.incidents];
@@ -1016,7 +1022,7 @@
       return { ok: true };
     },
 
-    // §7.4 justera tid
+    // §7.4 justera tid (planerad)
     async adjustTime(shiftId, newStart, newEnd, actorUserId) {
       const s = db.shiftById(shiftId);
       if (!s) return { error: 'NOT_FOUND' };
@@ -1066,6 +1072,93 @@
       const prop = db.propertyById(s.property_id);
       const cust = state.customers.find(c => c.id === prop.customer_id);
       if (cust) pushNotification(cust.primary_contact_user_id, 'time_adjusted', { shift_id: s.id, property_id: s.property_id, start_at: s.start_at });
+      bump();
+      return { ok: true };
+    },
+
+    /** Admin justerar faktisk incheckning/utcheckning (t.ex. missad incheckning). */
+    async adjustWorkedTime(shiftId, { checkInAt, checkOutAt, actorUserId }) {
+      const s = db.shiftById(shiftId);
+      if (!s) return { error: 'NOT_FOUND' };
+
+      const checkIn = checkInAt ? new Date(checkInAt) : null;
+      const checkOut = checkOutAt ? new Date(checkOutAt) : null;
+      if (!checkIn) return { error: 'INVALID_TIME', message: 'Incheckningstid krävs.' };
+      if (checkOut && checkOut <= checkIn) {
+        return { error: 'INVALID_TIME', message: 'Utcheckning måste vara efter incheckning.' };
+      }
+
+      const snapshot = {
+        checked_in_at: s.checked_in_at,
+        checked_out_at: s.checked_out_at,
+        start_at: s.start_at,
+        end_at: s.end_at,
+        original_start_at: s.original_start_at,
+        original_end_at: s.original_end_at,
+        status: s.status,
+        last_modified_by: s.last_modified_by,
+        shift_eventsLen: state.shift_events.length,
+        notificationsLen: state.notifications.length,
+      };
+
+      if (!s.original_start_at) {
+        s.original_start_at = s.start_at;
+        s.original_end_at = s.end_at;
+      }
+
+      s.checked_in_at = checkIn;
+      s.checked_out_at = checkOut;
+      s.start_at = checkIn;
+      s.end_at = checkOut || checkIn;
+      s.status = checkOut ? 'Utfört' : 'Pågående';
+      s.last_modified_by = actorUserId;
+
+      state.shift_events.push({
+        id: id('se'),
+        shift_id: shiftId,
+        actor_user_id: actorUserId,
+        event_type: 'time_adjusted',
+        payload: {
+          kind: 'worked_time',
+          checked_in_at: checkIn,
+          checked_out_at: checkOut,
+          start_at: s.start_at,
+          end_at: s.end_at,
+        },
+        created_at: new Date(),
+      });
+      bump();
+
+      const persist = window.dbPersist && window.dbPersist.adjustWorkedTime;
+      if (persist) {
+        const r = await persist({ shiftId, actorUserId, shift: s });
+        if (!r.ok) {
+          s.checked_in_at = snapshot.checked_in_at;
+          s.checked_out_at = snapshot.checked_out_at;
+          s.start_at = snapshot.start_at;
+          s.end_at = snapshot.end_at;
+          s.original_start_at = snapshot.original_start_at;
+          s.original_end_at = snapshot.original_end_at;
+          s.status = snapshot.status;
+          s.last_modified_by = snapshot.last_modified_by;
+          state.shift_events.length = snapshot.shift_eventsLen;
+          bump();
+          return { error: 'PERSIST_FAILED', message: r.message };
+        }
+      }
+
+      if (s.cleaner_user_id) {
+        pushNotification(s.cleaner_user_id, 'time_adjusted', { shift_id: s.id, start_at: s.start_at, end_at: s.end_at });
+      }
+      const prop = db.propertyById(s.property_id);
+      const cust = state.customers.find(c => c.id === prop?.customer_id);
+      if (cust) {
+        pushNotification(cust.primary_contact_user_id, 'time_adjusted', {
+          shift_id: s.id,
+          property_id: s.property_id,
+          start_at: s.start_at,
+        });
+      }
       bump();
       return { ok: true };
     },
@@ -1847,14 +1940,32 @@
     async checkIn(shiftId, cleanerUserId) {
       const s = db.shiftById(shiftId);
       if (!s) return { error: 'NOT_FOUND' };
+      if (!db.canCleanerCheckIn(s)) return { error: 'NOT_ELIGIBLE' };
 
       const snapshot = {
         checked_in_at: s.checked_in_at,
         status: s.status,
+        start_at: s.start_at,
+        end_at: s.end_at,
+        original_start_at: s.original_start_at,
+        original_end_at: s.original_end_at,
         shift_eventsLen: state.shift_events.length,
       };
 
       const checkedInAt = new Date();
+      const wasAutoCompleted = s.status === 'Utfört' && !s.checked_in_at;
+      const SF = window.ShiftFinalization;
+      const lateSameDay = SF?.isLateSameDayCheckIn?.(s, checkedInAt);
+
+      if (wasAutoCompleted || lateSameDay) {
+        if (!s.original_start_at) {
+          s.original_start_at = s.start_at;
+          s.original_end_at = s.end_at;
+        }
+        s.start_at = checkedInAt;
+        s.end_at = checkedInAt;
+      }
+
       s.checked_in_at = checkedInAt;
       s.status = 'Pågående';
       state.shift_events.push({
@@ -1862,17 +1973,27 @@
         shift_id: shiftId,
         actor_user_id: cleanerUserId,
         event_type: 'check_in',
-        payload: {},
+        payload: { late_same_day: !!(wasAutoCompleted || lateSameDay) },
         created_at: new Date(),
       });
       bump();
 
       const persist = window.dbPersist && window.dbPersist.checkIn;
       if (persist) {
-        const r = await persist({ shiftId, cleanerUserId, checkedInAt });
+        const r = await persist({
+          shiftId,
+          cleanerUserId,
+          checkedInAt,
+          shift: s,
+          lateSameDay: !!(wasAutoCompleted || lateSameDay),
+        });
         if (!r.ok) {
           s.checked_in_at = snapshot.checked_in_at;
           s.status = snapshot.status;
+          s.start_at = snapshot.start_at;
+          s.end_at = snapshot.end_at;
+          s.original_start_at = snapshot.original_start_at;
+          s.original_end_at = snapshot.original_end_at;
           state.shift_events.length = snapshot.shift_eventsLen;
           bump();
           return { error: 'PERSIST_FAILED', message: r.message };

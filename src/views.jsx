@@ -374,7 +374,8 @@
     const total = checklist.length;
     const pct = total === 0 ? 0 : Math.round((done / total) * 100);
 
-    const canCheckIn = isOwnerCleaner && ['Godkänt', 'Planerat'].includes(shift.status);
+    const canCheckIn = isOwnerCleaner && db.canCleanerCheckIn(shift);
+    const isLateCheckIn = canCheckIn && shift.status === 'Utfört';
     const canCheckOut = isOwnerCleaner && db.canCleanerCheckOut(shift);
     const isLateCheckout = canCheckOut && shift.status === 'Utfört';
     const canReportSick = isOwnerCleaner && ['Godkänt', 'Planerat'].includes(shift.status);
@@ -403,11 +404,13 @@
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <p className="text-sm font-semibold text-slate-900">
-                      {canCheckIn ? 'Redo att börja' : isLateCheckout ? 'Pass klarmarkerat' : 'Pågående pass'}
+                      {canCheckIn ? (isLateCheckIn ? 'Sent incheckad samma dag' : 'Redo att börja') : isLateCheckout ? 'Pass klarmarkerat' : 'Pågående pass'}
                     </p>
                     <p className="text-xs text-slate-500 mt-0.5">
                       {canCheckIn
-                        ? 'Checka in när du är på plats för att starta passet.'
+                        ? (isLateCheckIn
+                          ? 'Passet klarmarkerades utan incheckning. Checka in nu – din faktiska tid gäller i rapporten.'
+                          : 'Checka in när du är på plats för att starta passet.')
                         : isLateCheckout
                           ? `Incheckad ${shift.checked_in_at ? formatTime(shift.checked_in_at) : ''}. Checka ut för att spara faktisk sluttid i rapporten.`
                           : `Incheckad ${shift.checked_in_at ? formatTime(shift.checked_in_at) : ''}`}
@@ -416,7 +419,8 @@
                   {canCheckIn && (
                     <Button variant="primary" icon="play" onClick={async () => {
                       const r = await db.checkIn(shift.id, session.userId);
-                      if (r?.ok) toast.success('Incheckad. Lycka till med passet!');
+                      if (r?.ok) toast.success(isLateCheckIn ? 'Incheckad. Din faktiska tid gäller i rapporten.' : 'Incheckad. Lycka till med passet!');
+                      else if (r?.error === 'NOT_ELIGIBLE') toast.error('Passet kan inte checkas in.');
                       else if (r?.error === 'PERSIST_FAILED') toast.error('Kunde inte spara – försök igen.');
                     }}>Checka in</Button>
                   )}
@@ -803,7 +807,7 @@
             </p>
             <div className="space-y-2">
               <Button variant="outline" icon="clock" className="w-full justify-start" onClick={() => setAdjustOpen(true)}>
-                Justera tid
+                Justera incheckning / utcheckning
               </Button>
               <Button variant="outline" icon="user-plus" className="w-full justify-start" onClick={() => setAssignOpen(true)}>
                 Byt städare
@@ -812,7 +816,7 @@
           </Card>
           <AdminDeleteShiftSection shift={shift} session={session} onClose={onClose} />
           <AssignReplacementModal open={assignOpen} onClose={() => setAssignOpen(false)} shift={shift} session={session} onDone={onClose} />
-          <AdjustShiftModal open={adjustOpen} onClose={() => setAdjustOpen(false)} shift={shift} session={session} onDone={onClose} />
+          <AdjustShiftModal open={adjustOpen} onClose={() => setAdjustOpen(false)} shift={shift} session={session} onDone={onClose} mode="worked" />
         </>
       );
     }
@@ -903,9 +907,18 @@
         <>
           <Card padding="md">
             <h3 className="font-bold text-slate-900 mb-1">Pågående pass</h3>
-            <p className="text-xs text-slate-500">Du kan följa städarens framsteg via checklistan.</p>
+            <p className="text-xs text-slate-500 mb-3">
+              {shift.checked_in_at
+                ? `Incheckad ${formatTime(shift.checked_in_at)}.`
+                : 'Städaren har inte checkat in ännu.'}
+              {' '}Du kan justera incheckning eller utcheckning om städaren missat.
+            </p>
+            <Button variant="outline" icon="clock" className="w-full justify-start" onClick={() => setAdjustOpen(true)}>
+              Justera incheckning / utcheckning
+            </Button>
           </Card>
           <AdminDeleteShiftSection shift={shift} session={session} onClose={onClose} />
+          <AdjustShiftModal open={adjustOpen} onClose={() => setAdjustOpen(false)} shift={shift} session={session} onDone={onClose} mode="worked" />
         </>
       );
     }
@@ -1069,10 +1082,16 @@
   /* ============================================================
    * AdjustShiftModal – §7.1 / §7.4 justera tid (+ valfri städar-byte)
    * ============================================================ */
-  function AdjustShiftModal({ open, onClose, shift, session, onDone }) {
+  function AdjustShiftModal({ open, onClose, shift, session, onDone, mode = 'schedule' }) {
+    const isWorkedMode = mode === 'worked' || ['Utfört', 'Pågående'].includes(shift.status);
+    const times = db.shiftTimes(shift);
     const [date, setDate] = useState('');
     const [start, setStart] = useState('');
     const [end, setEnd] = useState('');
+    const [checkInDate, setCheckInDate] = useState('');
+    const [checkInTime, setCheckInTime] = useState('');
+    const [checkOutDate, setCheckOutDate] = useState('');
+    const [checkOutTime, setCheckOutTime] = useState('');
     const [swapCleaner, setSwapCleaner] = useState(false);
     const [newCleanerId, setNewCleanerId] = useState('');
 
@@ -1081,6 +1100,12 @@
         setDate(toDateInput(shift.start_at));
         setStart(toTimeInput(shift.start_at));
         setEnd(toTimeInput(shift.end_at));
+        const checkInSource = shift.checked_in_at || shift.start_at;
+        const checkOutSource = shift.checked_out_at || (shift.status === 'Utfört' ? shift.end_at : '');
+        setCheckInDate(toDateInput(checkInSource));
+        setCheckInTime(toTimeInput(checkInSource));
+        setCheckOutDate(checkOutSource ? toDateInput(checkOutSource) : toDateInput(checkInSource));
+        setCheckOutTime(checkOutSource ? toTimeInput(checkOutSource) : '');
         setSwapCleaner(false);
         setNewCleanerId('');
       }
@@ -1090,71 +1115,125 @@
     const prop = db.propertyById(shift.property_id);
     const newStart = combineDateTime(date, start);
     const newEnd = combineDateTime(date, end);
-    const validTime = newEnd > newStart;
+    const validSchedule = newEnd > newStart;
+    const checkInAt = checkInDate && checkInTime ? combineDateTime(checkInDate, checkInTime) : null;
+    const checkOutAt = checkOutDate && checkOutTime ? combineDateTime(checkOutDate, checkOutTime) : null;
+    const validWorked = !!checkInAt && (!checkOutAt || new Date(checkOutAt) > new Date(checkInAt));
     const cleaners = db.state.users.filter(u => u.role === 'cleaner' && u.active);
 
     return (
       <Modal
         open={open}
         onClose={onClose}
-        title="Justera tiden"
+        title={isWorkedMode ? 'Justera incheckning / utcheckning' : 'Justera tiden'}
         size="sm"
         footer={
           <>
             <Button variant="ghost" onClick={onClose}>Avbryt</Button>
-            <Button variant="primary" icon="check" disabled={!validTime || (swapCleaner && !newCleanerId)} onClick={async () => {
-              const r = await db.adjustTime(shift.id, newStart, newEnd, session.userId);
-              if (r?.error) {
-                toast.error(r.message || 'Kunde inte justera tiden.');
-                return;
-              }
-              if (swapCleaner && newCleanerId) {
-                const r2 = await db.swapCleaner(shift.id, newCleanerId, session.userId);
-                if (r2?.error) {
-                  toast.error(r2.message || 'Tiden sparades men städarbytet misslyckades.');
+            <Button
+              variant="primary"
+              icon="check"
+              disabled={isWorkedMode ? !validWorked : (!validSchedule || (swapCleaner && !newCleanerId))}
+              onClick={async () => {
+                if (isWorkedMode) {
+                  const r = await db.adjustWorkedTime(shift.id, {
+                    checkInAt,
+                    checkOutAt: checkOutAt || null,
+                    actorUserId: session.userId,
+                  });
+                  if (r?.error) {
+                    toast.error(r.message || 'Kunde inte justera tiden.');
+                    return;
+                  }
+                  toast.success('Faktisk tid uppdaterad. Berörda parter notifierade.');
+                  onClose();
+                  onDone && onDone();
                   return;
                 }
-              }
-              toast.success('Tiden uppdaterad. Berörda parter notifierade.');
-              onClose();
-              onDone && onDone();
-            }}>Spara</Button>
+                const r = await db.adjustTime(shift.id, newStart, newEnd, session.userId);
+                if (r?.error) {
+                  toast.error(r.message || 'Kunde inte justera tiden.');
+                  return;
+                }
+                if (swapCleaner && newCleanerId) {
+                  const r2 = await db.swapCleaner(shift.id, newCleanerId, session.userId);
+                  if (r2?.error) {
+                    toast.error(r2.message || 'Tiden sparades men städarbytet misslyckades.');
+                    return;
+                  }
+                }
+                toast.success('Tiden uppdaterad. Berörda parter notifierade.');
+                onClose();
+                onDone && onDone();
+              }}
+            >
+              Spara
+            </Button>
           </>
         }
       >
         <p className="text-sm text-slate-700 mb-1"><span className="font-semibold">{prop?.name}</span></p>
-        <p className="text-xs text-slate-500 mb-4">Originaltiden sparas under historiken och kund + städare notifieras.</p>
 
-        <Field label="Datum">
-          <Input type="date" value={date} onChange={e => setDate(e.target.value)} />
-        </Field>
-        <div className="grid grid-cols-2 gap-3 mt-3">
-          <Field label="Starttid">
-            <Input type="time" value={start} onChange={e => setStart(e.target.value)} />
-          </Field>
-          <Field label="Sluttid">
-            <Input type="time" value={end} onChange={e => setEnd(e.target.value)} />
-          </Field>
-        </div>
-        {!validTime && (
-          <p className="text-xs text-rose-600 mt-2">Sluttiden måste ligga efter starttiden.</p>
-        )}
-
-        <div className="mt-4 pt-4 border-t border-slate-100">
-          <Checkbox checked={swapCleaner} onChange={setSwapCleaner} label="Byt även städare" />
-          {swapCleaner && (
-            <div className="mt-3">
-              <Select value={newCleanerId} onChange={e => setNewCleanerId(e.target.value)}>
-                <option value="">— välj städare —</option>
-                {cleaners.map(c => (
-                  <option key={c.id} value={c.id} disabled={c.id === shift.cleaner_user_id}>
-                    {c.name}{c.id === shift.cleaner_user_id ? ' (nuvarande)' : ''}
-                  </option>
-                ))}
-              </Select>
+        {isWorkedMode ? (
+          <>
+            <p className="text-xs text-slate-500 mb-4">
+              Planerad tid: {formatRange(times.planned.start, times.planned.end)}.
+              {' '}Ange städarens faktiska incheckning och utcheckning – det är den tiden som gäller i rapporten.
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Incheckning – datum" required>
+                <Input type="date" value={checkInDate} onChange={e => setCheckInDate(e.target.value)} />
+              </Field>
+              <Field label="Incheckning – tid" required>
+                <Input type="time" value={checkInTime} onChange={e => setCheckInTime(e.target.value)} />
+              </Field>
             </div>
-          )}
-        </div>
+            <div className="grid grid-cols-2 gap-3 mt-3">
+              <Field label="Utcheckning – datum" hint={shift.status === 'Pågående' ? 'Valfritt tills passet avslutas.' : 'Krävs för utfört pass.'}>
+                <Input type="date" value={checkOutDate} onChange={e => setCheckOutDate(e.target.value)} />
+              </Field>
+              <Field label="Utcheckning – tid">
+                <Input type="time" value={checkOutTime} onChange={e => setCheckOutTime(e.target.value)} />
+              </Field>
+            </div>
+            {!validWorked && (
+              <p className="text-xs text-rose-600 mt-2">Ange incheckning. Utcheckning måste ligga efter incheckning.</p>
+            )}
+          </>
+        ) : (
+          <>
+            <p className="text-xs text-slate-500 mb-4">Originaltiden sparas under historiken och kund + städare notifieras.</p>
+            <Field label="Datum">
+              <Input type="date" value={date} onChange={e => setDate(e.target.value)} />
+            </Field>
+            <div className="grid grid-cols-2 gap-3 mt-3">
+              <Field label="Starttid">
+                <Input type="time" value={start} onChange={e => setStart(e.target.value)} />
+              </Field>
+              <Field label="Sluttid">
+                <Input type="time" value={end} onChange={e => setEnd(e.target.value)} />
+              </Field>
+            </div>
+            {!validSchedule && (
+              <p className="text-xs text-rose-600 mt-2">Sluttiden måste ligga efter starttiden.</p>
+            )}
+            <div className="mt-4 pt-4 border-t border-slate-100">
+              <Checkbox checked={swapCleaner} onChange={setSwapCleaner} label="Byt även städare" />
+              {swapCleaner && (
+                <div className="mt-3">
+                  <Select value={newCleanerId} onChange={e => setNewCleanerId(e.target.value)}>
+                    <option value="">— välj städare —</option>
+                    {cleaners.map(c => (
+                      <option key={c.id} value={c.id} disabled={c.id === shift.cleaner_user_id}>
+                        {c.name}{c.id === shift.cleaner_user_id ? ' (nuvarande)' : ''}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+              )}
+            </div>
+          </>
+        )}
       </Modal>
     );
   }

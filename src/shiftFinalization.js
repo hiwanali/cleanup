@@ -24,6 +24,32 @@
     };
   }
 
+  function isSameCalendarDay(a, b) {
+    const da = new Date(a);
+    const db = new Date(b);
+    return da.getFullYear() === db.getFullYear()
+      && da.getMonth() === db.getMonth()
+      && da.getDate() === db.getDate();
+  }
+
+  function isLateSameDayCheckIn(shift, checkInAt) {
+    if (!shift || checkInAt == null) return false;
+    const planned = getPlannedTimes(shift);
+    const checkInMs = toMs(checkInAt);
+    const plannedEndMs = toMs(planned.end);
+    if (!Number.isFinite(checkInMs) || !Number.isFinite(plannedEndMs)) return false;
+    return checkInMs > plannedEndMs && isSameCalendarDay(checkInAt, planned.end);
+  }
+
+  /** Städare kan checka in på Godkänt/Planerat, eller sent samma dag på auto-klarmarkerat pass. */
+  function canCleanerCheckIn(shift, now = new Date()) {
+    if (!shift || shift.checked_in_at) return false;
+    if (['Godkänt', 'Planerat'].includes(shift.status)) return true;
+    if (shift.status !== 'Utfört') return false;
+    const plannedEndMs = toMs(getPlannedTimes(shift).end);
+    return isSameCalendarDay(shift.start_at, now) && Number.isFinite(plannedEndMs) && toMs(now) > plannedEndMs;
+  }
+
   function eventTypeForResult() {
     return AUTO_COMPLETE_EVENT;
   }
@@ -58,6 +84,10 @@
     if (!Number.isFinite(plannedEndMs) || nowMs <= plannedEndMs) return null;
 
     const checkedIn = shift.checked_in_at;
+
+    if (checkedIn && isLateSameDayCheckIn(shift, checkedIn)) {
+      return null;
+    }
 
     if (!checkedIn) {
       return {
@@ -206,6 +236,21 @@
     assert('cannot check out without check-in', !canCleanerCheckOut({ ...base, status: 'Utfört' }));
     assert('cannot check out twice', !canCleanerCheckOut({ ...manual, status: 'Utfört' }));
 
+    assert('can check in on Godkänt', canCleanerCheckIn({ ...base, status: 'Godkänt' }, d('2026-06-06T11:00:00')));
+    assert('can late check in same day on auto Utfört', canCleanerCheckIn({
+      ...base,
+      status: 'Utfört',
+      start_at: base.start_at,
+      end_at: base.end_at,
+    }, d('2026-06-06T12:30:00')));
+    const lateCheckinOnly = {
+      ...base,
+      status: 'Pågående',
+      checked_in_at: d('2026-06-06T12:30:00'),
+    };
+    assert('late same day check-in skips finalize until checkout', evaluateShiftFinalization(lateCheckinOnly, d('2026-06-06T12:35:00')) === null);
+    assert('isLateSameDayCheckIn', isLateSameDayCheckIn(lateCheckinOnly, d('2026-06-06T12:30:00')));
+
     const failed = results.filter(r => !r.ok);
     if (failed.length) {
       console.error('[ShiftFinalization] Tests failed:', failed.map(f => f.name));
@@ -222,6 +267,9 @@
     PENDING_REVIEW_EVENT,
     TWELVE_HOURS_MS,
     getPlannedTimes,
+    isSameCalendarDay,
+    isLateSameDayCheckIn,
+    canCleanerCheckIn,
     evaluateShiftFinalization,
     canCleanerCheckOut,
     eventTypeForResult,

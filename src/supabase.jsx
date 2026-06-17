@@ -853,16 +853,24 @@
     return { ok: true };
   }
 
-  async function persistCheckIn({ shiftId, cleanerUserId, checkedInAt }) {
+  async function persistCheckIn({ shiftId, cleanerUserId, checkedInAt, shift, lateSameDay }) {
     if (!enabled || !sb || !isUuid(shiftId)) {
       return { ok: true, skipped: true };
     }
 
-    const { error: shiftErr } = await sb.from('shifts').update({
+    const update = {
       status: 'Pågående',
       checked_in_at: toIso(checkedInAt),
       last_modified_by: cleanerUserId,
-    }).eq('id', shiftId);
+    };
+    if (lateSameDay && shift) {
+      update.start_at = toIso(shift.start_at);
+      update.end_at = toIso(shift.end_at);
+      update.original_start_at = shift.original_start_at ? toIso(shift.original_start_at) : null;
+      update.original_end_at = shift.original_end_at ? toIso(shift.original_end_at) : null;
+    }
+
+    const { error: shiftErr } = await sb.from('shifts').update(update).eq('id', shiftId);
 
     if (shiftErr) {
       console.error('[persist] checkIn:', shiftErr.message);
@@ -873,7 +881,7 @@
       shift_id: shiftId,
       actor_user_id: cleanerUserId,
       event_type: 'check_in',
-      payload: {},
+      payload: { late_same_day: !!lateSameDay },
     });
 
     if (evErr) return { ok: false, message: evErr.message };
@@ -1374,6 +1382,44 @@
     return { ok: true };
   }
 
+  async function persistAdjustWorkedTime({ shiftId, actorUserId, shift }) {
+    if (!enabled || !sb || !isUuid(shiftId)) {
+      return { ok: true, skipped: true };
+    }
+
+    const { error: shiftErr } = await sb.from('shifts').update({
+      status: shift.status,
+      checked_in_at: toIso(shift.checked_in_at),
+      checked_out_at: shift.checked_out_at ? toIso(shift.checked_out_at) : null,
+      start_at: toIso(shift.start_at),
+      end_at: toIso(shift.end_at),
+      original_start_at: shift.original_start_at ? toIso(shift.original_start_at) : null,
+      original_end_at: shift.original_end_at ? toIso(shift.original_end_at) : null,
+      last_modified_by: actorUserId,
+    }).eq('id', shiftId);
+
+    if (shiftErr) {
+      console.error('[persist] adjustWorkedTime:', shiftErr.message);
+      return { ok: false, message: shiftErr.message };
+    }
+
+    const { error: evErr } = await sb.from('shift_events').insert({
+      shift_id: shiftId,
+      actor_user_id: actorUserId,
+      event_type: 'time_adjusted',
+      payload: {
+        kind: 'worked_time',
+        checked_in_at: toIso(shift.checked_in_at),
+        checked_out_at: shift.checked_out_at ? toIso(shift.checked_out_at) : null,
+        start_at: toIso(shift.start_at),
+        end_at: toIso(shift.end_at),
+      },
+    });
+
+    if (evErr) return { ok: false, message: evErr.message };
+    return { ok: true };
+  }
+
   async function persistMarkSickAsFinal({ shiftId, adminUserId }) {
     if (!enabled || !sb || !isUuid(shiftId)) {
       return { ok: true, skipped: true };
@@ -1697,6 +1743,7 @@
     reportSick: persistReportSick,
     swapCleaner: persistSwapCleaner,
     adjustTime: persistAdjustTime,
+    adjustWorkedTime: persistAdjustWorkedTime,
     markSickAsFinal: persistMarkSickAsFinal,
     createHoliday: persistCreateHoliday,
     deleteHoliday: persistDeleteHoliday,
