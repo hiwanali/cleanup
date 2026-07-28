@@ -435,8 +435,14 @@
 
             <Card padding="md" className="h-fit">
               <p className="text-xs font-semibold uppercase text-slate-500">Uppskattat pris</p>
-              <p className="mt-2 text-3xl font-extrabold text-slate-900">{estimatedPrice.toLocaleString('sv-SE')} kr</p>
-              <p className="mt-1 text-xs text-slate-500">Prisförslag ink. RUT-avdrag. Slutligt upplägg och pris bekräftas efter genomgång.</p>
+              <p className="mt-2 text-3xl font-extrabold text-slate-900">
+                {estimatedPrice.toLocaleString('sv-SE')} kr{form.serviceType === 'standard_cleaning' ? ' per tillfälle' : ''}
+              </p>
+              <p className="mt-1 text-xs text-slate-500">
+                {form.serviceType === 'standard_cleaning'
+                  ? 'Preliminär beräkning ink. RUT-avdrag per städtillfälle. Slutligt upplägg och pris bekräftas efter genomgång.'
+                  : 'Prisförslag ink. RUT-avdrag. Slutligt upplägg och pris bekräftas efter genomgång.'}
+              </p>
               <div className="mt-4 space-y-2 text-sm text-slate-600">
                 <p><span className="font-semibold text-slate-900">Tjänst:</span> {serviceLabel(form.serviceType)}</p>
                 {form.serviceType === 'standard_cleaning' && (
@@ -449,7 +455,7 @@
               </div>
               {form.serviceType === 'standard_cleaning' && (
                 <p className="mt-4 border-t border-slate-100 pt-3 text-[11px] leading-relaxed text-slate-500">
-                  Om RUT-avdrag inte kan nyttjas faktureras ordinarie belopp. Mätning av objektet kan vid behov göras på plats.
+                  Tiden är preliminär. Vi klockar varje städning med in- och utcheckning/GPS i vårt system och debiterar faktisk tid om passet blir kortare eller längre. Om RUT-avdrag inte kan nyttjas faktureras ordinarie belopp. Mätning av objektet kan vid behov göras på plats.
                 </p>
               )}
             </Card>
@@ -548,10 +554,12 @@
       );
     }
 
+    const isHomeCleaning = bookingRequest.service_type === 'standard_cleaning';
     const priceRows = [
-      { Fält: 'Prisförslag', Värde: bookingRequest.estimated_price_sek != null ? `${Number(bookingRequest.estimated_price_sek).toLocaleString('sv-SE')} kr` : 'Bekräftas efter genomgång' },
+      { Fält: isHomeCleaning ? 'Prisförslag per tillfälle' : 'Prisförslag', Värde: bookingRequest.estimated_price_sek != null ? `${Number(bookingRequest.estimated_price_sek).toLocaleString('sv-SE')} kr${isHomeCleaning ? ' per tillfälle' : ''}` : 'Bekräftas efter genomgång' },
       { Fält: 'RUT-avdrag', Värde: bookingAddons.rut_included ? 'Prisförslag ink. RUT-avdrag' : 'Bekräftas efter genomgång' },
       { Fält: 'Prisjustering', Värde: 'Slutligt upplägg och pris bekräftas av CleanUp efter genomgång med kund.' },
+      { Fält: 'Debitering av tid', Värde: isHomeCleaning ? 'Beräkningen är preliminär. CleanUp klockar varje städning med in- och utcheckning/GPS och debiterar faktisk tid om passet blir kortare eller längre.' : '' },
       { Fält: 'Mätning', Värde: 'Mätning av objektet kan vid behov göras på plats.' },
       { Fält: 'Om RUT ej kan nyttjas', Värde: 'Om RUT-avdrag inte kan nyttjas faktureras ordinarie belopp.' },
     ];
@@ -1100,8 +1108,12 @@
                     <div className="flex flex-col items-stretch gap-2 sm:items-end">
                       {bookingRequest.estimated_price_sek != null && (
                         <div className="rounded-xl bg-white px-4 py-3 text-right shadow-sm ring-1 ring-brand-100">
-                          <p className="text-[11px] font-bold uppercase text-slate-500">Prisförslag</p>
-                          <p className="text-xl font-extrabold text-slate-950">{Number(bookingRequest.estimated_price_sek).toLocaleString('sv-SE')} kr</p>
+                          <p className="text-[11px] font-bold uppercase text-slate-500">
+                            {bookingRequest.service_type === 'standard_cleaning' ? 'Prisförslag per tillfälle' : 'Prisförslag'}
+                          </p>
+                          <p className="text-xl font-extrabold text-slate-950">
+                            {Number(bookingRequest.estimated_price_sek).toLocaleString('sv-SE')} kr{bookingRequest.service_type === 'standard_cleaning' ? ' / tillfälle' : ''}
+                          </p>
                         </div>
                       )}
                       {role === 'admin' && (
@@ -1167,6 +1179,11 @@
                 {bookingAddons.requires_admin_price_review && (
                   <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
                     Kunden har lämnat särskilda önskemål. Gå gärna igenom upplägg och pris med kund innan godkännande.
+                  </div>
+                )}
+                {bookingRequest.service_type === 'standard_cleaning' && (
+                  <div className="mt-4 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600">
+                    Pris och tid är preliminära. Varje städning klockas med in- och utcheckning/GPS och debiteras efter faktisk tid.
                   </div>
                 )}
                 <div className="mt-4 flex flex-wrap gap-2">
