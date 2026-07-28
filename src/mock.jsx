@@ -105,6 +105,8 @@
     messages: [],
     thread_reads: [],
     shift_requests: [],
+    booking_availability_slots: [],
+    booking_requests: [],
   };
 
   /* ============================================================
@@ -525,6 +527,114 @@
     },
 
     // Checklist på pass
+    bookingAvailabilitySlots(opts = {}) {
+      let list = state.booking_availability_slots.slice();
+      if (opts.from) list = list.filter(s => new Date(s.ends_at) >= new Date(opts.from));
+      if (opts.to) list = list.filter(s => new Date(s.starts_at) <= new Date(opts.to));
+      if (opts.activeOnly) list = list.filter(s => s.active);
+      if (opts.serviceType) list = list.filter(s => s.service_type === opts.serviceType);
+      return list.sort((a, b) => new Date(a.starts_at) - new Date(b.starts_at));
+    },
+    bookingRequestsForSlot(slotId) {
+      return state.booking_requests
+        .filter(r => r.availability_slot_id === slotId)
+        .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    },
+    bookingRequestForShift(shiftId) {
+      return state.booking_requests.find(r => r.shift_id === shiftId) || null;
+    },
+    reservedBookingCountForSlot(slotId) {
+      const active = new Set(['new', 'linked_to_shift', 'approved']);
+      return state.booking_requests.filter(r => r.availability_slot_id === slotId && active.has(r.status)).length;
+    },
+
+    async createBookingAvailabilitySlot({ startsAt, endsAt, capacity = 1, serviceType = 'standard_cleaning', note = '', actorUserId }) {
+      const actor = db.userById(actorUserId);
+      if (!actor || actor.role !== 'admin') return { error: 'FORBIDDEN' };
+      const starts_at = new Date(startsAt);
+      const ends_at = new Date(endsAt);
+      if (!startsAt || !endsAt || Number.isNaN(starts_at.getTime()) || Number.isNaN(ends_at.getTime()) || ends_at <= starts_at) return { error: 'INVALID_TIME' };
+      const numericCapacity = Number(capacity);
+      if (!Number.isInteger(numericCapacity) || numericCapacity < 1 || numericCapacity > 20) return { error: 'INVALID_CAPACITY' };
+
+      const slot = {
+        id: newId(),
+        org_id: actor.org_id || state.organizations[0]?.id,
+        starts_at,
+        ends_at,
+        capacity: numericCapacity,
+        service_type: (serviceType || '').trim() || 'standard_cleaning',
+        active: true,
+        note: (note || '').trim(),
+        created_by_user_id: actorUserId,
+        created_at: new Date(),
+        updated_at: new Date(),
+      };
+      state.booking_availability_slots.push(slot);
+      bump();
+
+      const persist = window.dbPersist && window.dbPersist.createBookingAvailabilitySlot;
+      if (persist && window.SUPABASE_ENABLED) {
+        const r = await persist({ slot });
+        if (!r.ok) {
+          state.booking_availability_slots = state.booking_availability_slots.filter(s => s.id !== slot.id);
+          bump();
+          return { error: 'PERSIST_FAILED', message: r.message };
+        }
+        if (r.slotId) slot.id = r.slotId;
+      }
+
+      return { ok: true, slot };
+    },
+
+    async updateBookingAvailabilitySlot(slotId, fields, actorUserId) {
+      const actor = db.userById(actorUserId);
+      if (!actor || actor.role !== 'admin') return { error: 'FORBIDDEN' };
+      const slot = state.booking_availability_slots.find(s => s.id === slotId);
+      if (!slot) return { error: 'NOT_FOUND' };
+
+      const snapshot = { ...slot };
+      if ('starts_at' in fields || 'ends_at' in fields) {
+        const starts = new Date(fields.starts_at || slot.starts_at);
+        const ends = new Date(fields.ends_at || slot.ends_at);
+        if (Number.isNaN(starts.getTime()) || Number.isNaN(ends.getTime()) || ends <= starts) return { error: 'INVALID_TIME' };
+        slot.starts_at = starts;
+        slot.ends_at = ends;
+      }
+      if ('capacity' in fields) {
+        const numericCapacity = Number(fields.capacity);
+        if (!Number.isInteger(numericCapacity) || numericCapacity < 1 || numericCapacity > 20) return { error: 'INVALID_CAPACITY' };
+        slot.capacity = numericCapacity;
+      }
+      if ('service_type' in fields) slot.service_type = (fields.service_type || '').trim() || 'standard_cleaning';
+      if ('active' in fields) slot.active = !!fields.active;
+      if ('note' in fields) slot.note = (fields.note || '').trim();
+      slot.updated_at = new Date();
+      bump();
+
+      const persist = window.dbPersist && window.dbPersist.updateBookingAvailabilitySlot;
+      if (persist && window.SUPABASE_ENABLED) {
+        const r = await persist({
+          slotId,
+          fields: {
+            starts_at: slot.starts_at,
+            ends_at: slot.ends_at,
+            capacity: slot.capacity,
+            service_type: slot.service_type,
+            active: slot.active,
+            note: slot.note,
+          },
+        });
+        if (!r.ok) {
+          Object.assign(slot, snapshot);
+          bump();
+          return { error: 'PERSIST_FAILED', message: r.message };
+        }
+      }
+
+      return { ok: true, slot };
+    },
+
     checklistForShift(sid) {
       return state.shift_checklist_items
         .filter(c => c.shift_id === sid)

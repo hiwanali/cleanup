@@ -48,6 +48,361 @@
     );
   }
 
+  function PublicBookingEmbedView() {
+    const cfg = window.__CLEANUP_CONFIG__ || {};
+    const supabaseUrl = cfg.url || 'https://bkmnlcdsbvpucpqmaycx.supabase.co';
+    const anonKey = cfg.anonKey || '';
+    const [step, setStep] = useState(1);
+    const [loadingSlots, setLoadingSlots] = useState(false);
+    const [submitting, setSubmitting] = useState(false);
+    const [slots, setSlots] = useState([]);
+    const [error, setError] = useState('');
+    const [confirmation, setConfirmation] = useState(null);
+    const [form, setForm] = useState({
+      serviceType: 'standard_cleaning',
+      areaSqm: '',
+      rooms: '',
+      bathrooms: '1',
+      windows: false,
+      oven: false,
+      selectedSlotId: '',
+      customerName: '',
+      customerEmail: '',
+      customerPhone: '',
+      address: '',
+      postalCode: '',
+      city: '',
+      message: '',
+      consent: false,
+      website: '',
+    });
+
+    const selectedSlot = slots.find(s => s.id === form.selectedSlotId);
+    const estimatedPrice = estimatePublicBookingPrice(form);
+    const canChooseSlot = !!form.serviceType;
+    const canSubmit = form.selectedSlotId && form.customerName.trim().length >= 2 && form.customerEmail.includes('@') &&
+      form.customerPhone.trim().length >= 6 && form.address.trim().length >= 3 && form.consent && !submitting;
+
+    useEffect(() => {
+      document.body.classList.add('bg-white');
+      return () => document.body.classList.remove('bg-white');
+    }, []);
+
+    useEffect(() => {
+      const sendHeight = () => {
+        try {
+          window.parent?.postMessage({
+            type: 'cleanup.booking.height',
+            height: document.documentElement.scrollHeight,
+          }, '*');
+        } catch (_) {}
+      };
+      sendHeight();
+      const id = setTimeout(sendHeight, 80);
+      window.addEventListener('resize', sendHeight);
+      return () => {
+        clearTimeout(id);
+        window.removeEventListener('resize', sendHeight);
+      };
+    }, [step, slots.length, error, confirmation]);
+
+    useEffect(() => {
+      if (!canChooseSlot || !supabaseUrl) return;
+      let cancelled = false;
+      async function loadSlots() {
+        setLoadingSlots(true);
+        setError('');
+        try {
+          const from = new Date();
+          const to = new Date(Date.now() + 45 * 24 * 60 * 60 * 1000);
+          const url = new URL(`${supabaseUrl}/functions/v1/public-availability`);
+          url.searchParams.set('from', from.toISOString());
+          url.searchParams.set('to', to.toISOString());
+          url.searchParams.set('service_type', form.serviceType);
+          const res = await fetch(url.toString(), {
+            headers: anonKey ? { apikey: anonKey } : {},
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data.error || 'availability_failed');
+          if (!cancelled) {
+            setSlots(data.slots || []);
+            if (form.selectedSlotId && !(data.slots || []).some(s => s.id === form.selectedSlotId)) {
+              setForm(f => ({ ...f, selectedSlotId: '' }));
+            }
+          }
+        } catch (_) {
+          if (!cancelled) {
+            setSlots([]);
+            setError('Kunde inte hÃ¤mta lediga tider just nu.');
+          }
+        } finally {
+          if (!cancelled) setLoadingSlots(false);
+        }
+      }
+      loadSlots();
+      return () => { cancelled = true; };
+    }, [form.serviceType, supabaseUrl]);
+
+    function update(key, value) {
+      setForm(f => ({ ...f, [key]: value }));
+    }
+
+    async function submit() {
+      if (!canSubmit) return;
+      setSubmitting(true);
+      setError('');
+      try {
+        const res = await fetch(`${supabaseUrl}/functions/v1/public-booking-request`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(anonKey ? { apikey: anonKey } : {}),
+          },
+          body: JSON.stringify({
+            availability_slot_id: form.selectedSlotId,
+            service_type: form.serviceType,
+            customer_name: form.customerName,
+            customer_email: form.customerEmail,
+            customer_phone: form.customerPhone,
+            address: form.address,
+            postal_code: form.postalCode,
+            city: form.city,
+            area_sqm: form.areaSqm ? Number(form.areaSqm) : null,
+            rooms: form.rooms ? Number(form.rooms) : null,
+            addons: { windows: form.windows, oven: form.oven, bathrooms: Number(form.bathrooms || 1) },
+            estimated_price_sek: estimatedPrice,
+            message: form.message,
+            website: form.website,
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          if (data.error === 'slot_unavailable') {
+            setError('Tiden hann bli reserverad. VÃ¤lj en annan ledig tid.');
+            setForm(f => ({ ...f, selectedSlotId: '' }));
+            setStep(2);
+            return;
+          }
+          throw new Error(data.error || 'booking_failed');
+        }
+        setConfirmation({ requestId: data.request_id, slot: selectedSlot });
+        setStep(4);
+      } catch (_) {
+        setError('Kunde inte skicka fÃ¶rfrÃ¥gan. FÃ¶rsÃ¶k igen om en stund.');
+      } finally {
+        setSubmitting(false);
+      }
+    }
+
+    if (confirmation) {
+      return (
+        <div className="min-h-screen bg-white text-slate-900 p-4 sm:p-6">
+          <div className="max-w-3xl mx-auto">
+            <div className="flex items-center gap-3 mb-6">
+              <BrandLogo size="md" />
+              <div>
+                <p className="font-extrabold text-slate-900">CleanUp</p>
+                <p className="text-xs text-slate-500">BokningsfÃ¶rfrÃ¥gan</p>
+              </div>
+            </div>
+            <Card padding="lg" className="border-emerald-200 bg-emerald-50/40">
+              <div className="flex items-start gap-4">
+                <span className="w-11 h-11 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center flex-shrink-0">
+                  <Icon name="check" className="w-5 h-5" />
+                </span>
+                <div>
+                  <h1 className="text-2xl font-extrabold text-slate-900">Tack! Din fÃ¶rfrÃ¥gan Ã¤r skickad.</h1>
+                  <p className="mt-2 text-sm text-slate-700">
+                    Vi Ã¥terkommer nÃ¤r tiden Ã¤r bekrÃ¤ftad. Tiden Ã¤r reserverad medan vi behandlar fÃ¶rfrÃ¥gan.
+                  </p>
+                  {confirmation.slot && (
+                    <p className="mt-4 text-sm font-semibold text-slate-900">
+                      {formatDateLong(confirmation.slot.starts_at)} kl. {formatTime(confirmation.slot.starts_at)}â€“{formatTime(confirmation.slot.ends_at)}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </Card>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="min-h-screen bg-white text-slate-900 p-4 sm:p-6">
+        <div className="max-w-4xl mx-auto">
+          <div className="flex items-center justify-between gap-3 mb-5">
+            <div className="flex items-center gap-3">
+              <BrandLogo size="md" />
+              <div>
+                <p className="font-extrabold text-slate-900">CleanUp</p>
+                <p className="text-xs text-slate-500">Pris & bokningsfÃ¶rfrÃ¥gan</p>
+              </div>
+            </div>
+            <Badge variant="brand">Steg {step} av 3</Badge>
+          </div>
+
+          {error && (
+            <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">
+              {error}
+            </div>
+          )}
+
+          <div className="grid lg:grid-cols-[1fr_280px] gap-4">
+            <Card padding="md">
+              {step === 1 && (
+                <div>
+                  <h1 className="text-xl font-extrabold text-slate-900">Vad behÃ¶ver du hjÃ¤lp med?</h1>
+                  <div className="grid sm:grid-cols-2 gap-3 mt-4">
+                    {[
+                      ['standard_cleaning', 'HemstÃ¤dning'],
+                      ['deep_cleaning', 'StorstÃ¤dning'],
+                      ['moving_cleaning', 'FlyttstÃ¤dning'],
+                      ['window_cleaning', 'FÃ¶nsterputs'],
+                    ].map(([id, label]) => (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() => update('serviceType', id)}
+                        className={cx(
+                          'text-left rounded-xl border p-4 transition-colors',
+                          form.serviceType === id ? 'border-brand-500 bg-brand-50' : 'border-slate-200 hover:bg-slate-50',
+                        )}
+                      >
+                        <p className="font-bold text-slate-900">{label}</p>
+                      </button>
+                    ))}
+                  </div>
+                  <div className="grid sm:grid-cols-3 gap-3 mt-4">
+                    <Field label="Kvadratmeter">
+                      <Input type="number" min="1" value={form.areaSqm} onChange={e => update('areaSqm', e.target.value)} />
+                    </Field>
+                    <Field label="Rum">
+                      <Input type="number" min="1" value={form.rooms} onChange={e => update('rooms', e.target.value)} />
+                    </Field>
+                    <Field label="Badrum">
+                      <Input type="number" min="1" value={form.bathrooms} onChange={e => update('bathrooms', e.target.value)} />
+                    </Field>
+                  </div>
+                  <div className="flex flex-wrap gap-4 mt-4">
+                    <Checkbox label="FÃ¶nsterputs" checked={form.windows} onChange={v => update('windows', v)} />
+                    <Checkbox label="UgnsrengÃ¶ring" checked={form.oven} onChange={v => update('oven', v)} />
+                  </div>
+                </div>
+              )}
+
+              {step === 2 && (
+                <div>
+                  <h1 className="text-xl font-extrabold text-slate-900">VÃ¤lj en ledig tid</h1>
+                  {loadingSlots ? (
+                    <div className="mt-4 grid sm:grid-cols-2 gap-3">
+                      <Skeleton className="h-20" />
+                      <Skeleton className="h-20" />
+                    </div>
+                  ) : slots.length === 0 ? (
+                    <EmptyState icon="calendar" title="Inga lediga tider just nu" description="Prova en annan tjÃ¤nst eller kontakta oss direkt." />
+                  ) : (
+                    <div className="grid sm:grid-cols-2 gap-3 mt-4">
+                      {slots.map(slot => (
+                        <button
+                          key={slot.id}
+                          type="button"
+                          onClick={() => update('selectedSlotId', slot.id)}
+                          className={cx(
+                            'text-left rounded-xl border p-4 transition-colors',
+                            form.selectedSlotId === slot.id ? 'border-brand-500 bg-brand-50' : 'border-slate-200 hover:bg-slate-50',
+                          )}
+                        >
+                          <p className="font-bold text-slate-900">{formatDateLong(slot.starts_at)}</p>
+                          <p className="text-sm text-slate-600 mt-1">{formatTime(slot.starts_at)}â€“{formatTime(slot.ends_at)}</p>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {step === 3 && (
+                <div>
+                  <h1 className="text-xl font-extrabold text-slate-900">Kontaktuppgifter</h1>
+                  <div className="grid sm:grid-cols-2 gap-3 mt-4">
+                    <Field label="Namn" required>
+                      <Input value={form.customerName} onChange={e => update('customerName', e.target.value)} />
+                    </Field>
+                    <Field label="Telefon" required>
+                      <Input value={form.customerPhone} onChange={e => update('customerPhone', e.target.value)} />
+                    </Field>
+                    <Field label="E-post" required>
+                      <Input type="email" value={form.customerEmail} onChange={e => update('customerEmail', e.target.value)} />
+                    </Field>
+                    <Field label="Adress" required>
+                      <Input value={form.address} onChange={e => update('address', e.target.value)} />
+                    </Field>
+                    <Field label="Postnummer">
+                      <Input value={form.postalCode} onChange={e => update('postalCode', e.target.value)} />
+                    </Field>
+                    <Field label="Ort">
+                      <Input value={form.city} onChange={e => update('city', e.target.value)} />
+                    </Field>
+                  </div>
+                  <div className="mt-3">
+                    <Field label="Kommentar">
+                      <Textarea rows={3} value={form.message} onChange={e => update('message', e.target.value)} />
+                    </Field>
+                  </div>
+                  <input className="hidden" tabIndex="-1" autoComplete="off" value={form.website} onChange={e => update('website', e.target.value)} />
+                  <div className="mt-4">
+                    <Checkbox
+                      checked={form.consent}
+                      onChange={v => update('consent', v)}
+                      label="Jag godkÃ¤nner att CleanUp kontaktar mig om min fÃ¶rfrÃ¥gan."
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div className="mt-6 flex items-center justify-between gap-2">
+                <Button variant="ghost" disabled={step === 1 || submitting} onClick={() => setStep(s => Math.max(1, s - 1))}>Tillbaka</Button>
+                {step < 3 ? (
+                  <Button disabled={step === 2 && !form.selectedSlotId} onClick={() => setStep(s => Math.min(3, s + 1))}>FortsÃ¤tt</Button>
+                ) : (
+                  <Button icon="send" loading={submitting} disabled={!canSubmit} onClick={submit}>Skicka fÃ¶rfrÃ¥gan</Button>
+                )}
+              </div>
+            </Card>
+
+            <Card padding="md" className="h-fit">
+              <p className="text-xs font-semibold uppercase text-slate-500">Uppskattat pris</p>
+              <p className="mt-2 text-3xl font-extrabold text-slate-900">{estimatedPrice.toLocaleString('sv-SE')} kr</p>
+              <p className="mt-1 text-xs text-slate-500">Slutligt pris bekrÃ¤ftas efter genomgÃ¥ng.</p>
+              <div className="mt-4 space-y-2 text-sm text-slate-600">
+                <p><span className="font-semibold text-slate-900">TjÃ¤nst:</span> {serviceLabel(form.serviceType)}</p>
+                {selectedSlot && <p><span className="font-semibold text-slate-900">Tid:</span> {formatDate(selectedSlot.starts_at)} {formatTime(selectedSlot.starts_at)}</p>}
+              </div>
+            </Card>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function estimatePublicBookingPrice(form) {
+    const area = Math.max(0, Number(form.areaSqm || 0));
+    const rooms = Math.max(0, Number(form.rooms || 0));
+    const bathrooms = Math.max(1, Number(form.bathrooms || 1));
+    const baseByService = {
+      standard_cleaning: 590,
+      deep_cleaning: 990,
+      moving_cleaning: 1490,
+      window_cleaning: 690,
+    };
+    const areaRate = form.serviceType === 'moving_cleaning' ? 18 : form.serviceType === 'deep_cleaning' ? 14 : 9;
+    let price = (baseByService[form.serviceType] || 590) + area * areaRate + rooms * 80 + bathrooms * 120;
+    if (form.windows) price += 450;
+    if (form.oven) price += 250;
+    return Math.max(390, Math.round(price / 10) * 10);
+  }
+
   const LOGIN_REMEMBER_KEY = 'cleanup_login_remember_v1';
   function loadRememberedLogin() {
     try {
@@ -2409,6 +2764,213 @@
   /* ============================================================
    * ADMIN · Schema (§7.4) – kalender + listvy med filter
    * ============================================================ */
+  function serviceLabel(serviceType) {
+    const labels = {
+      standard_cleaning: 'HemstÃ¤dning',
+      deep_cleaning: 'StorstÃ¤dning',
+      moving_cleaning: 'FlyttstÃ¤dning',
+      window_cleaning: 'FÃ¶nsterputs',
+    };
+    return labels[serviceType] || serviceType || 'TjÃ¤nst';
+  }
+
+  function AdminAvailabilityView({ session }) {
+    useDb();
+    const [createOpen, setCreateOpen] = useState(false);
+    const [filter, setFilter] = useState('upcoming');
+    const now = new Date();
+    const slots = db.bookingAvailabilitySlots({ from: filter === 'all' ? null : now });
+    const visibleSlots = filter === 'active'
+      ? slots.filter(s => s.active)
+      : filter === 'closed'
+        ? slots.filter(s => !s.active)
+        : slots;
+
+    async function toggleSlot(slot) {
+      const r = await db.updateBookingAvailabilitySlot(slot.id, { active: !slot.active }, session.userId);
+      if (r?.error) {
+        toast.error(r.message || 'Kunde inte uppdatera tidsluckan.');
+        return;
+      }
+      toast.success(slot.active ? 'Tidsluckan pausad.' : 'Tidsluckan Ã¶ppnad.');
+    }
+
+    return (
+      <div>
+        <PageHeader
+          title="TillgÃ¤nglighet"
+          subtitle="Manuella tidsluckor som visas i bokningswidgeten pÃ¥ cleanup.nu."
+          actions={<Button icon="plus" onClick={() => setCreateOpen(true)}>Ny tidslucka</Button>}
+        />
+
+        <Card padding="md" className="mb-4">
+          <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+            <div>
+              <h3 className="font-bold text-slate-900">Publik bokningskalender</h3>
+              <p className="text-sm text-slate-600 mt-1">
+                Kunden kan bara vÃ¤lja aktiva tider som inte redan Ã¤r reserverade.
+              </p>
+            </div>
+            <Field label="Visa" className="md:w-56">
+              <Select value={filter} onChange={e => setFilter(e.target.value)}>
+                <option value="upcoming">Kommande</option>
+                <option value="active">Aktiva</option>
+                <option value="closed">Pausade</option>
+                <option value="all">Alla</option>
+              </Select>
+            </Field>
+          </div>
+        </Card>
+
+        {visibleSlots.length === 0 ? (
+          <Card padding="lg">
+            <EmptyState
+              icon="clock"
+              title="Inga tidsluckor"
+              description="Skapa fÃ¶rsta manuella tiden som iframen fÃ¥r visa."
+              action={<Button icon="plus" onClick={() => setCreateOpen(true)}>Ny tidslucka</Button>}
+            />
+          </Card>
+        ) : (
+          <div className="grid md:grid-cols-2 gap-3">
+            {visibleSlots.map(slot => {
+              const reserved = db.reservedBookingCountForSlot(slot.id);
+              const full = reserved >= slot.capacity;
+              return (
+                <Card key={slot.id} padding="md" className={!slot.active ? 'opacity-75' : ''}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Badge variant={slot.active ? (full ? 'amber' : 'emerald') : 'slate'} icon={slot.active ? 'clock' : 'pause'}>
+                          {slot.active ? (full ? 'Reserverad' : 'Aktiv') : 'Pausad'}
+                        </Badge>
+                        <Badge variant="brand">{serviceLabel(slot.service_type)}</Badge>
+                      </div>
+                      <p className="mt-3 font-bold text-slate-900">{formatDateLong(slot.starts_at)}</p>
+                      <p className="text-sm text-slate-600">{formatTime(slot.starts_at)}â€“{formatTime(slot.ends_at)}</p>
+                    </div>
+                    <Button variant="outline" size="sm" icon={slot.active ? 'pause' : 'check'} onClick={() => toggleSlot(slot)}>
+                      {slot.active ? 'Pausa' : 'Ã–ppna'}
+                    </Button>
+                  </div>
+                  <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                    <div className="rounded-lg bg-slate-50 p-3">
+                      <p className="text-xs text-slate-500">Kapacitet</p>
+                      <p className="font-bold text-slate-900">{slot.capacity}</p>
+                    </div>
+                    <div className="rounded-lg bg-slate-50 p-3">
+                      <p className="text-xs text-slate-500">Reserverat</p>
+                      <p className="font-bold text-slate-900">{reserved}</p>
+                    </div>
+                  </div>
+                  {slot.note && <p className="mt-3 text-sm text-slate-600">{slot.note}</p>}
+                </Card>
+              );
+            })}
+          </div>
+        )}
+
+        <CreateAvailabilitySlotModal open={createOpen} onClose={() => setCreateOpen(false)} session={session} />
+      </div>
+    );
+  }
+
+  function CreateAvailabilitySlotModal({ open, onClose, session }) {
+    const [date, setDate] = useState(toDateInput(new Date()));
+    const [startTime, setStartTime] = useState('09:00');
+    const [endTime, setEndTime] = useState('12:00');
+    const [serviceType, setServiceType] = useState('standard_cleaning');
+    const [capacity, setCapacity] = useState(1);
+    const [note, setNote] = useState('');
+    const [saving, setSaving] = useState(false);
+
+    useEffect(() => {
+      if (!open) return;
+      setDate(toDateInput(new Date()));
+      setStartTime('09:00');
+      setEndTime('12:00');
+      setServiceType('standard_cleaning');
+      setCapacity(1);
+      setNote('');
+      setSaving(false);
+    }, [open]);
+
+    const validTime = startTime && endTime && startTime < endTime;
+    const canSubmit = date && validTime && Number(capacity) >= 1 && !saving;
+
+    async function submit() {
+      setSaving(true);
+      try {
+        const r = await db.createBookingAvailabilitySlot({
+          startsAt: combineDateTime(date, startTime),
+          endsAt: combineDateTime(date, endTime),
+          capacity: Number(capacity),
+          serviceType,
+          note,
+          actorUserId: session.userId,
+        });
+        if (r?.error) {
+          const messages = {
+            INVALID_TIME: 'Sluttid mÃ¥ste vara efter starttid.',
+            INVALID_CAPACITY: 'Kapacitet mÃ¥ste vara minst 1.',
+            FORBIDDEN: 'Du saknar behÃ¶righet.',
+          };
+          toast.error(r.message || messages[r.error] || 'Kunde inte skapa tidsluckan.');
+          return;
+        }
+        toast.success('Tidsluckan Ã¤r skapad.');
+        onClose();
+      } finally {
+        setSaving(false);
+      }
+    }
+
+    return (
+      <Modal
+        open={open}
+        onClose={onClose}
+        title="Ny tidslucka"
+        size="md"
+        footer={
+          <>
+            <Button variant="ghost" onClick={onClose} disabled={saving}>Avbryt</Button>
+            <Button icon="plus" disabled={!canSubmit} onClick={submit}>{saving ? 'Spararâ€¦' : 'Skapa'}</Button>
+          </>
+        }
+      >
+        <div className="grid grid-cols-3 gap-3">
+          <Field label="Datum" required>
+            <Input type="date" value={date} onChange={e => setDate(e.target.value)} />
+          </Field>
+          <Field label="Start" required>
+            <Input type="time" value={startTime} onChange={e => setStartTime(e.target.value)} />
+          </Field>
+          <Field label="Slut" required error={!validTime && startTime && endTime ? 'Efter start.' : null}>
+            <Input type="time" value={endTime} onChange={e => setEndTime(e.target.value)} />
+          </Field>
+        </div>
+        <div className="grid md:grid-cols-2 gap-3 mt-3">
+          <Field label="TjÃ¤nst" required>
+            <Select value={serviceType} onChange={e => setServiceType(e.target.value)}>
+              <option value="standard_cleaning">HemstÃ¤dning</option>
+              <option value="deep_cleaning">StorstÃ¤dning</option>
+              <option value="moving_cleaning">FlyttstÃ¤dning</option>
+              <option value="window_cleaning">FÃ¶nsterputs</option>
+            </Select>
+          </Field>
+          <Field label="Kapacitet" required hint="V1: anvÃ¤nd oftast 1.">
+            <Input type="number" min="1" max="20" value={capacity} onChange={e => setCapacity(e.target.value)} />
+          </Field>
+        </div>
+        <div className="mt-3">
+          <Field label="Intern anteckning" hint="Visas inte i iframen.">
+            <Textarea rows={2} value={note} onChange={e => setNote(e.target.value)} />
+          </Field>
+        </div>
+      </Modal>
+    );
+  }
+
   function AdminSchemaView({ session, onNavigate }) {
     useDb();
     const [statusFilter, setStatusFilter] = useState('all');
@@ -6104,6 +6666,7 @@
   }
 
   window.LoginView = LoginView;
+  window.PublicBookingEmbedView = PublicBookingEmbedView;
   window.AdminDashboardView = AdminDashboardView;
   window.CleanerTodayView = CleanerTodayView;
   window.CleanerShiftsListView = CleanerShiftsListView;
@@ -6126,6 +6689,7 @@
   window.CustomerHolidayView = CustomerHolidayView;
   window.HolidayCard = HolidayCard;
   window.AdminSchemaView = AdminSchemaView;
+  window.AdminAvailabilityView = AdminAvailabilityView;
   window.CreateShiftModal = CreateShiftModal;
   window.CustomerShiftRequestModal = CustomerShiftRequestModal;
   window.ApproveShiftModal = ApproveShiftModal;

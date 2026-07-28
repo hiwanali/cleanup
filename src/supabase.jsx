@@ -53,6 +53,8 @@
     messages: ['created_at'],
     thread_reads: ['last_read_at'],
     shift_requests: ['created_at'],
+    booking_availability_slots: ['starts_at', 'ends_at', 'created_at', 'updated_at'],
+    booking_requests: ['requested_starts_at', 'requested_ends_at', 'created_at', 'updated_at'],
   };
 
   function convertRow(table, row) {
@@ -110,6 +112,8 @@
       messages,
       thread_reads,
       shift_requests,
+      booking_availability_slots,
+      booking_requests,
     ] = await Promise.all([
       fetchTable('organizations'),
       fetchTable('customers'),
@@ -131,6 +135,8 @@
       fetchTable('messages'),
       fetchTable('thread_reads'),
       fetchTable('shift_requests'),
+      fetchTable('booking_availability_slots'),
+      fetchTable('booking_requests'),
     ]);
 
     // Vyn saknar access_info – lägg till tom sträng så vy-koden inte kraschar
@@ -157,6 +163,8 @@
       messages,
       thread_reads,
       shift_requests,
+      booking_availability_slots,
+      booking_requests,
     };
   }
 
@@ -642,6 +650,16 @@
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'property_cleaners' },
+        () => scheduleHydrateFromRealtime(userId),
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'booking_availability_slots' },
+        () => scheduleHydrateFromRealtime(userId),
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'booking_requests' },
         () => scheduleHydrateFromRealtime(userId),
       )
       .subscribe((status) => {
@@ -1712,6 +1730,56 @@
     return { ok: true };
   }
 
+  async function persistCreateBookingAvailabilitySlot({ slot }) {
+    if (!enabled || !sb || !slot) {
+      return { ok: true, skipped: true };
+    }
+
+    const { data, error } = await sb.from('booking_availability_slots').insert({
+      org_id: slot.org_id,
+      starts_at: toIso(slot.starts_at),
+      ends_at: toIso(slot.ends_at),
+      capacity: slot.capacity,
+      service_type: slot.service_type,
+      active: !!slot.active,
+      note: slot.note || '',
+      created_by_user_id: slot.created_by_user_id,
+    }).select('id').single();
+
+    if (error) {
+      console.error('[persist] createBookingAvailabilitySlot:', error.message);
+      return { ok: false, message: error.message };
+    }
+
+    return { ok: true, slotId: data?.id };
+  }
+
+  async function persistUpdateBookingAvailabilitySlot({ slotId, fields }) {
+    if (!enabled || !sb || !isUuid(slotId)) {
+      return { ok: true, skipped: true };
+    }
+
+    const update = {};
+    if ('starts_at' in fields) update.starts_at = toIso(fields.starts_at);
+    if ('ends_at' in fields) update.ends_at = toIso(fields.ends_at);
+    if ('capacity' in fields) update.capacity = fields.capacity;
+    if ('service_type' in fields) update.service_type = fields.service_type;
+    if ('active' in fields) update.active = !!fields.active;
+    if ('note' in fields) update.note = fields.note || '';
+
+    const { error } = await sb
+      .from('booking_availability_slots')
+      .update(update)
+      .eq('id', slotId);
+
+    if (error) {
+      console.error('[persist] updateBookingAvailabilitySlot:', error.message);
+      return { ok: false, message: error.message };
+    }
+
+    return { ok: true };
+  }
+
   window.dbPersist = {
     insertNotifications: persistInsertNotifications,
     adminDelete: persistAdminDelete,
@@ -1757,5 +1825,7 @@
     createCleaner: persistCreateCleaner,
     updateCleaner: persistUpdateCleaner,
     setCleanerProperties: persistSetCleanerProperties,
+    createBookingAvailabilitySlot: persistCreateBookingAvailabilitySlot,
+    updateBookingAvailabilitySlot: persistUpdateBookingAvailabilitySlot,
   };
 })();

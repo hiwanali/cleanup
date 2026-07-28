@@ -15,13 +15,17 @@
    * ============================================================ */
   function readPath() {
     const h = window.location.hash || '#/';
+    if (h && h !== '#/' && h.startsWith('#')) return h.slice(1);
+    const pathname = window.location.pathname.replace(/\/+$/, '') || '/';
+    if (pathname === '/embed/booking') return '/embed/booking';
     return h.startsWith('#') ? h.slice(1) : h;
   }
   const routeListeners = new Set();
   window.addEventListener('hashchange', () => routeListeners.forEach(l => l()));
+  window.addEventListener('popstate', () => routeListeners.forEach(l => l()));
   const router = {
     subscribe(fn) { routeListeners.add(fn); return () => routeListeners.delete(fn); },
-    snapshot() { return window.location.hash || '#/'; },
+    snapshot() { return `${window.location.pathname}${window.location.hash || ''}`; },
     navigate(path) {
       if (!path.startsWith('#')) path = '#' + path;
       if (window.location.hash !== path) window.location.hash = path;
@@ -92,6 +96,7 @@
     admin: [
       { path: '/admin/dashboard', label: 'Dashboard', icon: 'home' },
       { path: '/admin/schema', label: 'Schema', icon: 'calendar' },
+      { path: '/admin/tillganglighet', label: 'TillgÃ¤nglighet', icon: 'clock' },
       { path: '/admin/kunder', label: 'Kunder', icon: 'briefcase' },
       { path: '/admin/stadare', label: 'Städare', icon: 'users' },
       { path: '/admin/meddelanden', label: 'Meddelanden', icon: 'message-square' },
@@ -352,6 +357,7 @@
     if (matchPath(path, '/admin/dashboard')) return <AdminDashboardView session={session} onNavigate={navigate} />;
     if ((m = matchPath(path, '/admin/schema/:id'))) return <AdminShiftDetailView session={session} onNavigate={navigate} shiftId={m.id} />;
     if (matchPath(path, '/admin/schema')) return <AdminSchemaView session={session} onNavigate={navigate} />;
+    if (matchPath(path, '/admin/tillganglighet')) return <AdminAvailabilityView session={session} onNavigate={navigate} />;
     if (matchPath(path, '/admin/kunder')) return <AdminCustomersListView session={session} onNavigate={navigate} />;
     if ((m = matchPath(path, '/admin/kunder/:cid'))) return <AdminCustomerView session={session} onNavigate={navigate} customerId={m.cid} />;
     if ((m = matchPath(path, '/admin/kunder/:cid/objekt/:pid'))) return <AdminPropertyView session={session} onNavigate={navigate} customerId={m.cid} propertyId={m.pid} />;
@@ -464,15 +470,23 @@
   }
 
   function App() {
+    const path = useRoute();
+    const isEmbedBooking = !!matchPath(path, '/embed/booking');
     const session = useSession();
-    const [booting, setBooting] = useState(!!window.SUPABASE_ENABLED);
+    const [booting, setBooting] = useState(() => !!window.SUPABASE_ENABLED && !isEmbedBooking);
 
     useEffect(() => {
+      if (isEmbedBooking) {
+        setBooting(false);
+        return undefined;
+      }
       if (!window.SUPABASE_ENABLED) {
         sessionStore.logout();
-        return;
+        setBooting(false);
+        return undefined;
       }
       let active = true;
+      setBooting(true);
       (async () => {
         try {
           const { data } = await sb.auth.getSession();
@@ -492,17 +506,17 @@
         if (event === 'SIGNED_OUT') sessionStore.logout();
       });
       return () => { active = false; sub.subscription.unsubscribe(); };
-    }, []);
+    }, [isEmbedBooking]);
 
     useEffect(() => {
-      if (!window.SUPABASE_ENABLED || !session?.userId || typeof window.subscribeRealtimeSync !== 'function') {
+      if (isEmbedBooking || !window.SUPABASE_ENABLED || !session?.userId || typeof window.subscribeRealtimeSync !== 'function') {
         return undefined;
       }
       return window.subscribeRealtimeSync(session.userId);
-    }, [session?.userId]);
+    }, [isEmbedBooking, session?.userId]);
 
     useEffect(() => {
-      if (!session?.userId || typeof db.runShiftFinalization !== 'function') {
+      if (isEmbedBooking || !session?.userId || typeof db.runShiftFinalization !== 'function') {
         return undefined;
       }
       const tick = () => {
@@ -511,7 +525,11 @@
       tick();
       const intervalId = setInterval(tick, 60_000);
       return () => clearInterval(intervalId);
-    }, [session?.userId]);
+    }, [isEmbedBooking, session?.userId]);
+
+    if (isEmbedBooking) {
+      return <PublicBookingEmbedView />;
+    }
 
     if (booting) return <BootScreen />;
 
