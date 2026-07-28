@@ -582,6 +582,21 @@
     const [h, mi] = timeStr.split(':').map(Number);
     return new Date(y, m - 1, d, h, mi, 0, 0);
   }
+  function nextAvailabilityDefaults() {
+    const start = new Date();
+    start.setMinutes(0, 0, 0);
+    start.setHours(start.getHours() + 1);
+    const end = new Date(start.getTime() + 3 * 60 * 60 * 1000);
+    if (toDateInput(end) !== toDateInput(start)) {
+      end.setFullYear(start.getFullYear(), start.getMonth(), start.getDate());
+      end.setHours(23, 59, 0, 0);
+    }
+    return {
+      date: toDateInput(start),
+      startTime: toTimeInput(start),
+      endTime: toTimeInput(end),
+    };
+  }
 
   /* ============================================================
    * ShiftDetail – återanvänds av cleaner/customer (admin senare)
@@ -2876,9 +2891,10 @@
   }
 
   function CreateAvailabilitySlotModal({ open, onClose, session }) {
-    const [date, setDate] = useState(toDateInput(new Date()));
-    const [startTime, setStartTime] = useState('09:00');
-    const [endTime, setEndTime] = useState('12:00');
+    const defaults = nextAvailabilityDefaults();
+    const [date, setDate] = useState(defaults.date);
+    const [startTime, setStartTime] = useState(defaults.startTime);
+    const [endTime, setEndTime] = useState(defaults.endTime);
     const [serviceType, setServiceType] = useState('standard_cleaning');
     const [capacity, setCapacity] = useState(1);
     const [note, setNote] = useState('');
@@ -2886,9 +2902,10 @@
 
     useEffect(() => {
       if (!open) return;
-      setDate(toDateInput(new Date()));
-      setStartTime('09:00');
-      setEndTime('12:00');
+      const next = nextAvailabilityDefaults();
+      setDate(next.date);
+      setStartTime(next.startTime);
+      setEndTime(next.endTime);
       setServiceType('standard_cleaning');
       setCapacity(1);
       setNote('');
@@ -2896,9 +2913,15 @@
     }, [open]);
 
     const validTime = startTime && endTime && startTime < endTime;
-    const canSubmit = date && validTime && Number(capacity) >= 1 && !saving;
+    const selectedStart = date && startTime ? combineDateTime(date, startTime) : null;
+    const startIsFuture = selectedStart && selectedStart.getTime() > Date.now();
+    const canSubmit = date && validTime && startIsFuture && Number(capacity) >= 1 && !saving;
 
     async function submit() {
+      if (!startIsFuture) {
+        toast.error('Välj en framtida starttid.');
+        return;
+      }
       setSaving(true);
       try {
         const r = await db.createBookingAvailabilitySlot({
@@ -2945,7 +2968,7 @@
           <Field label="Start" required>
             <Input type="time" value={startTime} onChange={e => setStartTime(e.target.value)} />
           </Field>
-          <Field label="Slut" required error={!validTime && startTime && endTime ? 'Efter start.' : null}>
+          <Field label="Slut" required error={!validTime && startTime && endTime ? 'Efter start.' : (!startIsFuture && selectedStart ? 'Starten har passerat.' : null)}>
             <Input type="time" value={endTime} onChange={e => setEndTime(e.target.value)} />
           </Field>
         </div>
