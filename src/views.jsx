@@ -60,6 +60,7 @@
     const [confirmation, setConfirmation] = useState(null);
     const [form, setForm] = useState({
       serviceType: 'standard_cleaning',
+      homeFrequency: 'one_time',
       areaSqm: '',
       rooms: '',
       bathrooms: '1',
@@ -78,7 +79,8 @@
     });
 
     const selectedSlot = slots.find(s => s.id === form.selectedSlotId);
-    const estimatedPrice = estimatePublicBookingPrice(form);
+    const priceDetails = getPublicBookingPriceDetails(form);
+    const estimatedPrice = priceDetails.price;
     const canChooseSlot = !!form.serviceType;
     const canSubmit = form.selectedSlotId && form.customerName.trim().length >= 2 && form.customerEmail.includes('@') &&
       form.customerPhone.trim().length >= 6 && form.address.trim().length >= 3 && form.consent && !submitting;
@@ -169,7 +171,17 @@
             city: form.city,
             area_sqm: form.areaSqm ? Number(form.areaSqm) : null,
             rooms: form.rooms ? Number(form.rooms) : null,
-            addons: { windows: form.windows, oven: form.oven, bathrooms: Number(form.bathrooms || 1) },
+            addons: {
+              windows: form.windows,
+              oven: form.oven,
+              bathrooms: Number(form.bathrooms || 1),
+              home_frequency: form.serviceType === 'standard_cleaning' ? form.homeFrequency : null,
+              home_frequency_label: form.serviceType === 'standard_cleaning' ? priceDetails.frequencyLabel : null,
+              estimated_hours: priceDetails.hours,
+              hourly_price_after_rut: priceDetails.hourlyRate,
+              rut_included: form.serviceType === 'standard_cleaning',
+              requires_admin_price_review: !!form.message.trim(),
+            },
             estimated_price_sek: estimatedPrice,
             message: form.message,
             website: form.website,
@@ -213,7 +225,7 @@
                 <div>
                   <h1 className="text-2xl font-extrabold text-slate-900">Tack! Din förfrågan är skickad.</h1>
                   <p className="mt-2 text-sm text-slate-700">
-                    Vi återkommer när tiden är bekräftad. Tiden är reserverad medan vi behandlar förfrågan.
+                    Vi återkommer för att gå igenom upplägg och bekräfta tiden. Din förfrågan är mottagen och tiden är reserverad medan vi behandlar den.
                   </p>
                   {confirmation.slot && (
                     <p className="mt-4 text-sm font-semibold text-slate-900">
@@ -273,6 +285,31 @@
                       </button>
                     ))}
                   </div>
+                  {form.serviceType === 'standard_cleaning' && (
+                    <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+                      <p className="text-sm font-bold text-slate-900">Hur ofta vill du ha hemstädning?</p>
+                      <div className="mt-3 grid sm:grid-cols-3 gap-3">
+                        {[
+                          ['one_time', 'Engångsstädning', 250],
+                          ['biweekly', 'Varannan vecka', 235],
+                          ['weekly', 'Varje vecka', 220],
+                        ].map(([id, label, rate]) => (
+                          <button
+                            key={id}
+                            type="button"
+                            onClick={() => update('homeFrequency', id)}
+                            className={cx(
+                              'rounded-xl border bg-white p-3 text-left transition-all',
+                              form.homeFrequency === id ? 'border-brand-500 ring-2 ring-brand-100' : 'border-slate-200 hover:border-brand-200',
+                            )}
+                          >
+                            <p className="font-bold text-slate-900">{label}</p>
+                            <p className="mt-1 text-xs font-semibold text-slate-600">{rate} kr/h efter RUT</p>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                   <div className="grid md:grid-cols-2 gap-3 mt-4">
                     <RangeNumberField
                       label="Kvadratmeter"
@@ -360,7 +397,7 @@
                     <Checkbox
                       checked={form.consent}
                       onChange={v => update('consent', v)}
-                      label="Jag godkänner att CleanUp kontaktar mig om min förfrågan."
+                      label="Jag godkänner att CleanUp kontaktar mig om min förfrågan och behandlar mina uppgifter tryggt enligt GDPR."
                     />
                   </div>
                 </div>
@@ -379,11 +416,22 @@
             <Card padding="md" className="h-fit">
               <p className="text-xs font-semibold uppercase text-slate-500">Uppskattat pris</p>
               <p className="mt-2 text-3xl font-extrabold text-slate-900">{estimatedPrice.toLocaleString('sv-SE')} kr</p>
-              <p className="mt-1 text-xs text-slate-500">Slutligt pris bekräftas efter genomgång.</p>
+              <p className="mt-1 text-xs text-slate-500">Prisförslag ink. RUT-avdrag. Slutligt upplägg och pris bekräftas efter genomgång.</p>
               <div className="mt-4 space-y-2 text-sm text-slate-600">
                 <p><span className="font-semibold text-slate-900">Tjänst:</span> {serviceLabel(form.serviceType)}</p>
+                {form.serviceType === 'standard_cleaning' && (
+                  <>
+                    <p><span className="font-semibold text-slate-900">Frekvens:</span> {priceDetails.frequencyLabel}</p>
+                    <p><span className="font-semibold text-slate-900">Städning:</span> {priceDetails.hours} tim · {priceDetails.hourlyRate} kr/h</p>
+                  </>
+                )}
                 {selectedSlot && <p><span className="font-semibold text-slate-900">Tid:</span> {formatDate(selectedSlot.starts_at)} {formatTime(selectedSlot.starts_at)}</p>}
               </div>
+              {form.serviceType === 'standard_cleaning' && (
+                <p className="mt-4 border-t border-slate-100 pt-3 text-[11px] leading-relaxed text-slate-500">
+                  Om RUT-avdrag inte kan nyttjas faktureras ordinarie belopp. Mätning av objektet kan vid behov göras på plats.
+                </p>
+              )}
             </Card>
           </div>
         </div>
@@ -391,7 +439,35 @@
     );
   }
 
-  function estimatePublicBookingPrice(form) {
+  function getHomeCleaningHours(areaSqm) {
+    const area = Math.max(0, Number(areaSqm || 0));
+    if (area <= 50) return 2;
+    if (area <= 90) return 3;
+    if (area <= 140) return 4;
+    return 5;
+  }
+
+  function getHomeCleaningFrequency(frequency) {
+    const options = {
+      one_time: { label: 'Engångsstädning', hourlyRate: 250 },
+      biweekly: { label: 'Varannan vecka', hourlyRate: 235 },
+      weekly: { label: 'Varje vecka', hourlyRate: 220 },
+    };
+    return options[frequency] || options.one_time;
+  }
+
+  function getPublicBookingPriceDetails(form) {
+    if (form.serviceType === 'standard_cleaning') {
+      const frequency = getHomeCleaningFrequency(form.homeFrequency);
+      const hours = getHomeCleaningHours(form.areaSqm);
+      return {
+        price: hours * frequency.hourlyRate,
+        hours,
+        hourlyRate: frequency.hourlyRate,
+        frequencyLabel: frequency.label,
+      };
+    }
+
     const area = Math.max(0, Number(form.areaSqm || 0));
     const rooms = Math.max(0, Number(form.rooms || 0));
     const bathrooms = Math.max(1, Number(form.bathrooms || 1));
@@ -405,7 +481,12 @@
     let price = (baseByService[form.serviceType] || 590) + area * areaRate + rooms * 80 + bathrooms * 120;
     if (form.windows) price += 450;
     if (form.oven) price += 250;
-    return Math.max(390, Math.round(price / 10) * 10);
+    return {
+      price: Math.max(390, Math.round(price / 10) * 10),
+      hours: null,
+      hourlyRate: null,
+      frequencyLabel: '',
+    };
   }
 
   const LOGIN_REMEMBER_KEY = 'cleanup_login_remember_v1';
@@ -828,6 +909,7 @@
     const isCustomerView = role === 'customer' || role === 'customer_employee';
     const cleanerLabel = db.displayCleaner(shift.cleaner_user_id, role);
     const bookingRequest = role === 'admin' ? db.bookingRequestForShift(shift.id) : null;
+    const bookingAddons = bookingRequest?.addons && typeof bookingRequest.addons === 'object' ? bookingRequest.addons : {};
     const bookingWorkflowStatus = bookingRequest
       ? (shift.status === 'Godkänt' ? 'approved' : shift.status === 'Avbokat' ? 'declined' : bookingRequest.status)
       : null;
@@ -940,11 +1022,26 @@
                       {bookingRequest.rooms ? ` · ${bookingRequest.rooms} rum` : ''}
                     </dd>
                   </div>
+                  {bookingRequest.service_type === 'standard_cleaning' && (
+                    <div>
+                      <dt className="text-xs font-semibold text-slate-500">Hemstädning</dt>
+                      <dd className="text-slate-800">
+                        {bookingAddons.home_frequency_label || 'Engångsstädning'}
+                        {bookingAddons.estimated_hours ? ` · ${bookingAddons.estimated_hours} tim` : ''}
+                        {bookingAddons.hourly_price_after_rut ? ` · ${bookingAddons.hourly_price_after_rut} kr/h efter RUT` : ''}
+                      </dd>
+                    </div>
+                  )}
                   <div>
                     <dt className="text-xs font-semibold text-slate-500">Önskad tid</dt>
                     <dd className="text-slate-800">{formatDateLong(bookingRequest.requested_starts_at)} · {formatTime(bookingRequest.requested_starts_at)}-{formatTime(bookingRequest.requested_ends_at)}</dd>
                   </div>
                 </dl>
+                {bookingAddons.requires_admin_price_review && (
+                  <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                    Kunden har lämnat särskilda önskemål. Gå gärna igenom upplägg och pris med kund innan godkännande.
+                  </div>
+                )}
                 {bookingRequest.message && (
                   <p className="mt-4 rounded-xl bg-white p-3 text-sm text-slate-700 ring-1 ring-brand-100">{bookingRequest.message}</p>
                 )}
