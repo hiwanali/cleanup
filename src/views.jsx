@@ -318,22 +318,11 @@
                   ) : slots.length === 0 ? (
                     <EmptyState icon="calendar" title="Inga lediga tider just nu" description="Prova en annan tjänst eller kontakta oss direkt." />
                   ) : (
-                    <div className="grid sm:grid-cols-2 gap-3 mt-4">
-                      {slots.map(slot => (
-                        <button
-                          key={slot.id}
-                          type="button"
-                          onClick={() => update('selectedSlotId', slot.id)}
-                          className={cx(
-                            'text-left rounded-xl border p-4 transition-colors',
-                            form.selectedSlotId === slot.id ? 'border-brand-500 bg-brand-50' : 'border-slate-200 hover:bg-slate-50',
-                          )}
-                        >
-                          <p className="font-bold text-slate-900">{formatDateLong(slot.starts_at)}</p>
-                          <p className="text-sm text-slate-600 mt-1">{formatTime(slot.starts_at)}-{formatTime(slot.ends_at)}</p>
-                        </button>
-                      ))}
-                    </div>
+                    <AvailabilityCalendar
+                      slots={slots}
+                      selectedSlotId={form.selectedSlotId}
+                      onSelectSlot={slot => update('selectedSlotId', slot.id)}
+                    />
                   )}
                 </div>
               )}
@@ -2747,6 +2736,205 @@
     return x.getFullYear() === y.getFullYear() && x.getMonth() === y.getMonth() && x.getDate() === y.getDate();
   }
 
+  function AvailabilityCalendar({
+    slots = [],
+    selectedSlotId = '',
+    onSelectSlot,
+    mode = 'public',
+    getReservedCount,
+    onToggleSlot,
+    onToggleDay,
+  }) {
+    const [cursor, setCursor] = useState(() => calStartOfMonth(new Date()));
+    const [selectedDayKey, setSelectedDayKey] = useState('');
+    const monthStart = calStartOfMonth(cursor);
+    const gridStart = new Date(monthStart);
+    gridStart.setDate(gridStart.getDate() - calMondayIndex(monthStart));
+
+    useEffect(() => {
+      setSelectedDayKey('');
+    }, [slots.length, mode]);
+
+    const days = [];
+    for (let i = 0; i < 42; i += 1) {
+      const d = new Date(gridStart);
+      d.setDate(gridStart.getDate() + i);
+      days.push(d);
+    }
+
+    const byDay = {};
+    slots.forEach(slot => {
+      const key = toDateInput(slot.starts_at);
+      (byDay[key] = byDay[key] || []).push(slot);
+    });
+    Object.values(byDay).forEach(list => list.sort((a, b) => new Date(a.starts_at) - new Date(b.starts_at)));
+
+    function gotoMonth(delta) {
+      setCursor(prev => {
+        const x = new Date(prev);
+        x.setMonth(x.getMonth() + delta);
+        return calStartOfMonth(x);
+      });
+    }
+
+    function slotReserved(slot) {
+      return typeof getReservedCount === 'function' ? getReservedCount(slot) : 0;
+    }
+
+    function slotFull(slot) {
+      return slotReserved(slot) >= Number(slot.capacity || 1);
+    }
+
+    function dayHasActive(list) {
+      return list.some(slot => slot.active !== false && !slotFull(slot));
+    }
+
+    function renderSlot(slot) {
+      const isSelected = selectedSlotId === slot.id;
+      const reserved = slotReserved(slot);
+      const full = reserved >= Number(slot.capacity || 1);
+      const isAdmin = mode === 'admin';
+      return (
+        <div
+          key={slot.id}
+          className={cx(
+            'rounded-xl border p-4 transition-all',
+            isSelected ? 'border-brand-500 bg-brand-50 shadow-sm' : 'border-slate-200 bg-white',
+            isAdmin && slot.active === false && 'opacity-70',
+          )}
+        >
+          <div className="flex items-start justify-between gap-3">
+            <button
+              type="button"
+              onClick={() => onSelectSlot && onSelectSlot(slot)}
+              className={cx('min-w-0 text-left', onSelectSlot && 'cursor-pointer')}
+            >
+              <p className="font-bold text-slate-900">{formatTime(slot.starts_at)}-{formatTime(slot.ends_at)}</p>
+              <p className="mt-1 text-sm text-slate-600">{serviceLabel(slot.service_type)}</p>
+              {isAdmin ? (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <Badge variant={slot.active === false ? 'slate' : full ? 'amber' : 'emerald'}>
+                    {slot.active === false ? 'Pausad' : full ? 'Reserverad' : 'Aktiv'}
+                  </Badge>
+                  <Badge variant="slate">Kapacitet {slot.capacity}</Badge>
+                  <Badge variant="slate">Reserverat {reserved}</Badge>
+                </div>
+              ) : (
+                <p className="mt-2 text-xs font-semibold text-emerald-700">
+                  {slot.available_capacity || Math.max(0, Number(slot.capacity || 1) - reserved)} ledig
+                </p>
+              )}
+            </button>
+            {isAdmin && onToggleSlot && (
+              <Button variant="outline" size="sm" icon={slot.active === false ? 'check' : 'pause'} onClick={() => onToggleSlot(slot)}>
+                {slot.active === false ? 'Öppna' : 'Pausa'}
+              </Button>
+            )}
+          </div>
+          {isAdmin && slot.note && <p className="mt-3 text-sm text-slate-500">{slot.note}</p>}
+        </div>
+      );
+    }
+
+    if (selectedDayKey) {
+      const daySlots = byDay[selectedDayKey] || [];
+      const dayDate = combineDateTime(selectedDayKey, '12:00');
+      const hasOpen = daySlots.some(slot => slot.active !== false);
+      return (
+        <div className="mt-4 animate-in fade-in duration-200">
+          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-2">
+              <Button variant="ghost" size="sm" icon="chevron-left" onClick={() => setSelectedDayKey('')}>
+                Kalender
+              </Button>
+              <div>
+                <p className="text-lg font-extrabold text-slate-900 capitalize">{formatDateLong(dayDate)}</p>
+                <p className="text-sm text-slate-500">{daySlots.length} tider</p>
+              </div>
+            </div>
+            {mode === 'admin' && onToggleDay && daySlots.length > 0 && (
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" icon="pause" onClick={() => onToggleDay(daySlots, false)} disabled={!hasOpen}>
+                  Pausa dagen
+                </Button>
+                <Button variant="outline" size="sm" icon="check" onClick={() => onToggleDay(daySlots, true)}>
+                  Öppna dagen
+                </Button>
+              </div>
+            )}
+          </div>
+          <div className="grid sm:grid-cols-2 gap-3">
+            {daySlots.map(renderSlot)}
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="mt-4">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-1.5">
+            <Button variant="outline" size="sm" iconOnly icon="chevron-left" aria-label="Föregående månad" onClick={() => gotoMonth(-1)} />
+            <Button variant="outline" size="sm" iconOnly icon="chevron-right" aria-label="Nästa månad" onClick={() => gotoMonth(1)} />
+            <Button variant="ghost" size="sm" onClick={() => setCursor(calStartOfMonth(new Date()))}>Idag</Button>
+          </div>
+          <h3 className="text-base font-bold text-slate-900 capitalize">
+            {CAL_MONTHS[monthStart.getMonth()]} {monthStart.getFullYear()}
+          </h3>
+        </div>
+
+        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="grid grid-cols-7 bg-slate-50">
+            {CAL_WEEKDAYS.map(w => (
+              <div key={w} className="px-1 py-2 text-center text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                {w}
+              </div>
+            ))}
+          </div>
+          <div className="grid grid-cols-7">
+            {days.map((day, index) => {
+              const key = toDateInput(day);
+              const list = byDay[key] || [];
+              const hasSlots = list.length > 0;
+              const hasActive = dayHasActive(list);
+              const inMonth = day.getMonth() === monthStart.getMonth();
+              const isToday = calSameDay(day, new Date());
+              return (
+                <button
+                  key={index}
+                  type="button"
+                  disabled={!hasSlots}
+                  onClick={() => hasSlots && setSelectedDayKey(key)}
+                  className={cx(
+                    'relative min-h-[66px] border-t border-r border-slate-100 p-2 text-left transition-all',
+                    inMonth ? 'bg-white' : 'bg-slate-50/70',
+                    hasSlots ? 'hover:bg-emerald-50 cursor-pointer' : 'cursor-default',
+                  )}
+                >
+                  <span className={cx(
+                    'inline-flex h-7 w-7 items-center justify-center rounded-full text-sm font-bold',
+                    isToday ? 'bg-brand-600 text-white' : inMonth ? 'text-slate-800' : 'text-slate-400',
+                  )}>
+                    {day.getDate()}
+                  </span>
+                  {hasSlots && (
+                    <div className="absolute bottom-2 left-2 right-2 flex items-center justify-center gap-1">
+                      <span className={cx(
+                        'h-2.5 w-2.5 rounded-full shadow-sm ring-2 ring-white',
+                        hasActive ? 'bg-emerald-500' : 'bg-slate-400',
+                      )} />
+                      {list.length > 1 && <span className="text-[11px] font-bold text-slate-500">{list.length}</span>}
+                    </div>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   function ScheduleCalendar({ shifts = [], viewerRole, onSelectShift }) {
     const [cursor, setCursor] = useState(() => calStartOfMonth(new Date()));
     const [dayDetail, setDayDetail] = useState(null);
@@ -2903,6 +3091,19 @@
         toast.success(slot.active ? 'Tidsluckan pausad.' : 'Tidsluckan öppnad.');
     }
 
+    async function toggleDaySlots(daySlots, active) {
+      const targets = daySlots.filter(slot => slot.active !== active);
+      if (targets.length === 0) return;
+      for (const slot of targets) {
+        const r = await db.updateBookingAvailabilitySlot(slot.id, { active }, session.userId);
+        if (r?.error) {
+          toast.error(r.message || 'Kunde inte uppdatera alla tider.');
+          return;
+        }
+      }
+      toast.success(active ? 'Dagens tider öppnade.' : 'Dagens tider pausade.');
+    }
+
     return (
       <div>
         <PageHeader
@@ -2940,42 +3141,15 @@
             />
           </Card>
         ) : (
-          <div className="grid md:grid-cols-2 gap-3">
-            {visibleSlots.map(slot => {
-              const reserved = db.reservedBookingCountForSlot(slot.id);
-              const full = reserved >= slot.capacity;
-              return (
-                <Card key={slot.id} padding="md" className={!slot.active ? 'opacity-75' : ''}>
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <Badge variant={slot.active ? (full ? 'amber' : 'emerald') : 'slate'} icon={slot.active ? 'clock' : 'pause'}>
-                          {slot.active ? (full ? 'Reserverad' : 'Aktiv') : 'Pausad'}
-                        </Badge>
-                        <Badge variant="brand">{serviceLabel(slot.service_type)}</Badge>
-                      </div>
-                      <p className="mt-3 font-bold text-slate-900">{formatDateLong(slot.starts_at)}</p>
-                      <p className="text-sm text-slate-600">{formatTime(slot.starts_at)}-{formatTime(slot.ends_at)}</p>
-                    </div>
-                    <Button variant="outline" size="sm" icon={slot.active ? 'pause' : 'check'} onClick={() => toggleSlot(slot)}>
-                      {slot.active ? 'Pausa' : 'Öppna'}
-                    </Button>
-                  </div>
-                  <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
-                    <div className="rounded-lg bg-slate-50 p-3">
-                      <p className="text-xs text-slate-500">Kapacitet</p>
-                      <p className="font-bold text-slate-900">{slot.capacity}</p>
-                    </div>
-                    <div className="rounded-lg bg-slate-50 p-3">
-                      <p className="text-xs text-slate-500">Reserverat</p>
-                      <p className="font-bold text-slate-900">{reserved}</p>
-                    </div>
-                  </div>
-                  {slot.note && <p className="mt-3 text-sm text-slate-600">{slot.note}</p>}
-                </Card>
-              );
-            })}
-          </div>
+          <Card padding="md">
+            <AvailabilityCalendar
+              mode="admin"
+              slots={visibleSlots}
+              getReservedCount={slot => db.reservedBookingCountForSlot(slot.id)}
+              onToggleSlot={toggleSlot}
+              onToggleDay={toggleDaySlots}
+            />
+          </Card>
         )}
 
         <CreateAvailabilitySlotModal open={createOpen} onClose={() => setCreateOpen(false)} session={session} />
