@@ -582,6 +582,15 @@
     const [h, mi] = timeStr.split(':').map(Number);
     return new Date(y, m - 1, d, h, mi, 0, 0);
   }
+  function addWeeks(date, weeks) {
+    const x = new Date(date);
+    x.setDate(x.getDate() + weeks * 7);
+    return x;
+  }
+  function weekdayLabel(dateStr) {
+    if (!dateStr) return '';
+    return combineDateTime(dateStr, '12:00').toLocaleDateString('sv-SE', { weekday: 'long' });
+  }
   function nextAvailabilityDefaults() {
     const start = new Date();
     start.setMinutes(0, 0, 0);
@@ -2898,6 +2907,8 @@
     const [serviceType, setServiceType] = useState('standard_cleaning');
     const [capacity, setCapacity] = useState(1);
     const [note, setNote] = useState('');
+    const [repeatWeekly, setRepeatWeekly] = useState(false);
+    const [repeatWeeks, setRepeatWeeks] = useState(8);
     const [saving, setSaving] = useState(false);
 
     useEffect(() => {
@@ -2909,39 +2920,52 @@
       setServiceType('standard_cleaning');
       setCapacity(1);
       setNote('');
+      setRepeatWeekly(false);
+      setRepeatWeeks(8);
       setSaving(false);
     }, [open]);
 
     const validTime = startTime && endTime && startTime < endTime;
     const selectedStart = date && startTime ? combineDateTime(date, startTime) : null;
     const startIsFuture = selectedStart && selectedStart.getTime() > Date.now();
-    const canSubmit = date && validTime && startIsFuture && Number(capacity) >= 1 && !saving;
+    const occurrenceCount = repeatWeekly ? Math.max(1, Math.min(52, Number(repeatWeeks) || 0)) : 1;
+    const validRepeat = !repeatWeekly || (Number.isInteger(Number(repeatWeeks)) && Number(repeatWeeks) >= 1 && Number(repeatWeeks) <= 52);
+    const canSubmit = date && validTime && startIsFuture && validRepeat && Number(capacity) >= 1 && !saving;
 
     async function submit() {
       if (!startIsFuture) {
         toast.error('Välj en framtida starttid.');
         return;
       }
+      if (!validRepeat) {
+        toast.error('Välj 1-52 veckor.');
+        return;
+      }
       setSaving(true);
       try {
-        const r = await db.createBookingAvailabilitySlot({
-          startsAt: combineDateTime(date, startTime),
-          endsAt: combineDateTime(date, endTime),
-          capacity: Number(capacity),
-          serviceType,
-          note,
-          actorUserId: session.userId,
-        });
-        if (r?.error) {
-          const messages = {
-            INVALID_TIME: 'Sluttid måste vara efter starttid.',
-            INVALID_CAPACITY: 'Kapacitet måste vara minst 1.',
-            FORBIDDEN: 'Du saknar behörighet.',
-          };
-          toast.error(r.message || messages[r.error] || 'Kunde inte skapa tidsluckan.');
-          return;
+        const baseStart = combineDateTime(date, startTime);
+        const baseEnd = combineDateTime(date, endTime);
+        const messages = {
+          INVALID_TIME: 'Sluttid måste vara efter starttid.',
+          INVALID_CAPACITY: 'Kapacitet måste vara minst 1.',
+          FORBIDDEN: 'Du saknar behörighet.',
+        };
+
+        for (let i = 0; i < occurrenceCount; i += 1) {
+          const r = await db.createBookingAvailabilitySlot({
+            startsAt: addWeeks(baseStart, i),
+            endsAt: addWeeks(baseEnd, i),
+            capacity: Number(capacity),
+            serviceType,
+            note,
+            actorUserId: session.userId,
+          });
+          if (r?.error) {
+            toast.error(r.message || messages[r.error] || 'Kunde inte skapa alla tidsluckor.');
+            return;
+          }
         }
-        toast.success('Tidsluckan är skapad.');
+        toast.success(occurrenceCount === 1 ? 'Tidsluckan är skapad.' : `${occurrenceCount} tidsluckor är skapade.`);
         onClose();
       } finally {
         setSaving(false);
@@ -2989,6 +3013,30 @@
           <Field label="Intern anteckning" hint="Visas inte i iframen.">
             <Textarea rows={2} value={note} onChange={e => setNote(e.target.value)} />
           </Field>
+        </div>
+        <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+          <Checkbox
+            checked={repeatWeekly}
+            onChange={setRepeatWeekly}
+            label={`Upprepa varje ${weekdayLabel(date) || 'vecka'}`}
+          />
+          {repeatWeekly && (
+            <div className="mt-3 grid md:grid-cols-2 gap-3">
+              <Field label="Antal veckor" required hint="Max 52. Inkluderar valt startdatum.">
+                <Input
+                  type="number"
+                  min="1"
+                  max="52"
+                  value={repeatWeeks}
+                  onChange={e => setRepeatWeeks(e.target.value)}
+                />
+              </Field>
+              <div className="rounded-lg bg-white border border-slate-200 p-3 text-sm text-slate-600">
+                <p className="font-semibold text-slate-900">Skapas i kalendern</p>
+                <p className="mt-1">{validRepeat ? occurrenceCount : 0} tidsluckor, en per vecka.</p>
+              </div>
+            </div>
+          )}
         </div>
       </Modal>
     );
