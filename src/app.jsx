@@ -96,7 +96,7 @@
     admin: [
       { path: '/admin/dashboard', label: 'Dashboard', icon: 'home' },
       { path: '/admin/schema', label: 'Schema', icon: 'calendar' },
-      { path: '/admin/tillganglighet', label: 'TillgÃ¤nglighet', icon: 'clock' },
+      { path: '/admin/tillganglighet', label: 'Tillgänglighet', icon: 'clock' },
       { path: '/admin/kunder', label: 'Kunder', icon: 'briefcase' },
       { path: '/admin/stadare', label: 'Städare', icon: 'users' },
       { path: '/admin/meddelanden', label: 'Meddelanden', icon: 'message-square' },

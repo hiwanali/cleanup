@@ -37,6 +37,7 @@ Genomfort:
    - `PUBLIC_BOOKING_ORG_ID`
    - `PUBLIC_BOOKING_LEAD_CUSTOMER_ID`
    - `PUBLIC_BOOKING_ALLOWED_ORIGINS`
+   - 2026-07-28: preview-testdomanen `https://cleanup-hiwanadili-4266s-projects.vercel.app` lades till i allowed origins.
 8. Live-test genomfort:
    - skapade testslot
    - `public-availability` returnerade slotten

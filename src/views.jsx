@@ -133,7 +133,7 @@
         } catch (_) {
           if (!cancelled) {
             setSlots([]);
-            setError('Kunde inte hÃ¤mta lediga tider just nu.');
+            setError('Kunde inte hämta lediga tider just nu.');
           }
         } finally {
           if (!cancelled) setLoadingSlots(false);
@@ -178,7 +178,7 @@
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
           if (data.error === 'slot_unavailable') {
-            setError('Tiden hann bli reserverad. VÃ¤lj en annan ledig tid.');
+            setError('Tiden hann bli reserverad. Välj en annan ledig tid.');
             setForm(f => ({ ...f, selectedSlotId: '' }));
             setStep(2);
             return;
@@ -188,7 +188,7 @@
         setConfirmation({ requestId: data.request_id, slot: selectedSlot });
         setStep(4);
       } catch (_) {
-        setError('Kunde inte skicka fÃ¶rfrÃ¥gan. FÃ¶rsÃ¶k igen om en stund.');
+        setError('Kunde inte skicka förfrågan. Försök igen om en stund.');
       } finally {
         setSubmitting(false);
       }
@@ -202,7 +202,7 @@
               <BrandLogo size="md" />
               <div>
                 <p className="font-extrabold text-slate-900">CleanUp</p>
-                <p className="text-xs text-slate-500">BokningsfÃ¶rfrÃ¥gan</p>
+                <p className="text-xs text-slate-500">Bokningsförfrågan</p>
               </div>
             </div>
             <Card padding="lg" className="border-emerald-200 bg-emerald-50/40">
@@ -211,13 +211,13 @@
                   <Icon name="check" className="w-5 h-5" />
                 </span>
                 <div>
-                  <h1 className="text-2xl font-extrabold text-slate-900">Tack! Din fÃ¶rfrÃ¥gan Ã¤r skickad.</h1>
+                  <h1 className="text-2xl font-extrabold text-slate-900">Tack! Din förfrågan är skickad.</h1>
                   <p className="mt-2 text-sm text-slate-700">
-                    Vi Ã¥terkommer nÃ¤r tiden Ã¤r bekrÃ¤ftad. Tiden Ã¤r reserverad medan vi behandlar fÃ¶rfrÃ¥gan.
+                    Vi återkommer när tiden är bekräftad. Tiden är reserverad medan vi behandlar förfrågan.
                   </p>
                   {confirmation.slot && (
                     <p className="mt-4 text-sm font-semibold text-slate-900">
-                      {formatDateLong(confirmation.slot.starts_at)} kl. {formatTime(confirmation.slot.starts_at)}â€“{formatTime(confirmation.slot.ends_at)}
+                      {formatDateLong(confirmation.slot.starts_at)} kl. {formatTime(confirmation.slot.starts_at)}-{formatTime(confirmation.slot.ends_at)}
                     </p>
                   )}
                 </div>
@@ -236,7 +236,7 @@
               <BrandLogo size="md" />
               <div>
                 <p className="font-extrabold text-slate-900">CleanUp</p>
-                <p className="text-xs text-slate-500">Pris & bokningsfÃ¶rfrÃ¥gan</p>
+                <p className="text-xs text-slate-500">Pris & bokningsförfrågan</p>
               </div>
             </div>
             <Badge variant="brand">Steg {step} av 3</Badge>
@@ -252,13 +252,13 @@
             <Card padding="md">
               {step === 1 && (
                 <div>
-                  <h1 className="text-xl font-extrabold text-slate-900">Vad behÃ¶ver du hjÃ¤lp med?</h1>
+                  <h1 className="text-xl font-extrabold text-slate-900">Vad behöver du hjälp med?</h1>
                   <div className="grid sm:grid-cols-2 gap-3 mt-4">
                     {[
-                      ['standard_cleaning', 'HemstÃ¤dning'],
-                      ['deep_cleaning', 'StorstÃ¤dning'],
-                      ['moving_cleaning', 'FlyttstÃ¤dning'],
-                      ['window_cleaning', 'FÃ¶nsterputs'],
+                      ['standard_cleaning', 'Hemstädning'],
+                      ['deep_cleaning', 'Storstädning'],
+                      ['moving_cleaning', 'Flyttstädning'],
+                      ['window_cleaning', 'Fönsterputs'],
                     ].map(([id, label]) => (
                       <button
                         key={id}
@@ -285,22 +285,22 @@
                     </Field>
                   </div>
                   <div className="flex flex-wrap gap-4 mt-4">
-                    <Checkbox label="FÃ¶nsterputs" checked={form.windows} onChange={v => update('windows', v)} />
-                    <Checkbox label="UgnsrengÃ¶ring" checked={form.oven} onChange={v => update('oven', v)} />
+                    <Checkbox label="Fönsterputs" checked={form.windows} onChange={v => update('windows', v)} />
+                    <Checkbox label="Ugnsrengöring" checked={form.oven} onChange={v => update('oven', v)} />
                   </div>
                 </div>
               )}
 
               {step === 2 && (
                 <div>
-                  <h1 className="text-xl font-extrabold text-slate-900">VÃ¤lj en ledig tid</h1>
+                  <h1 className="text-xl font-extrabold text-slate-900">Välj en ledig tid</h1>
                   {loadingSlots ? (
                     <div className="mt-4 grid sm:grid-cols-2 gap-3">
                       <Skeleton className="h-20" />
                       <Skeleton className="h-20" />
                     </div>
                   ) : slots.length === 0 ? (
-                    <EmptyState icon="calendar" title="Inga lediga tider just nu" description="Prova en annan tjÃ¤nst eller kontakta oss direkt." />
+                    <EmptyState icon="calendar" title="Inga lediga tider just nu" description="Prova en annan tjänst eller kontakta oss direkt." />
                   ) : (
                     <div className="grid sm:grid-cols-2 gap-3 mt-4">
                       {slots.map(slot => (
@@ -314,7 +314,7 @@
                           )}
                         >
                           <p className="font-bold text-slate-900">{formatDateLong(slot.starts_at)}</p>
-                          <p className="text-sm text-slate-600 mt-1">{formatTime(slot.starts_at)}â€“{formatTime(slot.ends_at)}</p>
+                          <p className="text-sm text-slate-600 mt-1">{formatTime(slot.starts_at)}-{formatTime(slot.ends_at)}</p>
                         </button>
                       ))}
                     </div>
@@ -355,7 +355,7 @@
                     <Checkbox
                       checked={form.consent}
                       onChange={v => update('consent', v)}
-                      label="Jag godkÃ¤nner att CleanUp kontaktar mig om min fÃ¶rfrÃ¥gan."
+                      label="Jag godkänner att CleanUp kontaktar mig om min förfrågan."
                     />
                   </div>
                 </div>
@@ -364,9 +364,9 @@
               <div className="mt-6 flex items-center justify-between gap-2">
                 <Button variant="ghost" disabled={step === 1 || submitting} onClick={() => setStep(s => Math.max(1, s - 1))}>Tillbaka</Button>
                 {step < 3 ? (
-                  <Button disabled={step === 2 && !form.selectedSlotId} onClick={() => setStep(s => Math.min(3, s + 1))}>FortsÃ¤tt</Button>
+                  <Button disabled={step === 2 && !form.selectedSlotId} onClick={() => setStep(s => Math.min(3, s + 1))}>Fortsätt</Button>
                 ) : (
-                  <Button icon="send" loading={submitting} disabled={!canSubmit} onClick={submit}>Skicka fÃ¶rfrÃ¥gan</Button>
+                  <Button icon="send" loading={submitting} disabled={!canSubmit} onClick={submit}>Skicka förfrågan</Button>
                 )}
               </div>
             </Card>
@@ -374,9 +374,9 @@
             <Card padding="md" className="h-fit">
               <p className="text-xs font-semibold uppercase text-slate-500">Uppskattat pris</p>
               <p className="mt-2 text-3xl font-extrabold text-slate-900">{estimatedPrice.toLocaleString('sv-SE')} kr</p>
-              <p className="mt-1 text-xs text-slate-500">Slutligt pris bekrÃ¤ftas efter genomgÃ¥ng.</p>
+              <p className="mt-1 text-xs text-slate-500">Slutligt pris bekräftas efter genomgång.</p>
               <div className="mt-4 space-y-2 text-sm text-slate-600">
-                <p><span className="font-semibold text-slate-900">TjÃ¤nst:</span> {serviceLabel(form.serviceType)}</p>
+                <p><span className="font-semibold text-slate-900">Tjänst:</span> {serviceLabel(form.serviceType)}</p>
                 {selectedSlot && <p><span className="font-semibold text-slate-900">Tid:</span> {formatDate(selectedSlot.starts_at)} {formatTime(selectedSlot.starts_at)}</p>}
               </div>
             </Card>
@@ -2766,12 +2766,12 @@
    * ============================================================ */
   function serviceLabel(serviceType) {
     const labels = {
-      standard_cleaning: 'HemstÃ¤dning',
-      deep_cleaning: 'StorstÃ¤dning',
-      moving_cleaning: 'FlyttstÃ¤dning',
-      window_cleaning: 'FÃ¶nsterputs',
+      standard_cleaning: 'Hemstädning',
+      deep_cleaning: 'Storstädning',
+      moving_cleaning: 'Flyttstädning',
+      window_cleaning: 'Fönsterputs',
     };
-    return labels[serviceType] || serviceType || 'TjÃ¤nst';
+    return labels[serviceType] || serviceType || 'Tjänst';
   }
 
   function AdminAvailabilityView({ session }) {
@@ -2792,14 +2792,14 @@
         toast.error(r.message || 'Kunde inte uppdatera tidsluckan.');
         return;
       }
-      toast.success(slot.active ? 'Tidsluckan pausad.' : 'Tidsluckan Ã¶ppnad.');
+        toast.success(slot.active ? 'Tidsluckan pausad.' : 'Tidsluckan öppnad.');
     }
 
     return (
       <div>
         <PageHeader
-          title="TillgÃ¤nglighet"
-          subtitle="Manuella tidsluckor som visas i bokningswidgeten pÃ¥ cleanup.nu."
+          title="Tillgänglighet"
+          subtitle="Manuella tidsluckor som visas i bokningswidgeten på cleanup.nu."
           actions={<Button icon="plus" onClick={() => setCreateOpen(true)}>Ny tidslucka</Button>}
         />
 
@@ -2808,7 +2808,7 @@
             <div>
               <h3 className="font-bold text-slate-900">Publik bokningskalender</h3>
               <p className="text-sm text-slate-600 mt-1">
-                Kunden kan bara vÃ¤lja aktiva tider som inte redan Ã¤r reserverade.
+                Kunden kan bara välja aktiva tider som inte redan är reserverade.
               </p>
             </div>
             <Field label="Visa" className="md:w-56">
@@ -2827,7 +2827,7 @@
             <EmptyState
               icon="clock"
               title="Inga tidsluckor"
-              description="Skapa fÃ¶rsta manuella tiden som iframen fÃ¥r visa."
+              description="Skapa första manuella tiden som iframen får visa."
               action={<Button icon="plus" onClick={() => setCreateOpen(true)}>Ny tidslucka</Button>}
             />
           </Card>
@@ -2847,10 +2847,10 @@
                         <Badge variant="brand">{serviceLabel(slot.service_type)}</Badge>
                       </div>
                       <p className="mt-3 font-bold text-slate-900">{formatDateLong(slot.starts_at)}</p>
-                      <p className="text-sm text-slate-600">{formatTime(slot.starts_at)}â€“{formatTime(slot.ends_at)}</p>
+                      <p className="text-sm text-slate-600">{formatTime(slot.starts_at)}-{formatTime(slot.ends_at)}</p>
                     </div>
                     <Button variant="outline" size="sm" icon={slot.active ? 'pause' : 'check'} onClick={() => toggleSlot(slot)}>
-                      {slot.active ? 'Pausa' : 'Ã–ppna'}
+                      {slot.active ? 'Pausa' : 'Öppna'}
                     </Button>
                   </div>
                   <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
@@ -2911,14 +2911,14 @@
         });
         if (r?.error) {
           const messages = {
-            INVALID_TIME: 'Sluttid mÃ¥ste vara efter starttid.',
-            INVALID_CAPACITY: 'Kapacitet mÃ¥ste vara minst 1.',
-            FORBIDDEN: 'Du saknar behÃ¶righet.',
+            INVALID_TIME: 'Sluttid måste vara efter starttid.',
+            INVALID_CAPACITY: 'Kapacitet måste vara minst 1.',
+            FORBIDDEN: 'Du saknar behörighet.',
           };
           toast.error(r.message || messages[r.error] || 'Kunde inte skapa tidsluckan.');
           return;
         }
-        toast.success('Tidsluckan Ã¤r skapad.');
+        toast.success('Tidsluckan är skapad.');
         onClose();
       } finally {
         setSaving(false);
@@ -2934,7 +2934,7 @@
         footer={
           <>
             <Button variant="ghost" onClick={onClose} disabled={saving}>Avbryt</Button>
-            <Button icon="plus" disabled={!canSubmit} onClick={submit}>{saving ? 'Spararâ€¦' : 'Skapa'}</Button>
+            <Button icon="plus" disabled={!canSubmit} onClick={submit}>{saving ? 'Sparar...' : 'Skapa'}</Button>
           </>
         }
       >
@@ -2950,15 +2950,15 @@
           </Field>
         </div>
         <div className="grid md:grid-cols-2 gap-3 mt-3">
-          <Field label="TjÃ¤nst" required>
+          <Field label="Tjänst" required>
             <Select value={serviceType} onChange={e => setServiceType(e.target.value)}>
-              <option value="standard_cleaning">HemstÃ¤dning</option>
-              <option value="deep_cleaning">StorstÃ¤dning</option>
-              <option value="moving_cleaning">FlyttstÃ¤dning</option>
-              <option value="window_cleaning">FÃ¶nsterputs</option>
+              <option value="standard_cleaning">Hemstädning</option>
+              <option value="deep_cleaning">Storstädning</option>
+              <option value="moving_cleaning">Flyttstädning</option>
+              <option value="window_cleaning">Fönsterputs</option>
             </Select>
           </Field>
-          <Field label="Kapacitet" required hint="V1: anvÃ¤nd oftast 1.">
+          <Field label="Kapacitet" required hint="V1: använd oftast 1.">
             <Input type="number" min="1" max="20" value={capacity} onChange={e => setCapacity(e.target.value)} />
           </Field>
         </div>
