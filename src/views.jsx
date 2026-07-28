@@ -75,6 +75,7 @@
       city: '',
       message: '',
       consent: false,
+      policyAccepted: false,
       website: '',
     });
 
@@ -83,7 +84,7 @@
     const estimatedPrice = priceDetails.price;
     const canChooseSlot = !!form.serviceType;
     const canSubmit = form.selectedSlotId && form.customerName.trim().length >= 2 && form.customerEmail.includes('@') &&
-      form.customerPhone.trim().length >= 6 && form.address.trim().length >= 3 && form.consent && !submitting;
+      form.customerPhone.trim().length >= 6 && form.address.trim().length >= 3 && form.consent && form.policyAccepted && !submitting;
 
     useEffect(() => {
       document.body.classList.add('bg-white');
@@ -181,6 +182,11 @@
               hourly_price_after_rut: priceDetails.hourlyRate,
               rut_included: form.serviceType === 'standard_cleaning',
               requires_admin_price_review: !!form.message.trim(),
+              policy_accepted: form.policyAccepted,
+              policy_version: 'booking_terms_v1_2026-07-28',
+              privacy_notice_accepted: form.consent,
+              privacy_notice_version: 'privacy_notice_v1_2026-07-28',
+              accepted_at_client: new Date().toISOString(),
             },
             estimated_price_sek: estimatedPrice,
             message: form.message,
@@ -393,12 +399,26 @@
                     </Field>
                   </div>
                   <input className="hidden" tabIndex="-1" autoComplete="off" value={form.website} onChange={e => update('website', e.target.value)} />
-                  <div className="mt-4">
-                    <Checkbox
-                      checked={form.consent}
-                      onChange={v => update('consent', v)}
-                      label="Jag godkänner att CleanUp kontaktar mig om min förfrågan och behandlar mina uppgifter tryggt enligt GDPR."
-                    />
+                  <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+                    <p className="text-sm font-bold text-slate-900">Villkor och personuppgifter</p>
+                    <p className="mt-1 text-xs leading-relaxed text-slate-500">
+                      Prisförslaget är preliminärt och bekräftas efter genomgång. Vi kontaktar dig för att stämma av upplägg, tid och eventuella särskilda önskemål.
+                    </p>
+                    <div className="mt-3 space-y-3">
+                      <Checkbox
+                        checked={form.policyAccepted}
+                        onChange={v => update('policyAccepted', v)}
+                        label="Jag har läst och godkänner bokningsvillkoren för denna förfrågan."
+                      />
+                      <Checkbox
+                        checked={form.consent}
+                        onChange={v => update('consent', v)}
+                        label="Jag godkänner att CleanUp kontaktar mig om min förfrågan och behandlar mina uppgifter tryggt enligt GDPR."
+                      />
+                    </div>
+                  </div>
+                  <div className="mt-3 rounded-xl border border-slate-100 bg-white p-3 text-[11px] leading-relaxed text-slate-500">
+                    Vi sparar endast de uppgifter som behövs för att hantera förfrågan och eventuell bokning. Du kan kontakta oss om du vill få information ändrad eller borttagen.
                   </div>
                 </div>
               )}
@@ -487,6 +507,82 @@
       hourlyRate: null,
       frequencyLabel: '',
     };
+  }
+
+  function safeFilePart(value) {
+    return String(value || 'bokning')
+      .toLowerCase()
+      .replace(/[^a-z0-9åäö]+/gi, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 80) || 'bokning';
+  }
+
+  function yesNo(value) {
+    return value ? 'Ja' : 'Nej';
+  }
+
+  async function exportBookingConfirmationPdf({ shift, property, bookingRequest, bookingAddons }) {
+    if (!window.ReportExport?.exportReportPdf) {
+      throw new Error('PDF-export är inte tillgänglig.');
+    }
+
+    const statusLabel = shift.status === 'Godkänt'
+      ? 'Bekräftad i samråd med kund'
+      : shift.status === 'Planerat'
+        ? 'Förfrågan, inväntar godkännande'
+        : shift.status;
+    const cleaner = db.userById(shift.cleaner_user_id);
+    const serviceRows = [
+      { Fält: 'Status', Värde: statusLabel },
+      { Fält: 'Tjänst', Värde: serviceLabel(bookingRequest.service_type) },
+      { Fält: 'Datum och tid', Värde: `${formatDateLong(bookingRequest.requested_starts_at)} ${formatTime(bookingRequest.requested_starts_at)}-${formatTime(bookingRequest.requested_ends_at)}` },
+      { Fält: 'Adress', Värde: property?.address || bookingRequest.address || '' },
+      { Fält: 'Tilldelad städare', Värde: cleaner?.name || 'Tilldelas av CleanUp' },
+    ];
+
+    if (bookingRequest.service_type === 'standard_cleaning') {
+      serviceRows.push(
+        { Fält: 'Frekvens', Värde: bookingAddons.home_frequency_label || 'Engångsstädning' },
+        { Fält: 'Beräknad städtid', Värde: bookingAddons.estimated_hours ? `${bookingAddons.estimated_hours} timmar` : '' },
+        { Fält: 'Timpris efter RUT', Värde: bookingAddons.hourly_price_after_rut ? `${bookingAddons.hourly_price_after_rut} kr/h` : '' },
+      );
+    }
+
+    const priceRows = [
+      { Fält: 'Prisförslag', Värde: bookingRequest.estimated_price_sek != null ? `${Number(bookingRequest.estimated_price_sek).toLocaleString('sv-SE')} kr` : 'Bekräftas efter genomgång' },
+      { Fält: 'RUT-avdrag', Värde: bookingAddons.rut_included ? 'Prisförslag ink. RUT-avdrag' : 'Bekräftas efter genomgång' },
+      { Fält: 'Prisjustering', Värde: 'Slutligt upplägg och pris bekräftas av CleanUp efter genomgång med kund.' },
+      { Fält: 'Mätning', Värde: 'Mätning av objektet kan vid behov göras på plats.' },
+      { Fält: 'Om RUT ej kan nyttjas', Värde: 'Om RUT-avdrag inte kan nyttjas faktureras ordinarie belopp.' },
+    ];
+
+    const consentRows = [
+      { Fält: 'Bokningsvillkor accepterade', Värde: yesNo(bookingAddons.policy_accepted) },
+      { Fält: 'Villkorsversion', Värde: bookingAddons.policy_version || 'booking_terms_v1_2026-07-28' },
+      { Fält: 'GDPR/personuppgifter accepterat', Värde: yesNo(bookingAddons.privacy_notice_accepted) },
+      { Fält: 'Integritetsversion', Värde: bookingAddons.privacy_notice_version || 'privacy_notice_v1_2026-07-28' },
+      { Fält: 'Tidpunkt i formuläret', Värde: bookingAddons.accepted_at_client ? `${formatDateLong(bookingAddons.accepted_at_client)} ${formatTime(bookingAddons.accepted_at_client)}` : '' },
+    ];
+
+    const customerRows = [
+      { Fält: 'Namn', Värde: bookingRequest.customer_name },
+      { Fält: 'Telefon', Värde: bookingRequest.customer_phone },
+      { Fält: 'E-post', Värde: bookingRequest.customer_email },
+      { Fält: 'Kvm / rum', Värde: `${bookingRequest.area_sqm || 'Ej angivet'} kvm${bookingRequest.rooms ? `, ${bookingRequest.rooms} rum` : ''}` },
+      { Fält: 'Kommentar', Värde: bookingRequest.message || 'Ingen kommentar' },
+    ];
+
+    await window.ReportExport.exportReportPdf({
+      filename: `cleanup-bokningsbekraftelse-${safeFilePart(bookingRequest.customer_name)}-${formatDateShort(shift.start_at)}.pdf`,
+      title: 'CleanUp bokningsbekräftelse',
+      subtitle: `Underlag skapat ${formatDateLong(new Date())} ${formatTime(new Date())}`,
+      sections: [
+        { title: 'Bokning', headers: ['Fält', 'Värde'], rows: serviceRows },
+        { title: 'Kund', headers: ['Fält', 'Värde'], rows: customerRows },
+        { title: 'Pris och villkor', headers: ['Fält', 'Värde'], rows: priceRows },
+        { title: 'Samtycke och policy', headers: ['Fält', 'Värde'], rows: consentRows },
+      ],
+    });
   }
 
   const LOGIN_REMEMBER_KEY = 'cleanup_login_remember_v1';
@@ -926,6 +1022,7 @@
     const canReportSick = isOwnerCleaner && ['Godkänt', 'Planerat'].includes(shift.status);
     const canCheckItems = isOwnerCleaner && ['Pågående', 'Utfört'].includes(shift.status);
     const [sickOpen, setSickOpen] = useState(false);
+    const [bookingPdfExporting, setBookingPdfExporting] = useState(false);
 
     return (
       <div>
@@ -999,10 +1096,40 @@
                       {serviceLabel(bookingRequest.service_type)} från {bookingRequest.source_domain || 'cleanup.nu'}.
                     </p>
                   </div>
-                  {bookingRequest.estimated_price_sek != null && (
-                    <div className="rounded-xl bg-white px-4 py-3 text-right shadow-sm ring-1 ring-brand-100">
-                      <p className="text-[11px] font-bold uppercase text-slate-500">Prisförslag</p>
-                      <p className="text-xl font-extrabold text-slate-950">{Number(bookingRequest.estimated_price_sek).toLocaleString('sv-SE')} kr</p>
+                  {(bookingRequest.estimated_price_sek != null || role === 'admin') && (
+                    <div className="flex flex-col items-stretch gap-2 sm:items-end">
+                      {bookingRequest.estimated_price_sek != null && (
+                        <div className="rounded-xl bg-white px-4 py-3 text-right shadow-sm ring-1 ring-brand-100">
+                          <p className="text-[11px] font-bold uppercase text-slate-500">Prisförslag</p>
+                          <p className="text-xl font-extrabold text-slate-950">{Number(bookingRequest.estimated_price_sek).toLocaleString('sv-SE')} kr</p>
+                        </div>
+                      )}
+                      {role === 'admin' && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          icon="download"
+                          loading={bookingPdfExporting}
+                          onClick={async () => {
+                            setBookingPdfExporting(true);
+                            try {
+                              await exportBookingConfirmationPdf({
+                                shift,
+                                property: prop,
+                                bookingRequest,
+                                bookingAddons,
+                              });
+                              toast.success('PDF-bekräftelse skapad.');
+                            } catch (_) {
+                              toast.error('Kunde inte skapa PDF just nu.');
+                            } finally {
+                              setBookingPdfExporting(false);
+                            }
+                          }}
+                        >
+                          PDF-bekräftelse
+                        </Button>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1042,6 +1169,14 @@
                     Kunden har lämnat särskilda önskemål. Gå gärna igenom upplägg och pris med kund innan godkännande.
                   </div>
                 )}
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <Badge variant={bookingAddons.policy_accepted ? 'emerald' : 'amber'}>
+                    Villkor {bookingAddons.policy_accepted ? 'godkända' : 'saknas'}
+                  </Badge>
+                  <Badge variant={bookingAddons.privacy_notice_accepted ? 'emerald' : 'amber'}>
+                    GDPR {bookingAddons.privacy_notice_accepted ? 'godkänt' : 'saknas'}
+                  </Badge>
+                </div>
                 {bookingRequest.message && (
                   <p className="mt-4 rounded-xl bg-white p-3 text-sm text-slate-700 ring-1 ring-brand-100">{bookingRequest.message}</p>
                 )}
