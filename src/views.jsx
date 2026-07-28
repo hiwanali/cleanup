@@ -607,6 +607,7 @@
     const prop = db.propertyById(shift.property_id);
     const cleanerLabel = db.displayCleaner(shift.cleaner_user_id, viewerRole);
     const isAnon = viewerRole === 'customer' || viewerRole === 'customer_employee';
+    const bookingRequest = viewerRole === 'admin' ? db.bookingRequestForShift(shift.id) : null;
     return (
       <button
         onClick={() => onClick && onClick(shift)}
@@ -619,6 +620,12 @@
             </p>
             <p className="mt-1 font-semibold text-slate-900 truncate">{prop?.name}</p>
             <p className="text-xs text-slate-500 truncate">{prop?.address}</p>
+            {bookingRequest && (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                <Badge variant="brand" icon="send">Bokningsförfrågan</Badge>
+                <Badge variant="slate">{serviceLabel(bookingRequest.service_type)}</Badge>
+              </div>
+            )}
           </div>
           <StatusBadge status={shift.status} />
         </div>
@@ -820,6 +827,10 @@
     const isOwnerCleaner = role === 'cleaner' && shift.cleaner_user_id === session.userId;
     const isCustomerView = role === 'customer' || role === 'customer_employee';
     const cleanerLabel = db.displayCleaner(shift.cleaner_user_id, role);
+    const bookingRequest = role === 'admin' ? db.bookingRequestForShift(shift.id) : null;
+    const bookingWorkflowStatus = bookingRequest
+      ? (shift.status === 'Godkänt' ? 'approved' : shift.status === 'Avbokat' ? 'declined' : bookingRequest.status)
+      : null;
     // Nyckel/larm: admin + städare med minst ett pass på objektet
     const canSeeAccess = role === 'admin' || (role === 'cleaner' && db.shiftsForCleaner(session.userId).some(s => s.property_id === shift.property_id));
     const done = checklist.filter(c => c.done_at).length;
@@ -885,6 +896,58 @@
                     }}>Checka ut</Button>
                   )}
                 </div>
+              </Card>
+            )}
+
+            {bookingRequest && (
+              <Card padding="md" className="border-brand-100 bg-brand-50/30">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="font-bold text-brand-950">Publik bokningsförfrågan</h3>
+                      <Badge variant={bookingWorkflowStatus === 'approved' ? 'emerald' : bookingWorkflowStatus === 'declined' ? 'rose' : 'brand'}>
+                        {bookingWorkflowStatus === 'approved'
+                          ? 'Godkänd'
+                          : bookingWorkflowStatus === 'declined'
+                            ? 'Avslagen'
+                            : 'Väntar'}
+                      </Badge>
+                    </div>
+                    <p className="mt-1 text-sm text-brand-900/80">
+                      {serviceLabel(bookingRequest.service_type)} från {bookingRequest.source_domain || 'cleanup.nu'}.
+                    </p>
+                  </div>
+                  {bookingRequest.estimated_price_sek != null && (
+                    <div className="rounded-xl bg-white px-4 py-3 text-right shadow-sm ring-1 ring-brand-100">
+                      <p className="text-[11px] font-bold uppercase text-slate-500">Prisförslag</p>
+                      <p className="text-xl font-extrabold text-slate-950">{Number(bookingRequest.estimated_price_sek).toLocaleString('sv-SE')} kr</p>
+                    </div>
+                  )}
+                </div>
+                <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
+                  <div>
+                    <dt className="text-xs font-semibold text-slate-500">Kund</dt>
+                    <dd className="font-semibold text-slate-900">{bookingRequest.customer_name}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs font-semibold text-slate-500">Kontakt</dt>
+                    <dd className="text-slate-800">{bookingRequest.customer_phone} · {bookingRequest.customer_email}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs font-semibold text-slate-500">Yta / rum</dt>
+                    <dd className="text-slate-800">
+                      {bookingRequest.area_sqm ? `${bookingRequest.area_sqm} kvm` : 'Ej angivet'}
+                      {bookingRequest.rooms ? ` · ${bookingRequest.rooms} rum` : ''}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs font-semibold text-slate-500">Önskad tid</dt>
+                    <dd className="text-slate-800">{formatDateLong(bookingRequest.requested_starts_at)} · {formatTime(bookingRequest.requested_starts_at)}-{formatTime(bookingRequest.requested_ends_at)}</dd>
+                  </div>
+                </dl>
+                {bookingRequest.message && (
+                  <p className="mt-4 rounded-xl bg-white p-3 text-sm text-slate-700 ring-1 ring-brand-100">{bookingRequest.message}</p>
+                )}
               </Card>
             )}
 
@@ -2962,6 +3025,8 @@
 
     function shiftChip(s, full = false) {
       const prop = db.propertyById(s.property_id);
+      const bookingRequest = viewerRole === 'admin' ? db.bookingRequestForShift(s.id) : null;
+      const label = bookingRequest ? serviceLabel(bookingRequest.service_type) : (prop?.name || 'Pass');
       return (
         <button
           key={s.id}
@@ -2969,10 +3034,11 @@
           className={cx(
             'w-full text-left rounded-md px-1.5 py-1 text-[11px] font-medium leading-tight truncate transition-colors',
             CAL_STATUS_CHIP[s.status] || 'bg-slate-100 text-slate-600 hover:bg-slate-200',
+            bookingRequest && 'ring-1 ring-brand-200',
           )}
-          title={`${formatTime(s.start_at)}–${formatTime(s.end_at)} · ${prop?.name || ''}`}
+          title={`${formatTime(s.start_at)}–${formatTime(s.end_at)} · ${label}${bookingRequest ? ` · ${bookingRequest.customer_name}` : ''}`}
         >
-          <span className="tabular-nums">{formatTime(s.start_at)}</span> {prop?.name || 'Pass'}
+          <span className="tabular-nums">{formatTime(s.start_at)}</span> {bookingRequest ? 'Förfrågan' : label}
           {full && <span className="text-slate-500"> · {s.status}</span>}
         </button>
       );

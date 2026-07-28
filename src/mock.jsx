@@ -1447,6 +1447,7 @@
         status: s.status,
         cleaner_user_id: s.cleaner_user_id,
         last_modified_by: s.last_modified_by,
+        bookingRequestStatus: db.bookingRequestForShift(shiftId)?.status,
         shift_eventsLen: state.shift_events.length,
         notificationsLen: state.notifications.length,
       };
@@ -1454,6 +1455,8 @@
       s.cleaner_user_id = resolvedCleanerId;
       s.status = 'Godkänt';
       s.last_modified_by = actorUserId;
+      const bookingRequest = db.bookingRequestForShift(shiftId);
+      if (bookingRequest) bookingRequest.status = 'approved';
       state.shift_events.push({
         id: id('se'),
         shift_id: shiftId,
@@ -1485,6 +1488,8 @@
           s.status = snapshot.status;
           s.cleaner_user_id = snapshot.cleaner_user_id;
           s.last_modified_by = snapshot.last_modified_by;
+          const request = db.bookingRequestForShift(shiftId);
+          if (request) request.status = snapshot.bookingRequestStatus;
           state.shift_events.length = snapshot.shift_eventsLen;
           state.notifications.length = snapshot.notificationsLen;
           bump();
@@ -1504,6 +1509,7 @@
       const snapshot = {
         status: s.status,
         last_modified_by: s.last_modified_by,
+        bookingRequestStatus: db.bookingRequestForShift(shiftId)?.status,
         shift_eventsLen: state.shift_events.length,
         notificationsLen: state.notifications.length,
       };
@@ -1511,6 +1517,8 @@
       const hoursToStart = (new Date(s.start_at) - Date.now()) / 36e5;
       s.status = 'Avbokat';
       s.last_modified_by = actorUserId;
+      const bookingRequest = db.bookingRequestForShift(shiftId);
+      if (bookingRequest) bookingRequest.status = 'declined';
       state.shift_events.push({
         id: id('se'),
         shift_id: shiftId,
@@ -1541,6 +1549,8 @@
         if (!r.ok) {
           s.status = snapshot.status;
           s.last_modified_by = snapshot.last_modified_by;
+          const request = db.bookingRequestForShift(shiftId);
+          if (request) request.status = snapshot.bookingRequestStatus;
           state.shift_events.length = snapshot.shift_eventsLen;
           state.notifications.length = snapshot.notificationsLen;
           bump();

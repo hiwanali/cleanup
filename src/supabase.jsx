@@ -713,6 +713,16 @@
       return { ok: false, message: shiftErr.message };
     }
 
+    const { error: requestErr } = await sb
+      .from('booking_requests')
+      .update({ status: 'approved' })
+      .eq('shift_id', shiftId);
+
+    if (requestErr) {
+      console.error('[persist] approveShift booking_requests:', requestErr.message);
+      return { ok: false, message: requestErr.message };
+    }
+
     const { error: evErr } = await sb.from('shift_events').insert({
       shift_id: shiftId,
       actor_user_id: actorUserId,
@@ -739,6 +749,15 @@
 
     if (shiftErr) {
       return { ok: false, message: shiftErr.message };
+    }
+
+    const { error: requestErr } = await sb
+      .from('booking_requests')
+      .update({ status: 'declined' })
+      .eq('shift_id', shiftId);
+
+    if (requestErr) {
+      return { ok: false, message: requestErr.message };
     }
 
     await sb.from('shift_events').insert({
