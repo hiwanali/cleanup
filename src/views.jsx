@@ -337,15 +337,32 @@
                       step={1}
                       unit="rum"
                     />
+                    <RangeNumberField
+                      label="Badrum"
+                      hint="Dra eller skriv antal badrum."
+                      value={form.bathrooms}
+                      onChange={v => update('bathrooms', v)}
+                      min={1}
+                      max={6}
+                      step={1}
+                      unit="badrum"
+                    />
                   </div>
-                  <div className="grid sm:grid-cols-3 gap-3 mt-4">
-                    <Field label="Badrum">
-                      <Input type="number" min="1" value={form.bathrooms} onChange={e => update('bathrooms', e.target.value)} />
-                    </Field>
-                  </div>
-                  <div className="flex flex-wrap gap-4 mt-4">
-                    <Checkbox label="Fönsterputs" checked={form.windows} onChange={v => update('windows', v)} />
-                    <Checkbox label="Ugnsrengöring" checked={form.oven} onChange={v => update('oven', v)} />
+                  <div className="grid sm:grid-cols-2 gap-3 mt-4">
+                    <ToggleOptionCard
+                      label="Fönsterputs"
+                      description="Lägg till putsning av fönster."
+                      price="+450 kr"
+                      checked={form.windows}
+                      onChange={v => update('windows', v)}
+                    />
+                    <ToggleOptionCard
+                      label="Ugnsrengöring"
+                      description="Lägg till rengöring av ugn."
+                      price="+250 kr"
+                      checked={form.oven}
+                      onChange={v => update('oven', v)}
+                    />
                   </div>
                 </div>
               )}
@@ -664,17 +681,55 @@
             aria-label={label}
           />
           <Input
-            type="number"
+            type="text"
+            inputMode="numeric"
+            pattern="[0-9]*"
             min={min}
             max={max}
             step={step}
             value={value}
             onChange={e => update(e.target.value)}
+            onFocus={e => e.target.select()}
             className="text-center font-bold"
             aria-label={`${label} exakt värde`}
           />
         </div>
       </div>
+    );
+  }
+
+  function ToggleOptionCard({ label, description, price, checked, onChange }) {
+    return (
+      <button
+        type="button"
+        onClick={() => onChange(!checked)}
+        className={cx(
+          'group flex min-h-[96px] items-center justify-between gap-4 rounded-2xl border bg-white p-4 text-left shadow-sm transition-all duration-200',
+          checked
+            ? 'border-brand-500 bg-brand-50 ring-2 ring-brand-100 shadow-md'
+            : 'border-slate-200 hover:border-brand-200 hover:shadow-md',
+        )}
+        aria-pressed={!!checked}
+      >
+        <span className="flex min-w-0 items-start gap-3">
+          <span
+            className={cx(
+              'mt-0.5 inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg border transition-colors',
+              checked ? 'border-brand-600 bg-brand-600 text-white' : 'border-slate-300 bg-white text-slate-400 group-hover:border-brand-300 group-hover:text-brand-600',
+            )}
+            aria-hidden="true"
+          >
+            {checked ? <Icon name="check" className="h-4 w-4" strokeWidth={3} /> : <Icon name="plus" className="h-4 w-4" strokeWidth={2.5} />}
+          </span>
+          <span>
+            <span className="block text-sm font-bold text-slate-900">{label}</span>
+            <span className="mt-0.5 block text-xs text-slate-500">{description}</span>
+          </span>
+        </span>
+        <span className={cx('flex-shrink-0 rounded-full px-3 py-1 text-xs font-bold', checked ? 'bg-white text-brand-700' : 'bg-slate-100 text-slate-600')}>
+          {price}
+        </span>
+      </button>
     );
   }
 
