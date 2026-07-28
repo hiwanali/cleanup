@@ -273,13 +273,29 @@
                       </button>
                     ))}
                   </div>
+                  <div className="grid md:grid-cols-2 gap-3 mt-4">
+                    <RangeNumberField
+                      label="Kvadratmeter"
+                      hint="Dra eller skriv exakt yta."
+                      value={form.areaSqm}
+                      onChange={v => update('areaSqm', v)}
+                      min={0}
+                      max={300}
+                      step={5}
+                      unit="kvm"
+                    />
+                    <RangeNumberField
+                      label="Rum"
+                      hint="Dra eller skriv antal rum."
+                      value={form.rooms}
+                      onChange={v => update('rooms', v)}
+                      min={0}
+                      max={12}
+                      step={1}
+                      unit="rum"
+                    />
+                  </div>
                   <div className="grid sm:grid-cols-3 gap-3 mt-4">
-                    <Field label="Kvadratmeter">
-                      <Input type="number" min="1" value={form.areaSqm} onChange={e => update('areaSqm', e.target.value)} />
-                    </Field>
-                    <Field label="Rum">
-                      <Input type="number" min="1" value={form.rooms} onChange={e => update('rooms', e.target.value)} />
-                    </Field>
                     <Field label="Badrum">
                       <Input type="number" min="1" value={form.bathrooms} onChange={e => update('bathrooms', e.target.value)} />
                     </Field>
@@ -418,6 +434,74 @@
       if (rememberMe) localStorage.setItem(LOGIN_REMEMBER_KEY, JSON.stringify({ email: email.trim() }));
       else localStorage.removeItem(LOGIN_REMEMBER_KEY);
     } catch (_) {}
+  }
+
+  function RangeNumberField({ label, value, onChange, min = 0, max = 100, step = 1, unit = '', hint = '' }) {
+    const [pulse, setPulse] = useState(false);
+    const numericValue = Number(value);
+    const safeValue = Number.isFinite(numericValue) ? Math.min(max, Math.max(min, numericValue)) : min;
+    const progress = max > min ? ((safeValue - min) / (max - min)) * 100 : 0;
+
+    useEffect(() => {
+      setPulse(true);
+      const id = setTimeout(() => setPulse(false), 180);
+      return () => clearTimeout(id);
+    }, [value]);
+
+    function update(next) {
+      if (next === '') {
+        onChange('');
+        return;
+      }
+      const n = Number(next);
+      if (!Number.isFinite(n)) return;
+      onChange(String(Math.min(max, Math.max(min, Math.round(n)))));
+    }
+
+    return (
+      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition-all duration-200 hover:border-brand-200 hover:shadow-md">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold text-slate-700">{label}</p>
+            {hint && <p className="mt-0.5 text-xs text-slate-500">{hint}</p>}
+          </div>
+          <div
+            className={cx(
+              'min-w-[88px] rounded-xl px-3 py-2 text-right transition-all duration-200',
+              pulse ? 'scale-105 bg-brand-600 text-white shadow-lg shadow-brand-200' : 'bg-brand-50 text-brand-800',
+            )}
+          >
+            <span className="text-lg font-extrabold">{value === '' ? min : safeValue}</span>
+            {unit && <span className="ml-1 text-xs font-bold opacity-80">{unit}</span>}
+          </div>
+        </div>
+        <div className="mt-4 grid grid-cols-[1fr_96px] items-center gap-3">
+          <input
+            type="range"
+            min={min}
+            max={max}
+            step={step}
+            value={safeValue}
+            onChange={e => update(e.target.value)}
+            className="h-2 w-full cursor-pointer appearance-none rounded-full bg-slate-200 accent-brand-600"
+            style={{
+              background: `linear-gradient(90deg, #2563eb ${progress}%, #e2e8f0 ${progress}%)`,
+            }}
+            aria-label={label}
+          />
+          <Input
+            type="number"
+            min={min}
+            max={max}
+            step={step}
+            value={value}
+            onChange={e => update(e.target.value)}
+            className="text-center font-bold"
+            aria-label={`${label} exakt värde`}
+          />
+        </div>
+      </div>
+    );
   }
 
   function PasswordLoginView({ onPasswordLogin }) {
