@@ -4,6 +4,9 @@
 -- This small patch is safe to run after smart booking windows because it only
 -- creates/replaces the checklist helper functions.
 
+DROP FUNCTION IF EXISTS public.add_public_booking_service_checklist(uuid, text, jsonb);
+DROP FUNCTION IF EXISTS public.public_booking_service_checklist_items(text, jsonb);
+
 CREATE OR REPLACE FUNCTION public.public_booking_service_checklist_items(
   p_service_type text,
   p_addons jsonb DEFAULT '{}'::jsonb
