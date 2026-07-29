@@ -4281,7 +4281,16 @@
    * ============================================================ */
   function CustomerShiftDetailView({ session, onNavigate, shiftId }) {
     useDb();
+    const [showPortalLanding, setShowPortalLanding] = useState(false);
     const shift = db.shiftById(shiftId);
+    useEffect(() => {
+      try {
+        if (sessionStorage.getItem('cleanup_portal_landing_shift') === shiftId) {
+          setShowPortalLanding(true);
+          sessionStorage.removeItem('cleanup_portal_landing_shift');
+        }
+      } catch (_) {}
+    }, [shiftId]);
     if (!shift) return <ComingSoonView title="Pass saknas" section="—" description="Passet kunde inte hittas." />;
     // Separationsregel: kund ser endast sina egna pass
     const allowed = db.shiftsForCustomerUser(session.userId).some(s => s.id === shiftId);
@@ -4293,12 +4302,31 @@
         </div>
       );
     }
-    return <ShiftDetail
-      shift={shift}
-      session={session}
-      onBack={() => onNavigate('/kund/oversikt')}
-      breadcrumbs={[{ label: 'Översikt', href: '#/kund/oversikt' }, { label: relativeDay(shift.start_at) }]}
-    />;
+    return (
+      <>
+        {showPortalLanding && (
+          <Card padding="md" className="mb-4 border-emerald-200 bg-emerald-50/70">
+            <div className="flex items-start gap-3">
+              <div className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
+                <Icon name="check" className="h-5 w-5" />
+              </div>
+              <div>
+                <h3 className="font-bold text-emerald-950">Din bokning är bekräftad</h3>
+                <p className="mt-1 text-sm text-emerald-900/90">
+                  Här ser du tid, adress och status för städningen. Behöver du ändra något kan du använda portalen eller kontakta oss.
+                </p>
+              </div>
+            </div>
+          </Card>
+        )}
+        <ShiftDetail
+          shift={shift}
+          session={session}
+          onBack={() => onNavigate('/kund/oversikt')}
+          breadcrumbs={[{ label: 'Översikt', href: '#/kund/oversikt' }, { label: relativeDay(shift.start_at) }]}
+        />
+      </>
+    );
   }
 
   /* ============================================================

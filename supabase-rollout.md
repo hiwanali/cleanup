@@ -692,3 +692,30 @@ Flode:
 Admin kan ocksa skicka/skicka om kundlanken fran bokningskortet pa passets detaljsida. Om `RESEND_API_KEY` eller `RESEND_FROM` saknas blir bokningen fortsatt godkand, men mejlet skickas inte.
 
 Viktigt i Supabase Auth URL configuration: lagg till redirect URL for `https://www.logincleanup.app/CleanUp.html` sa magic-link-redirecten tillats.
+
+## 21. Kundportal fas 4: aktiv portalstatus
+
+Syfte: nar kunden faktiskt oppnar magic-linken och landar pa sitt pass ska bokningsforfragan markeras som aktiv i admin.
+
+Kor SQL-filen:
+
+```sql
+supabase/migrations/20260729130115_customer_portal_active_status.sql
+```
+
+Detta skapar RPC:n:
+
+```sql
+public.mark_customer_portal_active(p_shift_id uuid)
+```
+
+Flode:
+
+1. Kunden klickar magic-linken.
+2. Appen laser `portalRedirect=/kund/pass/{shiftId}`.
+3. Kunden skickas till ratt passvy.
+4. Appen anropar `mark_customer_portal_active`.
+5. Endast raden dar `booking_requests.portal_user_id = auth.uid()` far uppdateras.
+6. `booking_requests.portal_access_status` blir `active`.
+
+Fas 4 andrar inte avbokningsregeln. Nasta fas ar att byta kundavbokning fran 48h till 24h och flytta regeln till en trygg RPC sa klienten inte ensam bestammer gransen.

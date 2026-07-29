@@ -474,6 +474,12 @@
     const target = params.get('portalRedirect');
     if (!target || !target.startsWith('/kund/')) return false;
     if (user.role !== 'customer' && user.role !== 'customer_employee') return false;
+    const shiftMatch = target.match(/^\/kund\/pass\/([0-9a-f-]{36})$/i);
+    if (shiftMatch) {
+      try { sessionStorage.setItem('cleanup_portal_landing_shift', shiftMatch[1]); } catch (_) {}
+      const persist = window.dbPersist && window.dbPersist.markCustomerPortalActive;
+      if (persist) persist({ shiftId: shiftMatch[1] }).catch(() => {});
+    }
     const cleanPath = `${window.location.pathname}#${target}`;
     window.history.replaceState(null, '', cleanPath);
     router.navigate(target);

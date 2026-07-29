@@ -240,6 +240,23 @@
     return { ok: true, data };
   }
 
+  async function persistMarkCustomerPortalActive({ shiftId }) {
+    if (!enabled || !sb || !isUuid(shiftId)) {
+      return { ok: true, skipped: true };
+    }
+
+    const { data, error } = await sb.rpc('mark_customer_portal_active', {
+      p_shift_id: shiftId,
+    });
+
+    if (error) {
+      console.warn('[persist] mark customer portal active:', error.message);
+      return { ok: false, message: error.message };
+    }
+
+    return { ok: true, data };
+  }
+
   /** Persisterar notiser via RPC (samma org) och triggar Resend per rad. */
   async function persistInsertNotifications(rows) {
     if (!enabled || !sb || !rows?.length) {
@@ -2005,5 +2022,6 @@
     createBookingAvailabilitySlot: persistCreateBookingAvailabilitySlot,
     updateBookingAvailabilitySlot: persistUpdateBookingAvailabilitySlot,
     sendCustomerPortalInvite: persistSendCustomerPortalInvite,
+    markCustomerPortalActive: persistMarkCustomerPortalActive,
   };
 })();
