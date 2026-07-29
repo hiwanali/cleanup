@@ -608,3 +608,26 @@ supabase functions deploy public-availability public-booking-request --project-r
 5. Kontrollera att kunden ser 3-timmarstider i 30-minuterssteg och att admin far ett pass med exakt vald tid.
 
 Viktigt: Edge Functions ska inte deployas fore SQL-filen, eftersom `public-booking-request` skickar `requested_starts_at` och `requested_ends_at` till RPC-funktionen.
+
+## 18. Kundportal fas 1: datamodell
+
+Syfte: forbereda databasen sa en publik bokningsforfragan senare kan kopplas till kundens portal, utan att andra floden andras i denna fas.
+
+Kor SQL-filen:
+
+```sql
+-- Supabase SQL Editor eller CLI
+supabase/migrations/20260729123707_customer_portal_access_phase1.sql
+```
+
+Detta lagger till pa `booking_requests`:
+
+- `portal_user_id`
+- `portal_customer_id`
+- `portal_access_status`
+- `portal_access_created_at`
+- `portal_invited_at`
+- `portal_last_magic_link_sent_at`
+- `portal_redirect_path`
+
+Fas 1 skickar inga mejl, skapar inga auth-users och andrar inte adminens godkannande. Det ar bara grunden for fas 2, dar godkand forfragan ska skapa/koppla kundkonto och forbereda magic-link-inbjudan.

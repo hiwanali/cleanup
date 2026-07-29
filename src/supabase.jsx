@@ -54,7 +54,7 @@
     thread_reads: ['last_read_at'],
     shift_requests: ['created_at'],
     booking_availability_slots: ['starts_at', 'ends_at', 'created_at', 'updated_at'],
-    booking_requests: ['requested_starts_at', 'requested_ends_at', 'created_at', 'updated_at'],
+    booking_requests: ['requested_starts_at', 'requested_ends_at', 'portal_access_created_at', 'portal_invited_at', 'portal_last_magic_link_sent_at', 'created_at', 'updated_at'],
   };
 
   function convertRow(table, row) {
