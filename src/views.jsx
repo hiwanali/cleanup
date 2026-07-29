@@ -7452,12 +7452,21 @@
    * ============================================================ */
   function CustomerOverviewView({ session, onNavigate }) {
     useDb();
+    const [showPortalWelcome, setShowPortalWelcome] = useState(false);
     const customer = db.customerForUser(session.userId);
     const props = db.propertiesForUser(session.userId);
     const upcoming = db.shiftsForCustomerUser(session.userId, { from: new Date(), statuses: ['Godkänt', 'Planerat', 'Sjukanmäld', 'Pausat (kundledighet)'] }).slice(0, 8);
     const openIncidents = db.incidents({ viewerUserId: session.userId, status: 'open' });
     const isEmployee = session.user.role === 'customer_employee';
     const roleLabel = isEmployee ? 'Kundanställd' : 'Huvudkontakt';
+    useEffect(() => {
+      try {
+        if (sessionStorage.getItem('cleanup_portal_landing_overview') === '1') {
+          setShowPortalWelcome(true);
+          sessionStorage.removeItem('cleanup_portal_landing_overview');
+        }
+      } catch (_) {}
+    }, []);
 
     return (
       <div>
@@ -7468,6 +7477,27 @@
             <Button variant="outline" icon="calendar" onClick={() => onNavigate('/kund/ledighet')}>Ny ledighet</Button>
           }
         />
+
+        {showPortalWelcome && (
+          <Card padding="md" className="mb-6 border-emerald-200 bg-emerald-50/70">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-start gap-3">
+                <div className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
+                  <Icon name="check" className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-emerald-950">Du är inloggad i kundportalen</h3>
+                  <p className="mt-1 text-sm text-emerald-900/90">
+                    Här ser du dina bokningar, objekt och kontaktvägar till CleanUp.
+                  </p>
+                </div>
+              </div>
+              <Button variant="outline" icon="calendar" onClick={() => onNavigate('/kund/schema')}>
+                Visa schema
+              </Button>
+            </div>
+          </Card>
+        )}
 
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-8">
           <Stat label="Objekt" value={props.length} icon="building" tone="brand" />

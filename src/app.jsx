@@ -471,7 +471,7 @@
 
   function consumePortalRedirect(user) {
     const params = new URLSearchParams(window.location.search || '');
-    const target = params.get('portalRedirect');
+    let target = params.get('portalRedirect');
     if (!target || !target.startsWith('/kund/')) return false;
     if (user.role !== 'customer' && user.role !== 'customer_employee') return false;
     const shiftMatch = target.match(/^\/kund\/pass\/([0-9a-f-]{36})$/i);
@@ -479,6 +479,11 @@
       try { sessionStorage.setItem('cleanup_portal_landing_shift', shiftMatch[1]); } catch (_) {}
       const persist = window.dbPersist && window.dbPersist.markCustomerPortalActive;
       if (persist) persist({ shiftId: shiftMatch[1] }).catch(() => {});
+    } else if (!/^\/kund\/(oversikt|schema|objekt|ledighet|avvikelser|meddelanden|rapporter|installningar)(\/|$)/.test(target)) {
+      target = '/kund/oversikt';
+      try { sessionStorage.setItem('cleanup_portal_landing_overview', '1'); } catch (_) {}
+    } else if (target === '/kund/oversikt') {
+      try { sessionStorage.setItem('cleanup_portal_landing_overview', '1'); } catch (_) {}
     }
     const cleanPath = `${window.location.pathname}#${target}`;
     window.history.replaceState(null, '', cleanPath);

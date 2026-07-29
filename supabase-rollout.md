@@ -746,3 +746,16 @@ Flode:
 6. Vid godkand avbokning markeras passet `Avbokat`, orsak sparas och en `customer_cancelled`-handelse skapas.
 
 Migrationen tar ocksa bort den gamla direkta kund-update-policyn pa `shifts`, sa 24h-regeln inte kan rundas via direkt API-anrop.
+
+## 23. Kundportal fas 6: robust magic-link-landning
+
+Syfte: kunden ska alltid hamna i kundportalen pa ett begripligt stalle efter magic-link.
+
+Klientflode:
+
+1. Om magic-linken innehaller `portalRedirect=/kund/pass/{shiftId}` skickas kunden direkt till passet.
+2. Om magic-linken pekar pa `/kund/oversikt` visas en kort bekräftelse i kundöversikten.
+3. Om `portalRedirect` pekar pa en okand kundroute skickas kunden till `/kund/oversikt` i stallet for en trasig vy.
+4. Nar kunden landar pa översikten finns knapp vidare till schema och kommande pass syns direkt.
+
+Ingen ny SQL kravs for fas 6.
