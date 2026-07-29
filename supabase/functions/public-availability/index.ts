@@ -19,6 +19,8 @@ type AvailabilitySlot = {
 
 type BookingRequest = {
   availability_slot_id: string | null;
+  requested_starts_at: string;
+  requested_ends_at: string;
 };
 
 function allowedOrigins(): string[] {
@@ -59,6 +61,21 @@ function parseDate(value: string | null, fallback: Date): Date {
   return Number.isNaN(parsed.getTime()) ? fallback : parsed;
 }
 
+function parseMinutes(value: string | null, fallback: number, min: number, max: number): number {
+  if (!value) return fallback;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < min || parsed > max) return fallback;
+  return parsed;
+}
+
+function addMinutes(date: Date, minutes: number): Date {
+  return new Date(date.getTime() + minutes * 60 * 1000);
+}
+
+function overlaps(aStart: Date, aEnd: Date, bStart: Date, bEnd: Date): boolean {
+  return aStart < bEnd && bStart < aEnd;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders(req) });
@@ -86,6 +103,9 @@ Deno.serve(async (req) => {
   const maxTo = new Date(from.getTime() + 90 * 24 * 60 * 60 * 1000);
   const to = requestedTo > maxTo ? maxTo : requestedTo;
   const serviceType = url.searchParams.get("service_type")?.trim();
+  const durationMinutes = parseMinutes(url.searchParams.get("duration_minutes"), 0, 0, 12 * 60);
+  const stepMinutes = parseMinutes(url.searchParams.get("step_minutes"), 60, 15, 240);
+  const bufferMinutes = parseMinutes(url.searchParams.get("buffer_minutes"), 30, 0, 180);
 
   if (to <= from) {
     return json(req, { error: "Invalid date range" }, 400);
@@ -100,7 +120,7 @@ Deno.serve(async (req) => {
     .select("id, starts_at, ends_at, capacity, service_type")
     .eq("org_id", orgId)
     .eq("active", true)
-    .gte("starts_at", from.toISOString())
+    .gte("ends_at", from.toISOString())
     .lte("starts_at", to.toISOString())
     .order("starts_at", { ascending: true });
 
@@ -122,7 +142,7 @@ Deno.serve(async (req) => {
   const slotIds = typedSlots.map((slot) => slot.id);
   const { data: requests, error: requestsError } = await sb
     .from("booking_requests")
-    .select("availability_slot_id")
+    .select("availability_slot_id, requested_starts_at, requested_ends_at")
     .in("availability_slot_id", slotIds)
     .in("status", ACTIVE_REQUEST_STATUSES);
 
@@ -131,27 +151,65 @@ Deno.serve(async (req) => {
     return json(req, { error: "Could not load availability" }, 500);
   }
 
-  const reservedBySlot = new Map<string, number>();
+  const requestsBySlot = new Map<string, BookingRequest[]>();
   for (const request of (requests ?? []) as BookingRequest[]) {
     if (!request.availability_slot_id) continue;
-    reservedBySlot.set(
-      request.availability_slot_id,
-      (reservedBySlot.get(request.availability_slot_id) ?? 0) + 1,
-    );
+    const list = requestsBySlot.get(request.availability_slot_id) ?? [];
+    list.push(request);
+    requestsBySlot.set(request.availability_slot_id, list);
   }
 
-  const availableSlots = typedSlots
-    .map((slot) => {
-      const reserved = reservedBySlot.get(slot.id) ?? 0;
-      return {
+  const availableSlots = typedSlots.flatMap((slot) => {
+    const slotStart = new Date(slot.starts_at);
+    const slotEnd = new Date(slot.ends_at);
+    const existing = requestsBySlot.get(slot.id) ?? [];
+
+    function reservedFor(candidateStart: Date, candidateEnd: Date): number {
+      const blockedEnd = addMinutes(candidateEnd, bufferMinutes);
+      return existing.filter((request) => {
+        const requestStart = new Date(request.requested_starts_at);
+        const requestEnd = addMinutes(new Date(request.requested_ends_at), bufferMinutes);
+        if (Number.isNaN(requestStart.getTime()) || Number.isNaN(requestEnd.getTime())) return false;
+        return overlaps(candidateStart, blockedEnd, requestStart, requestEnd);
+      }).length;
+    }
+
+    if (!durationMinutes) {
+      const reserved = reservedFor(slotStart, slotEnd);
+      if (reserved >= slot.capacity) return [];
+      return [{
         id: slot.id,
+        availability_slot_id: slot.id,
         starts_at: slot.starts_at,
         ends_at: slot.ends_at,
         service_type: slot.service_type,
         available_capacity: Math.max(0, slot.capacity - reserved),
-      };
-    })
-    .filter((slot) => slot.available_capacity > 0);
+      }];
+    }
+
+    const out = [];
+    let cursor = slotStart;
+    while (cursor < from) {
+      cursor = addMinutes(cursor, stepMinutes);
+    }
+
+    while (addMinutes(cursor, durationMinutes) <= slotEnd) {
+      const candidateEnd = addMinutes(cursor, durationMinutes);
+      const reserved = reservedFor(cursor, candidateEnd);
+      if (reserved < slot.capacity) {
+        out.push({
+          id: `${slot.id}:${cursor.toISOString()}`,
+          availability_slot_id: slot.id,
+          starts_at: cursor.toISOString(),
+          ends_at: candidateEnd.toISOString(),
+          service_type: slot.service_type,
+          available_capacity: Math.max(0, slot.capacity - reserved),
+        });
+      }
+      cursor = addMinutes(cursor, stepMinutes);
+    }
+    return out;
+  });
 
   return json(req, { slots: availableSlots });
 });

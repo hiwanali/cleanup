@@ -9,6 +9,8 @@ const DEFAULT_ALLOWED_ORIGINS = [
 
 type BookingBody = {
   availability_slot_id?: unknown;
+  requested_starts_at?: unknown;
+  requested_ends_at?: unknown;
   service_type?: unknown;
   customer_name?: unknown;
   customer_email?: unknown;
@@ -88,6 +90,13 @@ function isEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 
+function asIsoDateString(value: unknown): string | null {
+  if (typeof value !== "string" || !value.trim()) return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toISOString();
+}
+
 function sourceDomain(req: Request): string {
   const origin = req.headers.get("origin");
   if (!origin) return "cleanup.nu";
@@ -111,6 +120,8 @@ async function hashIp(req: Request): Promise<string | null> {
 
 function validate(body: BookingBody): { ok: true; value: Record<string, unknown> } | { ok: false; error: string } {
   const availabilitySlotId = asString(body.availability_slot_id, 64);
+  const requestedStartsAt = asIsoDateString(body.requested_starts_at);
+  const requestedEndsAt = asIsoDateString(body.requested_ends_at);
   const serviceType = asString(body.service_type, 80) || "standard_cleaning";
   const customerName = asString(body.customer_name, 120);
   const customerEmail = asString(body.customer_email, 180).toLowerCase();
@@ -127,6 +138,8 @@ function validate(body: BookingBody): { ok: true; value: Record<string, unknown>
     : {};
 
   if (!isUuid(availabilitySlotId)) return { ok: false, error: "invalid_slot" };
+  if ((body.requested_starts_at || body.requested_ends_at) && (!requestedStartsAt || !requestedEndsAt)) return { ok: false, error: "invalid_requested_time" };
+  if (requestedStartsAt && requestedEndsAt && new Date(requestedEndsAt) <= new Date(requestedStartsAt)) return { ok: false, error: "invalid_requested_time" };
   if (!serviceType) return { ok: false, error: "invalid_service_type" };
   if (customerName.length < 2) return { ok: false, error: "invalid_customer_name" };
   if (!isEmail(customerEmail)) return { ok: false, error: "invalid_customer_email" };
@@ -137,6 +150,8 @@ function validate(body: BookingBody): { ok: true; value: Record<string, unknown>
     ok: true,
     value: {
       availabilitySlotId,
+      requestedStartsAt,
+      requestedEndsAt,
       serviceType,
       customerName,
       customerEmail,
@@ -200,6 +215,8 @@ Deno.serve(async (req) => {
     p_org_id: orgId,
     p_lead_customer_id: leadCustomerId,
     p_availability_slot_id: value.availabilitySlotId,
+    p_requested_starts_at: value.requestedStartsAt,
+    p_requested_ends_at: value.requestedEndsAt,
     p_service_type: value.serviceType,
     p_customer_name: value.customerName,
     p_customer_email: value.customerEmail,

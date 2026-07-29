@@ -82,6 +82,7 @@
     const selectedSlot = slots.find(s => s.id === form.selectedSlotId);
     const priceDetails = getPublicBookingPriceDetails(form);
     const estimatedPrice = priceDetails.price;
+    const bookingDurationMinutes = priceDetails.hours ? Math.round(priceDetails.hours * 60) : 0;
     const canChooseSlot = !!form.serviceType;
     const canSubmit = form.selectedSlotId && form.customerName.trim().length >= 2 && form.customerEmail.includes('@') &&
       form.customerPhone.trim().length >= 6 && form.address.trim().length >= 3 && form.consent && form.policyAccepted && !submitting;
@@ -122,6 +123,11 @@
           url.searchParams.set('from', from.toISOString());
           url.searchParams.set('to', to.toISOString());
           url.searchParams.set('service_type', form.serviceType);
+          if (bookingDurationMinutes > 0) {
+            url.searchParams.set('duration_minutes', String(bookingDurationMinutes));
+            url.searchParams.set('step_minutes', '60');
+            url.searchParams.set('buffer_minutes', '30');
+          }
           const res = await fetch(url.toString(), {
             headers: anonKey ? { apikey: anonKey } : {},
           });
@@ -144,14 +150,14 @@
       }
       loadSlots();
       return () => { cancelled = true; };
-    }, [form.serviceType, supabaseUrl]);
+    }, [form.serviceType, supabaseUrl, bookingDurationMinutes]);
 
     function update(key, value) {
       setForm(f => ({ ...f, [key]: value }));
     }
 
     async function submit() {
-      if (!canSubmit) return;
+      if (!canSubmit || !selectedSlot) return;
       setSubmitting(true);
       setError('');
       try {
@@ -162,7 +168,9 @@
             ...(anonKey ? { apikey: anonKey } : {}),
           },
           body: JSON.stringify({
-            availability_slot_id: form.selectedSlotId,
+            availability_slot_id: selectedSlot.availability_slot_id || selectedSlot.id,
+            requested_starts_at: selectedSlot.starts_at,
+            requested_ends_at: selectedSlot.ends_at,
             service_type: form.serviceType,
             customer_name: form.customerName,
             customer_email: form.customerEmail,
@@ -179,6 +187,9 @@
               home_frequency: form.serviceType === 'standard_cleaning' ? form.homeFrequency : null,
               home_frequency_label: form.serviceType === 'standard_cleaning' ? priceDetails.frequencyLabel : null,
               estimated_hours: priceDetails.hours,
+              booking_duration_minutes: bookingDurationMinutes || null,
+              booking_buffer_minutes: bookingDurationMinutes ? 30 : null,
+              booking_step_minutes: bookingDurationMinutes ? 60 : null,
               hourly_price_after_rut: priceDetails.hourlyRate,
               rut_included: form.serviceType === 'standard_cleaning',
               requires_admin_price_review: !!form.message.trim(),
@@ -468,7 +479,7 @@
                     <p><span className="font-semibold text-slate-900">Städning:</span> {priceDetails.hours} tim · {priceDetails.hourlyRate} kr/h</p>
                   </>
                 )}
-                {selectedSlot && <p><span className="font-semibold text-slate-900">Tid:</span> {formatDate(selectedSlot.starts_at)} {formatTime(selectedSlot.starts_at)}</p>}
+                {selectedSlot && <p><span className="font-semibold text-slate-900">Tid:</span> {formatDate(selectedSlot.starts_at)} {formatTime(selectedSlot.starts_at)}-{formatTime(selectedSlot.ends_at)}</p>}
               </div>
               {form.serviceType === 'standard_cleaning' && (
                 <p className="mt-4 border-t border-slate-100 pt-3 text-[11px] leading-relaxed text-slate-500">

@@ -582,3 +582,28 @@ Stoppa rollout och felsok om nagot av detta hander:
 - Supabase Function Configuration: `verify_jwt = false` kan sattas for publika Edge Functions.
 - Supabase RLS docs: RLS ska vara aktivt pa exponerade tabeller och policies styr radatkomst.
 - Supabase MCP docs/setup: MCP-access beror pa ratt autentisering och projekt/org-access.
+
+## 17. Smart tidsbokning inom tillganglighetsfonster
+
+Denna rollout gor adminens tillganglighet till ett arbetsfonster. Exempel:
+
+- Admin skapar hemstadning mandag `08:00-17:00`.
+- Kunden anger kvm, systemet raknar stadtid.
+- Iframen visar faktiska starttider, till exempel `08:00-11:00`, `09:00-12:00`, `10:00-13:00`.
+- Nar kunden skickar forfragan sparas exakt kundtid pa passet och booking request.
+
+Kors i denna ordning:
+
+1. Kor SQL-filen i Supabase SQL Editor:
+   `supabase/migrations/20260729094416_smart_booking_windows.sql`
+2. Deploya Edge Functions:
+
+```bash
+supabase functions deploy public-availability public-booking-request --project-ref bkmnlcdsbvpucpqmaycx --use-api
+```
+
+3. Pusha/deploya frontend.
+4. Testa med ett fonster `08:00-17:00` och hemstadning `51-90 kvm`.
+5. Kontrollera att kunden ser 3-timmarstider och att admin far ett pass med exakt vald tid.
+
+Viktigt: Edge Functions ska inte deployas fore SQL-filen, eftersom `public-booking-request` skickar `requested_starts_at` och `requested_ends_at` till RPC-funktionen.
