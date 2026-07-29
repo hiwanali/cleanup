@@ -8,7 +8,7 @@ CREATE OR REPLACE FUNCTION public.public_booking_service_checklist_items(
   p_service_type text,
   p_addons jsonb DEFAULT '{}'::jsonb
 )
-RETURNS TABLE(position integer, title text)
+RETURNS TABLE(item_position integer, title text)
 LANGUAGE plpgsql
 STABLE
 SET search_path = public
@@ -67,21 +67,21 @@ BEGIN
 
   FOREACH v_title IN ARRAY v_titles LOOP
     v_position := v_position + 1;
-    position := v_position;
+    item_position := v_position;
     title := v_title;
     RETURN NEXT;
   END LOOP;
 
   IF v_service <> 'moving_cleaning' AND v_windows THEN
     v_position := v_position + 1;
-    position := v_position;
+    item_position := v_position;
     title := 'Tillagg: fonsterputs enligt overenskommelse';
     RETURN NEXT;
   END IF;
 
   IF v_oven THEN
     v_position := v_position + 1;
-    position := v_position;
+    item_position := v_position;
     title := 'Tillagg: ugnsrengoring enligt overenskommelse';
     RETURN NEXT;
   END IF;
@@ -118,7 +118,7 @@ BEGIN
   END IF;
 
   INSERT INTO public.shift_checklist_items (shift_id, title, position)
-  SELECT p_shift_id, i.title, i.position
+  SELECT p_shift_id, i.title, i.item_position
   FROM public.public_booking_service_checklist_items(p_service_type, p_addons) i;
 
   GET DIAGNOSTICS v_count = ROW_COUNT;
