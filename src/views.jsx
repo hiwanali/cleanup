@@ -1586,7 +1586,7 @@
     return (
       <Card padding="md" className="border-rose-100 mt-4">
         <h3 className="font-bold text-slate-900 mb-2">Farlig zon</h3>
-        <p className="text-xs text-slate-500 mb-3">Admin kan alltid ta bort pass, även inom 48 timmar.</p>
+        <p className="text-xs text-slate-500 mb-3">Admin kan alltid ta bort pass, även inom 24 timmar.</p>
         <Button
           variant="danger-ghost"
           icon="trash"
@@ -2197,7 +2197,7 @@
   }
 
   /* ============================================================
-   * CustomerShiftActions – §7.2 48h-avbokning
+   * CustomerShiftActions – §7.2 24h-avbokning
    * ============================================================ */
   function CustomerShiftActions({ shift, session, onClose }) {
     useDb();
@@ -2244,12 +2244,12 @@
       return null;
     }
 
-    // Status är Godkänt / Planerat → 48h-regeln gäller
-    if (hoursToStart > 48) {
+    // Status är Godkänt / Planerat → 24h-regeln gäller
+    if (hoursToStart > 24) {
       return (
         <Card padding="md">
           <h3 className="font-bold text-slate-900 mb-1">Behöver du avboka?</h3>
-          <p className="text-xs text-slate-500 mb-3">Avbokning är möjlig fram till 48 timmar före passet.</p>
+          <p className="text-xs text-slate-500 mb-3">Avbokning är möjlig fram till 24 timmar före passet.</p>
           <Button variant="danger-ghost" icon="x" className="w-full" onClick={() => setCancelOpen(true)}>
             Avboka pass
           </Button>
@@ -2258,7 +2258,7 @@
       );
     }
 
-    // ≤ 48 h kvar → infobox med admins kontaktuppgifter
+    // ≤ 24 h kvar → infobox med admins kontaktuppgifter
     const support = db.orgSupportContact();
     const hoursLeft = Math.max(0, Math.floor(hoursToStart));
     return (
@@ -2266,7 +2266,7 @@
         <div className="flex items-start gap-2 mb-2">
           <Icon name="alert-circle" className="w-4 h-4 text-amber-700 mt-0.5" />
           <div>
-            <h3 className="font-bold text-amber-900">Inom 48 timmar</h3>
+            <h3 className="font-bold text-amber-900">Inom 24 timmar</h3>
             <p className="text-xs text-amber-800/90 mt-0.5">
               {hoursLeft <= 0 ? 'Passet börjar inom kort.' : `Cirka ${hoursLeft} timmar kvar.`} Kontakta oss för att avboka.
             </p>
@@ -2301,8 +2301,8 @@
       setCancelling(true);
       try {
         const result = await db.cancelByCustomer(shift.id, session.userId, reason);
-        if (result?.error === 'INSIDE_48H') {
-          toast.error('Passet ligger inom 48 timmar – kontakta admin för att avboka.');
+        if (result?.error === 'INSIDE_24H' || result?.error === 'INSIDE_48H') {
+          toast.error('Passet ligger inom 24 timmar – kontakta admin för att avboka.');
           return;
         }
         if (result?.error === 'FORBIDDEN') {
@@ -5465,7 +5465,7 @@
       <div>
         <PageHeader
           title="Inställningar"
-          subtitle="Företagsuppgifter och din kontaktprofil för kunder (48h-avbokning)."
+          subtitle="Företagsuppgifter och din kontaktprofil för kunder (24h-avbokning)."
         />
 
         <div className="grid lg:grid-cols-2 gap-6 max-w-4xl">
@@ -5515,7 +5515,7 @@
           <Card padding="md">
             <h3 className="font-bold text-slate-900 mb-1">Din kontaktprofil</h3>
             <p className="text-xs text-slate-500 mb-4">
-              Kunder inom 48 timmar ser dessa uppgifter när de inte kan avboka själva.
+              Kunder inom 24 timmar ser dessa uppgifter när de inte kan avboka själva.
             </p>
             <Field label="Namn *" className="mb-3">
               <Input value={userName} onChange={e => setUserName(e.target.value)} />

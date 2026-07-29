@@ -718,4 +718,31 @@ Flode:
 5. Endast raden dar `booking_requests.portal_user_id = auth.uid()` far uppdateras.
 6. `booking_requests.portal_access_status` blir `active`.
 
-Fas 4 andrar inte avbokningsregeln. Nasta fas ar att byta kundavbokning fran 48h till 24h och flytta regeln till en trygg RPC sa klienten inte ensam bestammer gransen.
+Fas 4 andrade inte avbokningsregeln. Fas 5 nedan flyttar kundavbokning till en serverstyrd 24h-regel.
+
+## 22. Kundportal fas 5: serverstyrd 24h-avbokning
+
+Syfte: kunden ska kunna avboka bekräftade pass via portalen fram till 24 timmar före planerad start, men regeln ska kontrolleras i databasen och inte enbart i klienten.
+
+Kor SQL-filen:
+
+```sql
+supabase/migrations/20260729133131_customer_cancel_24h_rpc.sql
+```
+
+Detta skapar RPC:n:
+
+```sql
+public.customer_cancel_shift(p_shift_id uuid, p_reason text)
+```
+
+Flode:
+
+1. Kunden trycker "Avboka pass" i kundportalen.
+2. Klienten anropar `customer_cancel_shift`.
+3. Databasen kontrollerar att inloggad kund har access till passets objekt.
+4. Databasen kontrollerar att passet ar `Planerat` eller `Godkant`.
+5. Databasen blockerar avbokning om planerad start ar inom 24 timmar.
+6. Vid godkand avbokning markeras passet `Avbokat`, orsak sparas och en `customer_cancelled`-handelse skapas.
+
+Migrationen tar ocksa bort den gamla direkta kund-update-policyn pa `shifts`, sa 24h-regeln inte kan rundas via direkt API-anrop.

@@ -912,34 +912,27 @@
     return { ok: true, shiftId };
   }
 
-  async function persistCancelByCustomer({ shiftId, actorUserId, reason, hoursToStart }) {
+  async function persistCancelByCustomer({ shiftId, reason }) {
     if (!enabled || !sb || !isUuid(shiftId)) {
       return { ok: true, skipped: true };
     }
 
-    const { error: shiftErr } = await sb.from('shifts').update({
-      status: 'Avbokat',
-      cancel_reason: reason || null,
-      last_modified_by: actorUserId,
-    }).eq('id', shiftId);
-
-    if (shiftErr) {
-      console.error('[persist] cancelByCustomer:', shiftErr.message);
-      return { ok: false, message: shiftErr.message };
-    }
-
-    const { error: evErr } = await sb.from('shift_events').insert({
-      shift_id: shiftId,
-      actor_user_id: actorUserId,
-      event_type: 'customer_cancelled',
-      payload: { hours_to_start: hoursToStart, reason: reason || null },
+    const { data, error } = await sb.rpc('customer_cancel_shift', {
+      p_shift_id: shiftId,
+      p_reason: reason || null,
     });
 
-    if (evErr) {
-      return { ok: false, message: evErr.message };
+    if (error) {
+      console.error('[persist] cancelByCustomer:', error.message);
+      return {
+        ok: false,
+        code: error.code || null,
+        hint: error.hint || null,
+        message: error.message,
+      };
     }
 
-    return { ok: true };
+    return { ok: true, data };
   }
 
   async function persistCheckIn({ shiftId, cleanerUserId, checkedInAt, shift, lateSameDay }) {

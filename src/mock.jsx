@@ -219,7 +219,7 @@
       });
     }
 
-    // §7.2 demo: ett extra "akut" pass inom 48h för Acme HQ (kund kan EJ avboka själv)
+    // §7.2 demo: ett extra "akut" pass inom 24h för Acme HQ (kund kan EJ avboka själv)
     {
       const t9 = new Date();
       t9.setDate(t9.getDate() + 1);
@@ -751,7 +751,7 @@
 
     /**
      * Planerad vs faktisk tid. Efter utcheckning ligger faktisk tid i start_at/end_at;
-     * planerad i original_* om den skiljer sig. 48h-regler ska använda planned.start.
+     * planerad i original_* om den skiljer sig. 24h-regler ska använda planned.start.
      */
     shiftTimes(shift) {
       if (!shift) {
@@ -1381,14 +1381,14 @@
       return { ok: true };
     },
 
-    // §7.2 kundavbokning (48h räknas från planerad start, inte faktisk utcheckningstid)
+    // §7.2 kundavbokning (24h räknas från planerad start, inte faktisk utcheckningstid)
     async cancelByCustomer(shiftId, actorUserId, reason = '') {
       const s = db.shiftById(shiftId);
       if (!s) return { error: 'NOT_FOUND' };
       const allowed = db.shiftsForCustomerUser(actorUserId).some(x => x.id === shiftId);
       if (!allowed) return { error: 'FORBIDDEN' };
       const hours = (new Date(db.shiftPlannedStart(s)) - Date.now()) / 36e5;
-      if (hours <= 48) return { error: 'INSIDE_48H' };
+      if (hours <= 24) return { error: 'INSIDE_24H' };
 
       const snapshot = {
         status: s.status,
@@ -1416,6 +1416,10 @@
           state.shift_events.length = snapshot.shift_eventsLen;
           state.notifications.length = snapshot.notificationsLen;
           bump();
+          if (r.hint === 'INSIDE_24H' || /inside 24h/i.test(r.message || '')) {
+            return { error: 'INSIDE_24H', message: r.message };
+          }
+          if (r.code === '42501') return { error: 'FORBIDDEN', message: r.message };
           return { error: 'PERSIST_FAILED', message: r.message };
         }
       }
