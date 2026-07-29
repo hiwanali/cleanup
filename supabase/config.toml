@@ -404,3 +404,8 @@ entrypoint = "./functions/public-booking-request/index.ts"
 # Specifies static files to be bundled with the function. Supports glob patterns.
 # For example, if you want to serve static HTML pages in your function:
 # static_files = [ "./functions/public-booking-request/*.html" ]
+
+[functions.send-customer-portal-invite]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/send-customer-portal-invite/index.ts"

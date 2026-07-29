@@ -1614,6 +1614,11 @@
           bookingRequest.portal_access_status = r.portal.portal_access_status || bookingRequest.portal_access_status || 'created';
           bookingRequest.portal_access_created_at = bookingRequest.portal_access_created_at || new Date();
           bookingRequest.portal_redirect_path = r.portal.portal_redirect_path || bookingRequest.portal_redirect_path || `/kund/pass/${shiftId}`;
+          if (r.portalInvite?.ok) {
+            bookingRequest.portal_access_status = 'invited';
+            bookingRequest.portal_invited_at = bookingRequest.portal_invited_at || new Date();
+            bookingRequest.portal_last_magic_link_sent_at = new Date();
+          }
           bump();
         }
       }
@@ -1622,6 +1627,25 @@
     },
 
     // Planerat → Avbokat (admin avslår förfrågan)
+    async sendCustomerPortalInvite(shiftId) {
+      const bookingRequest = db.bookingRequestForShift(shiftId);
+      if (!bookingRequest) return { error: 'NOT_FOUND' };
+      if (bookingRequest.status !== 'approved') return { error: 'INVALID_STATUS' };
+
+      const persist = window.dbPersist && window.dbPersist.sendCustomerPortalInvite;
+      if (!persist) return { ok: true, skipped: true };
+
+      const r = await persist({ shiftId });
+      if (!r.ok) return { error: 'PERSIST_FAILED', message: r.message };
+
+      bookingRequest.portal_access_status = 'invited';
+      bookingRequest.portal_invited_at = bookingRequest.portal_invited_at || new Date();
+      bookingRequest.portal_last_magic_link_sent_at = new Date();
+      bump();
+
+      return { ok: true };
+    },
+
     async declineShift(shiftId, actorUserId) {
       const s = db.shiftById(shiftId);
       if (!s) return { error: 'NOT_FOUND' };

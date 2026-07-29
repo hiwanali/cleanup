@@ -1099,6 +1099,7 @@
     const canAdminEditChecklist = role === 'admin' && !['Borttaget', 'Avbokat'].includes(shift.status);
     const [sickOpen, setSickOpen] = useState(false);
     const [bookingPdfExporting, setBookingPdfExporting] = useState(false);
+    const [portalInviteSending, setPortalInviteSending] = useState(false);
     const [newChecklistTitle, setNewChecklistTitle] = useState('');
     const [checklistSaving, setChecklistSaving] = useState(false);
 
@@ -1193,6 +1194,15 @@
                             ? 'Avslagen'
                             : 'Väntar'}
                       </Badge>
+                      {bookingRequest.portal_access_status && bookingRequest.portal_access_status !== 'none' && (
+                        <Badge variant={bookingRequest.portal_access_status === 'invited' || bookingRequest.portal_access_status === 'active' ? 'emerald' : 'slate'}>
+                          {bookingRequest.portal_access_status === 'invited'
+                            ? 'Kundlänk skickad'
+                            : bookingRequest.portal_access_status === 'active'
+                              ? 'Kund aktiv'
+                              : 'Portal skapad'}
+                        </Badge>
+                      )}
                     </div>
                     <p className="mt-1 text-sm text-brand-900/80">
                       {serviceLabel(bookingRequest.service_type)} från {bookingRequest.source_domain || 'cleanup.nu'}.
@@ -1211,6 +1221,28 @@
                         </div>
                       )}
                       {role === 'admin' && (
+                        <>
+                        {bookingWorkflowStatus === 'approved' && bookingRequest.portal_access_status && bookingRequest.portal_access_status !== 'none' && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            icon="send"
+                            loading={portalInviteSending}
+                            onClick={async () => {
+                              setPortalInviteSending(true);
+                              try {
+                                const r = await db.sendCustomerPortalInvite(shift.id);
+                                if (r?.ok) toast.success('Kundlänk skickad.');
+                                else if (r?.error === 'PERSIST_FAILED') toast.error('Kunde inte skicka kundlänken just nu.');
+                                else toast.error('Kundlänken kunde inte skickas.');
+                              } finally {
+                                setPortalInviteSending(false);
+                              }
+                            }}
+                          >
+                            {bookingRequest.portal_access_status === 'invited' ? 'Skicka om kundlänk' : 'Skicka kundlänk'}
+                          </Button>
+                        )}
                         <Button
                           variant="outline"
                           size="sm"
@@ -1235,6 +1267,7 @@
                         >
                           PDF-bekräftelse
                         </Button>
+                        </>
                       )}
                     </div>
                   )}

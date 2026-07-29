@@ -218,6 +218,28 @@
     }
   }
 
+  async function persistSendCustomerPortalInvite({ shiftId }) {
+    if (!enabled || !sb || !isUuid(shiftId)) {
+      return { ok: true, skipped: true };
+    }
+
+    const { data, error } = await sb.functions.invoke('send-customer-portal-invite', {
+      body: { shift_id: shiftId },
+    });
+
+    if (error) {
+      console.warn('[persist] customer portal invite:', error.message);
+      return { ok: false, message: error.message };
+    }
+
+    if (data?.error) {
+      console.warn('[persist] customer portal invite:', data.error);
+      return { ok: false, message: data.error };
+    }
+
+    return { ok: true, data };
+  }
+
   /** Persisterar notiser via RPC (samma org) och triggar Resend per rad. */
   async function persistInsertNotifications(rows) {
     if (!enabled || !sb || !rows?.length) {
@@ -724,6 +746,7 @@
     }
 
     let portal = null;
+    let portalInvite = null;
     const { data: portalData, error: portalErr } = await sb.rpc('admin_prepare_customer_portal_for_booking_request', {
       p_shift_id: shiftId,
     });
@@ -732,6 +755,7 @@
       console.warn('[persist] approveShift portal:', portalErr.message);
     } else {
       portal = portalData || null;
+      portalInvite = await persistSendCustomerPortalInvite({ shiftId });
     }
 
     const { error: evErr } = await sb.from('shift_events').insert({
@@ -745,7 +769,7 @@
       return { ok: false, message: evErr.message };
     }
 
-    return { ok: true, portal };
+    return { ok: true, portal, portalInvite };
   }
 
   async function persistDeclineShift({ shiftId, actorUserId, hoursToStart, shift, primaryContactUserId }) {
@@ -1980,5 +2004,6 @@
     setCleanerProperties: persistSetCleanerProperties,
     createBookingAvailabilitySlot: persistCreateBookingAvailabilitySlot,
     updateBookingAvailabilitySlot: persistUpdateBookingAvailabilitySlot,
+    sendCustomerPortalInvite: persistSendCustomerPortalInvite,
   };
 })();

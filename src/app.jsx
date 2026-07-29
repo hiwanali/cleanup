@@ -469,6 +469,17 @@
     return null;
   }
 
+  function consumePortalRedirect(user) {
+    const params = new URLSearchParams(window.location.search || '');
+    const target = params.get('portalRedirect');
+    if (!target || !target.startsWith('/kund/')) return false;
+    if (user.role !== 'customer' && user.role !== 'customer_employee') return false;
+    const cleanPath = `${window.location.pathname}#${target}`;
+    window.history.replaceState(null, '', cleanPath);
+    router.navigate(target);
+    return true;
+  }
+
   function App() {
     const path = useRoute();
     const isEmbedBooking = !!matchPath(path, '/embed/booking');
@@ -492,7 +503,11 @@
           const { data } = await sb.auth.getSession();
           if (data.session) {
             await window.hydrateFromSupabase(data.session.user.id);
-            if (active) sessionStore.login(data.session.user.id);
+            if (active) {
+              const user = db.userById(data.session.user.id);
+              sessionStore.login(data.session.user.id);
+              if (user) consumePortalRedirect(user);
+            }
           } else if (active) {
             // Rensa ev. gammal mock-session så vi inte auto-loggar in mot seed-data
             sessionStore.logout();
@@ -502,8 +517,14 @@
         }
         if (active) setBooting(false);
       })();
-      const { data: sub } = sb.auth.onAuthStateChange((event) => {
+      const { data: sub } = sb.auth.onAuthStateChange(async (event, authSession) => {
         if (event === 'SIGNED_OUT') sessionStore.logout();
+        if (event === 'SIGNED_IN' && authSession?.user?.id) {
+          await window.hydrateFromSupabase(authSession.user.id);
+          const user = db.userById(authSession.user.id);
+          sessionStore.login(authSession.user.id);
+          if (user) consumePortalRedirect(user);
+        }
       });
       return () => { active = false; sub.subscription.unsubscribe(); };
     }, [isEmbedBooking]);

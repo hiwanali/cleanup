@@ -660,3 +660,35 @@ Nar `approveShift` kors:
 7. `booking_requests.portal_redirect_path` blir `/kund/pass/{shiftId}`.
 
 Fas 2 skickar fortfarande inga mejl. Det kommer i nasta fas nar vi lagger till serverstyrd magic-link/invite och markerar `portal_access_status = invited`.
+
+## 20. Kundportal fas 3: magic-link via mejl
+
+Syfte: nar admin godkanner en publik bokningsforfragan kan kunden fa en personlig magic-link till kundportalen.
+
+Deploya Edge Function:
+
+```bash
+supabase functions deploy send-customer-portal-invite --project-ref bkmnlcdsbvpucpqmaycx --use-api
+```
+
+Secrets som maste finnas i Supabase:
+
+- `SUPABASE_URL` - satts normalt automatiskt
+- `SUPABASE_ANON_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY` - satts normalt automatiskt
+- `RESEND_API_KEY`
+- `RESEND_FROM`
+- `CUSTOMER_PORTAL_SITE_URL` - rekommenderat: `https://www.logincleanup.app/CleanUp.html`
+
+Flode:
+
+1. Admin godkanner bokningen.
+2. Fas 2 skapar/kopplar kundportal.
+3. `send-customer-portal-invite` genererar magic-link med Supabase Auth Admin `generateLink`.
+4. Mejlet skickas via Resend.
+5. `booking_requests.portal_access_status` blir `invited`.
+6. `portal_invited_at` och `portal_last_magic_link_sent_at` sparas.
+
+Admin kan ocksa skicka/skicka om kundlanken fran bokningskortet pa passets detaljsida. Om `RESEND_API_KEY` eller `RESEND_FROM` saknas blir bokningen fortsatt godkand, men mejlet skickas inte.
+
+Viktigt i Supabase Auth URL configuration: lagg till redirect URL for `https://www.logincleanup.app/CleanUp.html` sa magic-link-redirecten tillats.
