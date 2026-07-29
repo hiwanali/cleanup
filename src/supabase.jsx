@@ -963,6 +963,44 @@
     return { ok: true };
   }
 
+  async function persistAdminCompleteShift({ shiftId, actorUserId, shift }) {
+    if (!enabled || !sb || !isUuid(shiftId)) {
+      return { ok: true, skipped: true };
+    }
+
+    const { error: shiftErr } = await sb.from('shifts').update({
+      status: 'Utfört',
+      checked_in_at: toIso(shift.checked_in_at),
+      checked_out_at: toIso(shift.checked_out_at),
+      start_at: toIso(shift.start_at),
+      end_at: toIso(shift.end_at),
+      original_start_at: toIso(shift.original_start_at),
+      original_end_at: toIso(shift.original_end_at),
+      last_modified_by: actorUserId,
+    }).eq('id', shiftId);
+
+    if (shiftErr) {
+      console.error('[persist] adminCompleteShift:', shiftErr.message);
+      return { ok: false, message: shiftErr.message };
+    }
+
+    const { error: evErr } = await sb.from('shift_events').insert({
+      shift_id: shiftId,
+      actor_user_id: actorUserId,
+      event_type: 'admin_marked_completed',
+      payload: {
+        planned: {
+          start_at: toIso(shift.original_start_at),
+          end_at: toIso(shift.original_end_at),
+        },
+        actual: { start_at: toIso(shift.start_at), end_at: toIso(shift.end_at) },
+      },
+    });
+
+    if (evErr) return { ok: false, message: evErr.message };
+    return { ok: true };
+  }
+
   async function persistAutoCompleteShift({ shiftId, shift, actorUserId, reason }) {
     if (!enabled || !sb || !isUuid(shiftId)) {
       return { ok: true, skipped: true };
@@ -1588,6 +1626,87 @@
     return { ok: true };
   }
 
+  async function persistEnsureBookingChecklistForShift({ shiftId }) {
+    if (!enabled || !sb || !isUuid(shiftId)) {
+      return { ok: true, skipped: true };
+    }
+
+    const { data: request, error: requestErr } = await sb
+      .from('booking_requests')
+      .select('service_type, addons')
+      .eq('shift_id', shiftId)
+      .maybeSingle();
+
+    if (requestErr) {
+      console.error('[persist] ensureBookingChecklistForShift request:', requestErr.message);
+      return { ok: false, message: requestErr.message };
+    }
+    if (!request) return { ok: true, skipped: true };
+
+    const { error } = await sb.rpc('add_public_booking_service_checklist', {
+      p_shift_id: shiftId,
+      p_service_type: request.service_type,
+      p_addons: request.addons || {},
+    });
+
+    if (error) {
+      console.error('[persist] ensureBookingChecklistForShift:', error.message);
+      return { ok: false, message: error.message };
+    }
+
+    return { ok: true };
+  }
+
+  async function persistAddShiftChecklistItem({ item }) {
+    if (!enabled || !sb || !isUuid(item?.shift_id)) {
+      return { ok: true, skipped: true };
+    }
+
+    const { data, error } = await sb
+      .from('shift_checklist_items')
+      .insert({
+        shift_id: item.shift_id,
+        title: item.title,
+        position: item.position,
+      })
+      .select('id')
+      .single();
+
+    if (error) {
+      console.error('[persist] addShiftChecklistItem:', error.message);
+      return { ok: false, message: error.message };
+    }
+
+    return { ok: true, itemId: data?.id };
+  }
+
+  async function persistDeleteShiftChecklistItem({ itemId, shiftId }) {
+    if (!enabled || !sb || !isUuid(itemId)) {
+      return { ok: true, skipped: true };
+    }
+
+    const { error } = await sb.from('shift_checklist_items').delete().eq('id', itemId);
+    if (error) {
+      console.error('[persist] deleteShiftChecklistItem:', error.message);
+      return { ok: false, message: error.message };
+    }
+
+    if (isUuid(shiftId)) {
+      const { data: remaining } = await sb
+        .from('shift_checklist_items')
+        .select('id, position')
+        .eq('shift_id', shiftId)
+        .order('position');
+      if (remaining?.length) {
+        await Promise.all(remaining.map((c, i) =>
+          sb.from('shift_checklist_items').update({ position: i + 1 }).eq('id', c.id),
+        ));
+      }
+    }
+
+    return { ok: true };
+  }
+
   async function persistAddChecklistTemplateItem({ propertyId, title, position }) {
     if (!enabled || !sb || !isUuid(propertyId)) {
       return { ok: true, skipped: true };
@@ -1817,6 +1936,7 @@
     cancelByCustomer: persistCancelByCustomer,
     checkIn: persistCheckIn,
     checkOut: persistCheckOut,
+    adminCompleteShift: persistAdminCompleteShift,
     autoCompleteShift: persistAutoCompleteShift,
     approveShiftCompletion: persistApproveShiftCompletion,
     createRecurringSchedule: persistCreateRecurringSchedule,
@@ -1837,6 +1957,9 @@
     createIncident: persistCreateIncident,
     updateIncident: persistUpdateIncident,
     toggleChecklistItem: persistToggleChecklistItem,
+    ensureBookingChecklistForShift: persistEnsureBookingChecklistForShift,
+    addShiftChecklistItem: persistAddShiftChecklistItem,
+    deleteShiftChecklistItem: persistDeleteShiftChecklistItem,
     addChecklistTemplateItem: persistAddChecklistTemplateItem,
     removeChecklistTemplateItem: persistRemoveChecklistTemplateItem,
     updateChecklistTemplateItem: persistUpdateChecklistTemplateItem,

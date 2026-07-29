@@ -398,11 +398,93 @@
     }
   }
 
+  const PUBLIC_BOOKING_SERVICE_CHECKLISTS = {
+    standard_cleaning: [
+      'Rummen: dammsug golv, mattor och synliga ytor',
+      'Rummen: dammtorka lister, element, möbler och fria ytor',
+      'Badrum: rengör dusch/badkar, toalett, handfat och blandare',
+      'Badrum: torka duschväggar och putsa speglar',
+      'Kök: rengör köksbänk, spis, kakelvägg och fläktens utsida',
+      'Kök: torka köksluckor och utsidan av vitvaror',
+      'Avslut: kontrollera golv och synliga ytor innan utcheckning',
+    ],
+    deep_cleaning: [
+      'Allmänt: dammsug och dammtorka golv, mattor och möbler',
+      'Allmänt: våttorka golv',
+      'Allmänt: rengör lampor, tavlor, persienner och skåp/garderober',
+      'Allmänt: rengör dörrar, lister, eluttag och strömbrytare',
+      'Allmänt: töm papperskorgar',
+      'Badrum: rengör dusch/badkar, toalett, handfat, väggar och golv',
+      'Badrum: rengör tvättmaskin/torkskåp vid behov',
+      'Badrum: rensa golvbrunn och torka rör',
+      'Kök: rengör köksbänk, spis, kakelvägg och fläkt',
+      'Kök: torka köksluckor och utsidan av vitvaror',
+    ],
+    moving_cleaning: [
+      'Allmänt: dammsug golv',
+      'Allmänt: våttorka golv och lister',
+      'Rummen: rengör dörrar, hyllor, skåp, garderober och element',
+      'Rummen: rengör eluttag och strömbrytare',
+      'Badrum: rengör dusch/badkar, tvättställ, toalett, handfat och väggar',
+      'Badrum: torka duschväggar, putsa speglar och torka rör',
+      'Badrum: rensa golvbrunn',
+      'Kök: rengör köksbänk, vask, kakelvägg och skåp',
+      'Kök: rengör spis in- och utvändigt',
+      'Kök: rengör spisfläkt och filter',
+      'Kök: rengör avfrostat kyl och frys in- och utvändigt',
+      'Fönsterputs: putsa alla glas, fönsterkant och nedre fönsterkarm',
+    ],
+    window_cleaning: [
+      'Fönster: tvätta och torka alla glas in- och utvändigt',
+      'Fönster: rengör fönsterkant',
+      'Fönster: rengör nedre fönsterkarm',
+    ],
+  };
+
+  function truthyAddon(value) {
+    return value === true || value === 'true' || value === 1 || value === '1';
+  }
+
+  function serviceChecklistForBooking(serviceType, addons = {}) {
+    const base = PUBLIC_BOOKING_SERVICE_CHECKLISTS[serviceType] || PUBLIC_BOOKING_SERVICE_CHECKLISTS.standard_cleaning;
+    const titles = base.slice();
+    if (serviceType !== 'moving_cleaning' && truthyAddon(addons.windows)) {
+      titles.push('Tillägg: fönsterputs enligt överenskommelse');
+    }
+    if (truthyAddon(addons.oven)) {
+      titles.push('Tillägg: ugnsrengöring enligt överenskommelse');
+    }
+    return titles;
+  }
+
+  function insertShiftChecklistTitles(shiftId, titles) {
+    if (!shiftId || !titles?.length) return [];
+    const existing = state.shift_checklist_items.filter(c => c.shift_id === shiftId);
+    if (existing.length) return [];
+    const rows = titles.map((title, i) => ({
+      id: id('sci'),
+      shift_id: shiftId,
+      title,
+      position: i + 1,
+      done_at: null,
+      done_by_cleaner_user_id: null,
+    }));
+    state.shift_checklist_items.push(...rows);
+    return rows;
+  }
+
   // Snapshot av mall-checklistan till ett pass i state.shifts (index i state.shifts)
   function snapshotChecklistToShift(shiftIndex) {
     const s = state.shifts[shiftIndex];
     if (!s) return;
     const items = state.cleaning_checklists.filter(c => c.property_id === s.property_id && c.active);
+    if (!items.length) {
+      const bookingRequest = state.booking_requests.find(r => r.shift_id === s.id);
+      if (bookingRequest) {
+        insertShiftChecklistTitles(s.id, serviceChecklistForBooking(bookingRequest.service_type, bookingRequest.addons));
+      }
+      return;
+    }
     items.forEach(c => {
       state.shift_checklist_items.push({
         id: id('sci'),
@@ -639,6 +721,32 @@
       return state.shift_checklist_items
         .filter(c => c.shift_id === sid)
         .sort((a, b) => a.position - b.position);
+    },
+    async ensureBookingChecklistForShift(shiftId) {
+      const shift = db.shiftById(shiftId);
+      if (!shift) return { error: 'NOT_FOUND' };
+      if (db.checklistForShift(shiftId).length) return { ok: true, skipped: true };
+      const bookingRequest = db.bookingRequestForShift(shiftId);
+      if (!bookingRequest) return { ok: true, skipped: true };
+
+      const rows = insertShiftChecklistTitles(
+        shiftId,
+        serviceChecklistForBooking(bookingRequest.service_type, bookingRequest.addons),
+      );
+      if (!rows.length) return { ok: true, skipped: true };
+      bump();
+
+      const persist = window.dbPersist && window.dbPersist.ensureBookingChecklistForShift;
+      if (persist) {
+        const r = await persist({ shiftId, bookingRequest });
+        if (!r.ok) {
+          const rowIds = new Set(rows.map(x => x.id));
+          state.shift_checklist_items = state.shift_checklist_items.filter(x => !rowIds.has(x.id));
+          bump();
+          return { error: 'PERSIST_FAILED', message: r.message };
+        }
+      }
+      return { ok: true, rows };
     },
 
     /**
@@ -1450,6 +1558,7 @@
         bookingRequestStatus: db.bookingRequestForShift(shiftId)?.status,
         shift_eventsLen: state.shift_events.length,
         notificationsLen: state.notifications.length,
+        checklistLen: state.shift_checklist_items.length,
       };
 
       s.cleaner_user_id = resolvedCleanerId;
@@ -1457,6 +1566,9 @@
       s.last_modified_by = actorUserId;
       const bookingRequest = db.bookingRequestForShift(shiftId);
       if (bookingRequest) bookingRequest.status = 'approved';
+      if (bookingRequest && db.checklistForShift(shiftId).length === 0) {
+        insertShiftChecklistTitles(shiftId, serviceChecklistForBooking(bookingRequest.service_type, bookingRequest.addons));
+      }
       state.shift_events.push({
         id: id('se'),
         shift_id: shiftId,
@@ -1492,6 +1604,7 @@
           if (request) request.status = snapshot.bookingRequestStatus;
           state.shift_events.length = snapshot.shift_eventsLen;
           state.notifications.length = snapshot.notificationsLen;
+          state.shift_checklist_items.length = snapshot.checklistLen;
           bump();
           return { error: 'PERSIST_FAILED', message: r.message };
         }
@@ -1753,6 +1866,68 @@
         if (!r.ok) {
           item.done_at = snapshot.done_at;
           item.done_by_cleaner_user_id = snapshot.done_by_cleaner_user_id;
+          bump();
+          return { error: 'PERSIST_FAILED', message: r.message };
+        }
+      }
+
+      return { ok: true };
+    },
+    async addShiftChecklistItem({ shiftId, title, actorUserId }) {
+      const actor = db.userById(actorUserId);
+      if (!actor || actor.role !== 'admin') return { error: 'FORBIDDEN' };
+      const shift = db.shiftById(shiftId);
+      if (!shift) return { error: 'NOT_FOUND' };
+      const text = (title || '').trim();
+      if (text.length < 2) return { error: 'EMPTY' };
+
+      const position = db.checklistForShift(shiftId).length + 1;
+      const item = {
+        id: id('sci'),
+        shift_id: shiftId,
+        title: text,
+        position,
+        done_at: null,
+        done_by_cleaner_user_id: null,
+      };
+      state.shift_checklist_items.push(item);
+      bump();
+
+      const persist = window.dbPersist && window.dbPersist.addShiftChecklistItem;
+      if (persist) {
+        const r = await persist({ item });
+        if (!r.ok) {
+          state.shift_checklist_items = state.shift_checklist_items.filter(x => x.id !== item.id);
+          bump();
+          return { error: 'PERSIST_FAILED', message: r.message };
+        }
+        if (r.itemId) item.id = r.itemId;
+      }
+
+      return { ok: true, item };
+    },
+    async deleteShiftChecklistItem(itemId, actorUserId) {
+      const actor = db.userById(actorUserId);
+      if (!actor || actor.role !== 'admin') return { error: 'FORBIDDEN' };
+      const idx = state.shift_checklist_items.findIndex(c => c.id === itemId);
+      if (idx === -1) return { ok: true };
+      const removed = state.shift_checklist_items[idx];
+      state.shift_checklist_items.splice(idx, 1);
+      state.shift_checklist_items
+        .filter(c => c.shift_id === removed.shift_id)
+        .sort((a, b) => a.position - b.position)
+        .forEach((c, i) => { c.position = i + 1; });
+      bump();
+
+      const persist = window.dbPersist && window.dbPersist.deleteShiftChecklistItem;
+      if (persist) {
+        const r = await persist({ itemId, shiftId: removed.shift_id });
+        if (!r.ok) {
+          state.shift_checklist_items.push(removed);
+          state.shift_checklist_items
+            .filter(c => c.shift_id === removed.shift_id)
+            .sort((a, b) => a.position - b.position)
+            .forEach((c, i) => { c.position = i + 1; });
           bump();
           return { error: 'PERSIST_FAILED', message: r.message };
         }
@@ -2178,6 +2353,76 @@
           s.end_at = snapshot.end_at;
           s.original_start_at = snapshot.original_start_at;
           s.original_end_at = snapshot.original_end_at;
+          state.shift_events.length = snapshot.shift_eventsLen;
+          bump();
+          return { error: 'PERSIST_FAILED', message: r.message };
+        }
+      }
+
+      return { ok: true };
+    },
+    async adminCompleteShift(shiftId, actorUserId) {
+      const actor = db.userById(actorUserId);
+      if (!actor || actor.role !== 'admin') return { error: 'FORBIDDEN' };
+      const s = db.shiftById(shiftId);
+      if (!s) return { error: 'NOT_FOUND' };
+      if (!['Godkänt', 'Pågående'].includes(s.status)) return { error: 'INVALID_STATUS' };
+
+      const snapshot = {
+        checked_in_at: s.checked_in_at,
+        checked_out_at: s.checked_out_at,
+        status: s.status,
+        start_at: s.start_at,
+        end_at: s.end_at,
+        original_start_at: s.original_start_at,
+        original_end_at: s.original_end_at,
+        last_modified_by: s.last_modified_by,
+        shift_eventsLen: state.shift_events.length,
+      };
+
+      const plannedStart = s.original_start_at || s.start_at;
+      const plannedEnd = s.original_end_at || s.end_at;
+      if (!s.original_start_at) {
+        s.original_start_at = plannedStart;
+        s.original_end_at = plannedEnd;
+      }
+      if (s.status === 'Pågående' && s.checked_in_at) {
+        s.checked_out_at = new Date();
+        s.start_at = s.checked_in_at;
+        s.end_at = s.checked_out_at;
+      } else {
+        s.checked_in_at = plannedStart;
+        s.checked_out_at = plannedEnd;
+        s.start_at = plannedStart;
+        s.end_at = plannedEnd;
+      }
+      s.status = 'Utfört';
+      s.last_modified_by = actorUserId;
+      state.shift_events.push({
+        id: id('se'),
+        shift_id: shiftId,
+        actor_user_id: actorUserId,
+        event_type: 'admin_marked_completed',
+        payload: {
+          planned: { start_at: s.original_start_at, end_at: s.original_end_at },
+          actual: { start_at: s.start_at, end_at: s.end_at },
+        },
+        created_at: new Date(),
+      });
+      bump();
+
+      const persist = window.dbPersist && window.dbPersist.adminCompleteShift;
+      if (persist) {
+        const r = await persist({ shiftId, actorUserId, shift: s });
+        if (!r.ok) {
+          s.checked_in_at = snapshot.checked_in_at;
+          s.checked_out_at = snapshot.checked_out_at;
+          s.status = snapshot.status;
+          s.start_at = snapshot.start_at;
+          s.end_at = snapshot.end_at;
+          s.original_start_at = snapshot.original_start_at;
+          s.original_end_at = snapshot.original_end_at;
+          s.last_modified_by = snapshot.last_modified_by;
           state.shift_events.length = snapshot.shift_eventsLen;
           bump();
           return { error: 'PERSIST_FAILED', message: r.message };

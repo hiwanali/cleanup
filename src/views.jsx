@@ -1083,9 +1083,37 @@
     const canCheckOut = isOwnerCleaner && db.canCleanerCheckOut(shift);
     const isLateCheckout = canCheckOut && shift.status === 'Utfört';
     const canReportSick = isOwnerCleaner && ['Godkänt', 'Planerat'].includes(shift.status);
-    const canCheckItems = isOwnerCleaner && ['Pågående', 'Utfört'].includes(shift.status);
+    const canCheckItems = (isOwnerCleaner && ['Pågående', 'Utfört'].includes(shift.status))
+      || (role === 'admin' && !['Borttaget', 'Avbokat'].includes(shift.status));
+    const canAdminEditChecklist = role === 'admin' && !['Borttaget', 'Avbokat'].includes(shift.status);
     const [sickOpen, setSickOpen] = useState(false);
     const [bookingPdfExporting, setBookingPdfExporting] = useState(false);
+    const [newChecklistTitle, setNewChecklistTitle] = useState('');
+    const [checklistSaving, setChecklistSaving] = useState(false);
+
+    useEffect(() => {
+      if (total > 0) return;
+      const request = db.bookingRequestForShift(shift.id);
+      if (!request) return;
+      db.ensureBookingChecklistForShift(shift.id).catch(() => {});
+    }, [shift.id, total]);
+
+    async function addShiftChecklistPoint() {
+      const title = newChecklistTitle.trim();
+      if (title.length < 2 || checklistSaving) return;
+      setChecklistSaving(true);
+      try {
+        const r = await db.addShiftChecklistItem({ shiftId: shift.id, title, actorUserId: session.userId });
+        if (r?.ok) {
+          setNewChecklistTitle('');
+          toast.success('Punkt tillagd i städschemat.');
+        } else if (r?.error === 'PERSIST_FAILED') {
+          toast.error('Kunde inte spara punkten.');
+        }
+      } finally {
+        setChecklistSaving(false);
+      }
+    }
 
     return (
       <div>
@@ -1312,9 +1340,53 @@
                           </p>
                         )}
                       </div>
+                      {canAdminEditChecklist && (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            const r = await db.deleteShiftChecklistItem(item.id, session.userId);
+                            if (r?.ok) toast.success('Punkt borttagen.');
+                            else toast.error(r.message || 'Kunde inte ta bort punkten.');
+                          }}
+                          className="mt-0.5 rounded-lg p-1 text-slate-300 hover:bg-rose-50 hover:text-rose-600"
+                          title="Ta bort punkt"
+                          aria-label="Ta bort punkt"
+                        >
+                          <Icon name="trash" className="h-4 w-4" />
+                        </button>
+                      )}
                     </li>
                   ))}
                 </ul>
+              )}
+              {canAdminEditChecklist && (
+                <div className="mt-4 border-t border-slate-100 pt-4">
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <Input
+                      value={newChecklistTitle}
+                      onChange={e => setNewChecklistTitle(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          addShiftChecklistPoint();
+                        }
+                      }}
+                      placeholder="Lägg till punkt för detta pass"
+                    />
+                    <Button
+                      variant="outline"
+                      icon="plus"
+                      disabled={newChecklistTitle.trim().length < 2 || checklistSaving}
+                      onClick={addShiftChecklistPoint}
+                      className="sm:w-auto"
+                    >
+                      Lägg till
+                    </Button>
+                  </div>
+                  <p className="mt-2 text-xs text-slate-500">
+                    Ändringen gäller detta pass. Objektets ordinarie mall redigeras på objektsidan.
+                  </p>
+                </div>
               )}
             </Card>
 
@@ -1550,6 +1622,23 @@
       }
     }
 
+    async function handleAdminComplete() {
+      setActing(true);
+      try {
+        const r = await db.adminCompleteShift(shift.id, session.userId);
+        if (r?.ok) {
+          toast.success('Passet markerat som utfört. Tiden syns nu i passet.');
+          onClose && onClose();
+        } else if (r?.error === 'PERSIST_FAILED') {
+          toast.error('Kunde inte spara utförd tid.');
+        } else {
+          toast.error('Passet kunde inte markeras som utfört.');
+        }
+      } finally {
+        setActing(false);
+      }
+    }
+
     if (isBorttaget) {
       return (
         <Card padding="md">
@@ -1708,6 +1797,9 @@
               <Button variant="outline" icon="clock" className="w-full justify-start" onClick={() => setAdjustOpen(true)}>
                 Justera tid
               </Button>
+              <Button variant="success" icon="check" className="w-full justify-start" disabled={acting} onClick={handleAdminComplete}>
+                Markera som utfört
+              </Button>
               <Button variant="danger-ghost" icon="alert-circle" className="w-full justify-start" onClick={() => setSickOpen(true)}>
                 Sjukanmäl åt städaren
               </Button>
@@ -1734,6 +1826,9 @@
             </p>
             <Button variant="outline" icon="clock" className="w-full justify-start" onClick={() => setAdjustOpen(true)}>
               Justera incheckning / utcheckning
+            </Button>
+            <Button variant="success" icon="check" className="mt-2 w-full justify-start" disabled={acting} onClick={handleAdminComplete}>
+              Markera som utfört
             </Button>
           </Card>
           <AdminDeleteShiftSection shift={shift} session={session} onClose={onClose} />
