@@ -125,7 +125,7 @@
           url.searchParams.set('service_type', form.serviceType);
           if (bookingDurationMinutes > 0) {
             url.searchParams.set('duration_minutes', String(bookingDurationMinutes));
-            url.searchParams.set('step_minutes', '60');
+            url.searchParams.set('step_minutes', '30');
             url.searchParams.set('buffer_minutes', '30');
           }
           const res = await fetch(url.toString(), {
@@ -189,7 +189,7 @@
               estimated_hours: priceDetails.hours,
               booking_duration_minutes: bookingDurationMinutes || null,
               booking_buffer_minutes: bookingDurationMinutes ? 30 : null,
-              booking_step_minutes: bookingDurationMinutes ? 60 : null,
+              booking_step_minutes: bookingDurationMinutes ? 30 : null,
               hourly_price_after_rut: priceDetails.hourlyRate,
               rut_included: form.serviceType === 'standard_cleaning',
               requires_admin_price_review: !!form.message.trim(),

@@ -589,7 +589,8 @@ Denna rollout gor adminens tillganglighet till ett arbetsfonster. Exempel:
 
 - Admin skapar hemstadning mandag `08:00-17:00`.
 - Kunden anger kvm, systemet raknar stadtid.
-- Iframen visar faktiska starttider, till exempel `08:00-11:00`, `09:00-12:00`, `10:00-13:00`.
+- Iframen visar faktiska starttider i 30-minuterssteg, till exempel `07:30-10:30`, `08:00-11:00`, `08:30-11:30`.
+- Systemet blockerar vald stadtid plus 30 min buffer for marginal/restid.
 - Nar kunden skickar forfragan sparas exakt kundtid pa passet och booking request.
 
 Kors i denna ordning:
@@ -604,6 +605,6 @@ supabase functions deploy public-availability public-booking-request --project-r
 
 3. Pusha/deploya frontend.
 4. Testa med ett fonster `08:00-17:00` och hemstadning `51-90 kvm`.
-5. Kontrollera att kunden ser 3-timmarstider och att admin far ett pass med exakt vald tid.
+5. Kontrollera att kunden ser 3-timmarstider i 30-minuterssteg och att admin far ett pass med exakt vald tid.
 
 Viktigt: Edge Functions ska inte deployas fore SQL-filen, eftersom `public-booking-request` skickar `requested_starts_at` och `requested_ends_at` till RPC-funktionen.

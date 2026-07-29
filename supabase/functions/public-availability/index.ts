@@ -104,7 +104,7 @@ Deno.serve(async (req) => {
   const to = requestedTo > maxTo ? maxTo : requestedTo;
   const serviceType = url.searchParams.get("service_type")?.trim();
   const durationMinutes = parseMinutes(url.searchParams.get("duration_minutes"), 0, 0, 12 * 60);
-  const stepMinutes = parseMinutes(url.searchParams.get("step_minutes"), 60, 15, 240);
+  const stepMinutes = parseMinutes(url.searchParams.get("step_minutes"), 30, 15, 240);
   const bufferMinutes = parseMinutes(url.searchParams.get("buffer_minutes"), 30, 0, 180);
 
   if (to <= from) {
