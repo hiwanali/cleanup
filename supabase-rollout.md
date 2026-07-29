@@ -631,3 +631,32 @@ Detta lagger till pa `booking_requests`:
 - `portal_redirect_path`
 
 Fas 1 skickar inga mejl, skapar inga auth-users och andrar inte adminens godkannande. Det ar bara grunden for fas 2, dar godkand forfragan ska skapa/koppla kundkonto och forbereda magic-link-inbjudan.
+
+## 19. Kundportal fas 2: koppling vid godkannande
+
+Syfte: nar admin godkanner en publik bokningsforfragan ska passet kopplas till en riktig kundportal-identitet, men utan att skicka mejl annu.
+
+Kor SQL-filen:
+
+```sql
+-- Supabase SQL Editor eller CLI
+supabase/migrations/20260729124223_customer_portal_approval_provisioning.sql
+```
+
+Detta skapar RPC:n:
+
+```sql
+public.admin_prepare_customer_portal_for_booking_request(p_shift_id uuid)
+```
+
+Nar `approveShift` kors:
+
+1. Passet markeras `Godkant`.
+2. `booking_requests.status` markeras `approved`.
+3. RPC:n skapar/ateranvander kundens `public.users`/Auth-rad via befintlig provisionering.
+4. RPC:n skapar/ateranvander `customers`.
+5. Objektet fran bokningsforfragan flyttas till kundens `customer_id`.
+6. `booking_requests.portal_access_status` blir `created`.
+7. `booking_requests.portal_redirect_path` blir `/kund/pass/{shiftId}`.
+
+Fas 2 skickar fortfarande inga mejl. Det kommer i nasta fas nar vi lagger till serverstyrd magic-link/invite och markerar `portal_access_status = invited`.

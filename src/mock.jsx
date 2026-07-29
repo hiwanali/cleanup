@@ -1608,6 +1608,14 @@
           bump();
           return { error: 'PERSIST_FAILED', message: r.message };
         }
+        if (bookingRequest && r.portal) {
+          bookingRequest.portal_user_id = r.portal.portal_user_id || bookingRequest.portal_user_id || null;
+          bookingRequest.portal_customer_id = r.portal.portal_customer_id || bookingRequest.portal_customer_id || null;
+          bookingRequest.portal_access_status = r.portal.portal_access_status || bookingRequest.portal_access_status || 'created';
+          bookingRequest.portal_access_created_at = bookingRequest.portal_access_created_at || new Date();
+          bookingRequest.portal_redirect_path = r.portal.portal_redirect_path || bookingRequest.portal_redirect_path || `/kund/pass/${shiftId}`;
+          bump();
+        }
       }
 
       return { ok: true };

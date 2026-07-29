@@ -723,6 +723,17 @@
       return { ok: false, message: requestErr.message };
     }
 
+    let portal = null;
+    const { data: portalData, error: portalErr } = await sb.rpc('admin_prepare_customer_portal_for_booking_request', {
+      p_shift_id: shiftId,
+    });
+
+    if (portalErr) {
+      console.warn('[persist] approveShift portal:', portalErr.message);
+    } else {
+      portal = portalData || null;
+    }
+
     const { error: evErr } = await sb.from('shift_events').insert({
       shift_id: shiftId,
       actor_user_id: actorUserId,
@@ -734,7 +745,7 @@
       return { ok: false, message: evErr.message };
     }
 
-    return { ok: true };
+    return { ok: true, portal };
   }
 
   async function persistDeclineShift({ shiftId, actorUserId, hoursToStart, shift, primaryContactUserId }) {
