@@ -814,3 +814,24 @@ Klientflode:
 5. Vid utförda pass visas att passet är klart, och faktisk utcheckning visas när den finns.
 
 Ingen ny SQL kravs for fas 10.
+
+## 28. Kundportal fas 11: tydligare e-postnotiser
+
+Syfte: kund, städare och admin ska få mer begripliga transaktionella mejl när befintliga notiser skapas.
+
+Edge Function:
+
+```text
+supabase/functions/send-notification-email
+```
+
+Flode:
+
+1. Appen skapar in-app-notiser som tidigare.
+2. `insert_notifications` returnerar notis-id.
+3. Klienten anropar `send-notification-email` för varje ny notis.
+4. Edge Function hämtar mottagare, pass/objekt och bygger svensk mall.
+5. Kunder får CTA till kundportalen.
+6. Admin och städare får CTA till rätt schema-vy i portalen.
+
+Ingen ny SQL kravs for fas 11. Kräver att `RESEND_API_KEY`, `RESEND_FROM` och `CUSTOMER_PORTAL_SITE_URL` finns som Edge Function secrets.

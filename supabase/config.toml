@@ -409,3 +409,8 @@ entrypoint = "./functions/public-booking-request/index.ts"
 enabled = true
 verify_jwt = true
 entrypoint = "./functions/send-customer-portal-invite/index.ts"
+
+[functions.send-notification-email]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/send-notification-email/index.ts"

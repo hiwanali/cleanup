@@ -26,31 +26,61 @@ function formatDateTime(iso: string | undefined | null): string {
   });
 }
 
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function buildEmailContent(
   kind: string,
   role: UserRole,
   propertyName: string,
   payload: Record<string, unknown>,
+  appBaseUrl: string,
 ): { subject: string; text: string; html: string } | null {
   const when = formatDateTime(payload.start_at as string);
   const propLine = propertyName ? `${propertyName}` : '';
   const timeLine = when ? ` · ${when}` : '';
   const detail = propLine + timeLine;
+  const shiftId = typeof payload.shift_id === 'string' ? payload.shift_id : '';
+  const shiftUrl = shiftId
+    ? `${appBaseUrl.replace(/\/$/, '')}#/kund/pass/${encodeURIComponent(shiftId)}`
+    : `${appBaseUrl.replace(/\/$/, '')}#/kund/schema`;
+  const staffUrl = `${appBaseUrl.replace(/\/$/, '')}#/${role === 'cleaner' ? 'stadare/schema' : 'admin/schema'}`;
+
+  const actionLine = role === 'customer' || role === 'customer_employee'
+    ? `\n\nDu kan se detaljerna i kundportalen: ${shiftUrl}`
+    : `\n\nLogga in i CleanUp-portalen för att hantera detta: ${staffUrl}`;
+  const actionHtml = role === 'customer' || role === 'customer_employee'
+    ? `<p><a href="${shiftUrl}" style="display:inline-block;background:#2557c7;color:#ffffff;text-decoration:none;border-radius:10px;padding:10px 14px;font-weight:700;">Öppna i kundportalen</a></p>`
+    : `<p><a href="${staffUrl}" style="display:inline-block;background:#2557c7;color:#ffffff;text-decoration:none;border-radius:10px;padding:10px 14px;font-weight:700;">Öppna CleanUp-portalen</a></p>`;
 
   const wrap = (title: string, body: string) => ({
     subject: `CleanUp: ${title}`,
-    text: `${title}\n\n${body}\n\n— CleanUp`,
-    html: `<p><strong>${title}</strong></p><p>${body.replace(/\n/g, '<br>')}</p><p style="color:#64748b;font-size:12px;">— CleanUp</p>`,
+    text: `${title}\n\n${body}${actionLine}\n\n— CleanUp`,
+    html: `<p><strong>${escapeHtml(title)}</strong></p><p>${escapeHtml(body).replace(/\n/g, '<br>')}</p>${actionHtml}<p style="color:#64748b;font-size:12px;">— CleanUp</p>`,
   });
 
   switch (kind) {
     case 'sick_reported':
+      if (role === 'customer' || role === 'customer_employee') {
+        return wrap('Vi hanterar ditt bokade pass', detail ? `${detail}\n\nStädaren har sjukanmält passet. CleanUp hanterar detta och återkommer vid behov.` : 'Städaren har sjukanmält ett pass. CleanUp hanterar detta och återkommer vid behov.');
+      }
       return wrap('Pass sjukanmält', detail || 'Ett pass har sjukanmälts.');
     case 'assigned_shift':
+      if (role === 'customer' || role === 'customer_employee') {
+        return wrap('Din bokning är bekräftad', detail || 'Din bokning är bekräftad av CleanUp.');
+      }
       return wrap('Du har tilldelats ett pass', detail || 'Ett nytt pass har tilldelats.');
+    case 'unassigned_shift':
+      return wrap('Du togs bort från ett pass', detail || 'Du togs bort från ett pass.');
     case 'cleaner_swapped':
       if (role === 'customer' || role === 'customer_employee') {
-        return wrap('Städare ombokad', detail || 'Städaren för ett pass har bytts.');
+        return wrap('Din städning är uppdaterad', detail ? `${detail}\n\nCleanUp har uppdaterat bemanningen för passet.` : 'CleanUp har uppdaterat bemanningen för ett pass.');
       }
       return wrap('Du har tilldelats ett pass', detail || 'Du har tilldelats ett pass.');
     case 'time_adjusted':
@@ -58,6 +88,9 @@ function buildEmailContent(
     case 'customer_cancelled':
       return wrap('Pass avbokat av kund', detail || 'Ett pass har avbokats av kunden.');
     case 'admin_deleted':
+      if (role === 'customer' || role === 'customer_employee') {
+        return wrap('Pass borttaget', detail ? `${detail}\n\nCleanUp har tagit bort passet. Kontakta oss om något verkar fel.` : 'CleanUp har tagit bort ett pass. Kontakta oss om något verkar fel.');
+      }
       return wrap('Pass borttaget', detail || 'Ett pass har tagits bort.');
     case 'paused_by_holiday':
       return wrap('Pass pausat (kundledighet)', detail || 'Ett pass har pausats på grund av kundledighet.');
@@ -78,6 +111,10 @@ function buildEmailContent(
       return wrap('Ditt ärende behandlas', 'Ditt ärende behandlas av admin.');
     case 'shift_will_be_missed':
       return wrap('Pass kommer inte att utföras', detail || 'Ett pass kommer inte att utföras som planerat.');
+    case 'shift_request_created':
+      return wrap('Nytt önskemål från kund', propLine || 'En kund har lämnat ett nytt önskemål.');
+    case 'customer_booking_request':
+      return wrap('Ny bokningsförfrågan', detail || 'En ny publik bokningsförfrågan har kommit in.');
     default:
       return wrap(kind, detail || 'Du har en ny notis i CleanUp.');
   }
@@ -97,6 +134,7 @@ Deno.serve(async (req) => {
     const resendFrom = Deno.env.get('RESEND_FROM');
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
     const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+    const appBaseUrl = Deno.env.get('CUSTOMER_PORTAL_SITE_URL') ?? 'https://www.logincleanup.app/CleanUp.html';
 
     if (!resendKey || !resendFrom) {
       return new Response(JSON.stringify({ error: 'RESEND not configured' }), {
@@ -161,7 +199,7 @@ Deno.serve(async (req) => {
       propertyName = prop?.name ?? '';
     }
 
-    const content = buildEmailContent(notif.kind, user.role as UserRole, propertyName, payload);
+    const content = buildEmailContent(notif.kind, user.role as UserRole, propertyName, payload, appBaseUrl);
     if (!content) {
       return new Response(JSON.stringify({ ok: true, skipped: 'no_template' }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
