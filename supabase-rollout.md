@@ -786,3 +786,17 @@ Klientflode:
 4. Uppdateringen sparas på inloggad användares egen `public.users`-rad.
 
 Ingen ny SQL kravs for fas 8. Befintlig RLS-policy `users_self_update` används.
+
+## 26. Kundportal fas 9: PDF-bokningsbekräftelse
+
+Syfte: kunden ska kunna ladda ner en enkel bokningsbekräftelse från sin passvy i kundportalen.
+
+Klientflode:
+
+1. Kunden öppnar ett pass i `Schema & bokningar`.
+2. Sidokolumnen visar ett nytt dokumentkort.
+3. Kunden klickar `Bokningsbekräftelse`.
+4. PDF:en innehåller passets status, datum, tid, objekt, adress och kundens kontaktuppgifter.
+5. Om passet har en publik bokningsförfrågan kopplad inkluderas även offertunderlaget, samtycken och eventuella tillägg.
+
+Ingen ny SQL kravs for fas 9.

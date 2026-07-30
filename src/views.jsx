@@ -555,11 +555,17 @@
     return value ? 'Ja' : 'Nej';
   }
 
-  async function exportBookingConfirmationPdf({ shift, property, bookingRequest, bookingAddons }) {
+  async function exportBookingConfirmationPdf({ shift, property, bookingRequest, bookingAddons = {}, customer }) {
     if (!window.ReportExport?.exportReportPdf) {
       throw new Error('PDF-export är inte tillgänglig.');
     }
 
+    const shiftTimes = db.shiftTimes ? db.shiftTimes(shift) : null;
+    const startsAt = bookingRequest?.requested_starts_at || shiftTimes?.planned?.start || shift.start_at;
+    const endsAt = bookingRequest?.requested_ends_at || shiftTimes?.planned?.end || shift.end_at;
+    const customerName = bookingRequest?.customer_name || customer?.name || property?.customer_name || 'kund';
+    const customerPhone = bookingRequest?.customer_phone || customer?.phone || '';
+    const customerEmail = bookingRequest?.customer_email || customer?.email || '';
     const statusLabel = shift.status === 'Godkänt'
       ? 'Bekräftad i samråd med kund'
       : shift.status === 'Planerat'
@@ -568,13 +574,14 @@
     const cleaner = db.userById(shift.cleaner_user_id);
     const serviceRows = [
       { Fält: 'Status', Värde: statusLabel },
-      { Fält: 'Tjänst', Värde: serviceLabel(bookingRequest.service_type) },
-      { Fält: 'Datum och tid', Värde: `${formatDateLong(bookingRequest.requested_starts_at)} ${formatTime(bookingRequest.requested_starts_at)}-${formatTime(bookingRequest.requested_ends_at)}` },
-      { Fält: 'Adress', Värde: property?.address || bookingRequest.address || '' },
+      { Fält: 'Tjänst', Värde: bookingRequest?.service_type ? serviceLabel(bookingRequest.service_type) : 'Städning' },
+      { Fält: 'Datum och tid', Värde: `${formatDateLong(startsAt)} ${formatTime(startsAt)}-${formatTime(endsAt)}` },
+      { Fält: 'Objekt', Värde: property?.name || '' },
+      { Fält: 'Adress', Värde: property?.address || bookingRequest?.address || '' },
       { Fält: 'Tilldelad städare', Värde: cleaner?.name || 'Tilldelas av CleanUp' },
     ];
 
-    if (bookingRequest.service_type === 'standard_cleaning') {
+    if (bookingRequest?.service_type === 'standard_cleaning') {
       serviceRows.push(
         { Fält: 'Frekvens', Värde: bookingAddons.home_frequency_label || 'Engångsstädning' },
         { Fält: 'Beräknad städtid', Värde: bookingAddons.estimated_hours ? `${bookingAddons.estimated_hours} timmar` : '' },
@@ -582,42 +589,54 @@
       );
     }
 
-    const isHomeCleaning = bookingRequest.service_type === 'standard_cleaning';
-    const priceRows = [
+    const isHomeCleaning = bookingRequest?.service_type === 'standard_cleaning';
+    const priceRows = bookingRequest ? [
       { Fält: isHomeCleaning ? 'Prisförslag per tillfälle' : 'Prisförslag', Värde: bookingRequest.estimated_price_sek != null ? `${Number(bookingRequest.estimated_price_sek).toLocaleString('sv-SE')} kr${isHomeCleaning ? ' per tillfälle' : ''}` : 'Bekräftas efter genomgång' },
       { Fält: 'RUT-avdrag', Värde: bookingAddons.rut_included ? 'Prisförslag ink. RUT-avdrag' : 'Bekräftas efter genomgång' },
       { Fält: 'Prisjustering', Värde: 'Slutligt upplägg och pris bekräftas av CleanUp efter genomgång med kund.' },
       { Fält: 'Debitering av tid', Värde: isHomeCleaning ? 'Beräkningen är preliminär. CleanUp klockar varje städning med in- och utcheckning/GPS och debiterar faktisk tid om passet blir kortare eller längre.' : '' },
       { Fält: 'Mätning', Värde: 'Mätning av objektet kan vid behov göras på plats.' },
       { Fält: 'Om RUT ej kan nyttjas', Värde: 'Om RUT-avdrag inte kan nyttjas faktureras ordinarie belopp.' },
+    ] : [
+      { Fält: 'Bekräftelse', Värde: 'Bokningen är bekräftad i samråd med kund.' },
+      { Fält: 'Avbokning', Värde: 'Avbokning via kundportal är möjlig fram till 24 timmar före planerad start.' },
+      { Fält: 'Kontakt', Värde: 'Vid frågor kontaktar du CleanUp.' },
     ];
 
-    const consentRows = [
+    const consentRows = bookingRequest ? [
       { Fält: 'Bokningsvillkor accepterade', Värde: yesNo(bookingAddons.policy_accepted) },
       { Fält: 'Villkorsversion', Värde: bookingAddons.policy_version || 'booking_terms_v1_2026-07-28' },
       { Fält: 'GDPR/personuppgifter accepterat', Värde: yesNo(bookingAddons.privacy_notice_accepted) },
       { Fält: 'Integritetsversion', Värde: bookingAddons.privacy_notice_version || 'privacy_notice_v1_2026-07-28' },
       { Fält: 'Tidpunkt i formuläret', Värde: bookingAddons.accepted_at_client ? `${formatDateLong(bookingAddons.accepted_at_client)} ${formatTime(bookingAddons.accepted_at_client)}` : '' },
-    ];
+    ] : [];
 
     const customerRows = [
-      { Fält: 'Namn', Värde: bookingRequest.customer_name },
-      { Fält: 'Telefon', Värde: bookingRequest.customer_phone },
-      { Fält: 'E-post', Värde: bookingRequest.customer_email },
-      { Fält: 'Kvm / rum', Värde: `${bookingRequest.area_sqm || 'Ej angivet'} kvm${bookingRequest.rooms ? `, ${bookingRequest.rooms} rum` : ''}` },
-      { Fält: 'Kommentar', Värde: bookingRequest.message || 'Ingen kommentar' },
+      { Fält: 'Namn', Värde: customerName },
+      { Fält: 'Telefon', Värde: customerPhone || 'Ej angivet' },
+      { Fält: 'E-post', Värde: customerEmail || 'Ej angivet' },
     ];
+    if (bookingRequest) {
+      customerRows.push(
+        { Fält: 'Kvm / rum', Värde: `${bookingRequest.area_sqm || 'Ej angivet'} kvm${bookingRequest.rooms ? `, ${bookingRequest.rooms} rum` : ''}` },
+        { Fält: 'Kommentar', Värde: bookingRequest.message || 'Ingen kommentar' },
+      );
+    }
+
+    const sections = [
+      { title: 'Bokning', headers: ['Fält', 'Värde'], rows: serviceRows },
+      { title: 'Kund', headers: ['Fält', 'Värde'], rows: customerRows },
+      { title: bookingRequest ? 'Pris och villkor' : 'Villkor', headers: ['Fält', 'Värde'], rows: priceRows },
+    ];
+    if (consentRows.length) {
+      sections.push({ title: 'Samtycke och policy', headers: ['Fält', 'Värde'], rows: consentRows });
+    }
 
     await window.ReportExport.exportReportPdf({
-      filename: `cleanup-bokningsbekraftelse-${safeFilePart(bookingRequest.customer_name)}-${formatDateShort(shift.start_at)}.pdf`,
+      filename: `cleanup-bokningsbekraftelse-${safeFilePart(customerName)}-${formatDateShort(startsAt)}.pdf`,
       title: 'CleanUp bokningsbekräftelse',
       subtitle: `Underlag skapat ${formatDateLong(new Date())} ${formatTime(new Date())}`,
-      sections: [
-        { title: 'Bokning', headers: ['Fält', 'Värde'], rows: serviceRows },
-        { title: 'Kund', headers: ['Fält', 'Värde'], rows: customerRows },
-        { title: 'Pris och villkor', headers: ['Fält', 'Värde'], rows: priceRows },
-        { title: 'Samtycke och policy', headers: ['Fält', 'Värde'], rows: consentRows },
-      ],
+      sections,
     });
   }
 
@@ -1080,6 +1099,8 @@
     const cleanerLabel = db.displayCleaner(shift.cleaner_user_id, role);
     const bookingRequest = role === 'admin' ? db.bookingRequestForShift(shift.id) : null;
     const bookingAddons = bookingRequest?.addons && typeof bookingRequest.addons === 'object' ? bookingRequest.addons : {};
+    const customerBookingRequest = isCustomerView ? db.bookingRequestForShift(shift.id) : null;
+    const customerBookingAddons = customerBookingRequest?.addons && typeof customerBookingRequest.addons === 'object' ? customerBookingRequest.addons : {};
     const bookingWorkflowStatus = bookingRequest
       ? (shift.status === 'Godkänt' ? 'approved' : shift.status === 'Avbokat' ? 'declined' : bookingRequest.status)
       : null;
@@ -1533,6 +1554,37 @@
             )}
 
             {role === 'admin' && <AdminShiftActions shift={shift} session={session} onClose={onBack} />}
+            {isCustomerView && (
+              <Card padding="md">
+                <h3 className="font-bold text-slate-900 mb-1">Dokument</h3>
+                <p className="text-xs text-slate-500 mb-3">Ladda ner en enkel bokningsbekräftelse för passet.</p>
+                <Button
+                  variant="outline"
+                  icon="download"
+                  className="w-full"
+                  loading={bookingPdfExporting}
+                  onClick={async () => {
+                    setBookingPdfExporting(true);
+                    try {
+                      await exportBookingConfirmationPdf({
+                        shift,
+                        property: prop,
+                        bookingRequest: customerBookingRequest,
+                        bookingAddons: customerBookingAddons,
+                        customer: session.user,
+                      });
+                      toast.success('Bokningsbekräftelse skapad.');
+                    } catch (_) {
+                      toast.error('Kunde inte skapa PDF just nu.');
+                    } finally {
+                      setBookingPdfExporting(false);
+                    }
+                  }}
+                >
+                  Bokningsbekräftelse
+                </Button>
+              </Card>
+            )}
             {isCustomerView && <CustomerShiftActions shift={shift} session={session} onClose={onBack} />}
           </div>
         </div>
