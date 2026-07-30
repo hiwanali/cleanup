@@ -870,6 +870,94 @@
     );
   }
 
+  function CustomerShiftProgressCard({ shift }) {
+    useDb();
+    const times = db.shiftTimes(shift);
+    const isCancelled = shift.status === 'Avbokat';
+    const isRemoved = shift.status === 'Borttaget';
+    const statusText = isCancelled
+      ? 'Avbokad'
+      : isRemoved
+        ? 'Borttagen'
+        : shift.status === 'Godkänt'
+          ? 'Bekräftad'
+          : shift.status === 'Planerat'
+            ? 'Planerad'
+            : shift.status;
+    const steps = [
+      {
+        label: 'Bokad tid',
+        value: `${formatDateLong(times.planned.start)} · ${formatRange(times.planned.start, times.planned.end)}`,
+        done: true,
+      },
+      {
+        label: statusText,
+        value: isCancelled
+          ? (shift.cancel_reason ? `Avbokad: ${shift.cancel_reason}` : 'Passet är avbokat.')
+          : isRemoved
+            ? 'Passet har tagits bort av CleanUp.'
+            : shift.status === 'Planerat'
+              ? 'Inväntar bekräftelse från CleanUp.'
+              : shift.status === 'Sjukanmäld'
+                ? 'CleanUp hanterar passet och återkommer vid behov.'
+                : 'Bokningen är bekräftad i samråd med kund.',
+        done: !['Planerat', 'Sjukanmäld'].includes(shift.status),
+        tone: isCancelled || isRemoved ? 'rose' : shift.status === 'Sjukanmäld' ? 'amber' : 'emerald',
+      },
+    ];
+
+    if (!isCancelled && !isRemoved) {
+      steps.push({
+        label: shift.checked_in_at ? 'Städning startad' : 'Start',
+        value: shift.checked_in_at
+          ? `${formatDateLong(shift.checked_in_at)} · ${formatTime(shift.checked_in_at)}`
+          : shift.status === 'Pågående'
+            ? 'Städningen pågår.'
+            : 'Städaren checkar in när passet startar.',
+        done: !!shift.checked_in_at || shift.status === 'Pågående' || shift.status === 'Utfört',
+      });
+      steps.push({
+        label: shift.checked_out_at || shift.status === 'Utfört' ? 'Städning klar' : 'Klar',
+        value: shift.checked_out_at
+          ? `${formatDateLong(shift.checked_out_at)} · ${formatTime(shift.checked_out_at)}`
+          : shift.status === 'Utfört'
+            ? 'Passet är klarmarkerat.'
+            : 'Syns här när passet är utcheckat.',
+        done: !!shift.checked_out_at || shift.status === 'Utfört',
+      });
+    }
+
+    return (
+      <Card padding="md">
+        <h3 className="font-bold text-slate-900 mb-1">Bokningsstatus</h3>
+        <p className="text-xs text-slate-500 mb-4">Följ passets viktigaste steg här.</p>
+        <ol className="space-y-3">
+          {steps.map((step, index) => {
+            const doneTone = step.tone === 'rose'
+              ? 'bg-rose-100 text-rose-700 ring-rose-200'
+              : step.tone === 'amber'
+                ? 'bg-amber-100 text-amber-700 ring-amber-200'
+                : 'bg-emerald-100 text-emerald-700 ring-emerald-200';
+            return (
+              <li key={`${step.label}-${index}`} className="flex gap-3">
+                <span className={cx(
+                  'mt-0.5 inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full text-xs font-bold ring-1',
+                  step.done ? doneTone : 'bg-slate-100 text-slate-400 ring-slate-200',
+                )}>
+                  {step.done ? <Icon name="check" className="h-3.5 w-3.5" strokeWidth={3} /> : index + 1}
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-sm font-semibold text-slate-900">{step.label}</span>
+                  <span className="block text-xs leading-relaxed text-slate-500">{step.value}</span>
+                </span>
+              </li>
+            );
+          })}
+        </ol>
+      </Card>
+    );
+  }
+
   /* ============================================================
    * Gemensamma kort
    * ============================================================ */
@@ -1554,6 +1642,7 @@
             )}
 
             {role === 'admin' && <AdminShiftActions shift={shift} session={session} onClose={onBack} />}
+            {isCustomerView && <CustomerShiftProgressCard shift={shift} />}
             {isCustomerView && (
               <Card padding="md">
                 <h3 className="font-bold text-slate-900 mb-1">Dokument</h3>

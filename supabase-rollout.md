@@ -800,3 +800,17 @@ Klientflode:
 5. Om passet har en publik bokningsförfrågan kopplad inkluderas även offertunderlaget, samtycken och eventuella tillägg.
 
 Ingen ny SQL kravs for fas 9.
+
+## 27. Kundportal fas 10: bokningsstatus i passvyn
+
+Syfte: kunden ska snabbt förstå vad som händer med ett bokat pass utan att behöva tolka interna statusar.
+
+Klientflode:
+
+1. Kunden öppnar ett pass i kundportalen.
+2. Sidokolumnen visar `Bokningsstatus`.
+3. Kortet visar bokad tid, bekräftelse/avbokning, start/incheckning och klar/utcheckning.
+4. Vid avbokade eller borttagna pass visas en kort förklaring.
+5. Vid utförda pass visas att passet är klart, och faktisk utcheckning visas när den finns.
+
+Ingen ny SQL kravs for fas 10.
