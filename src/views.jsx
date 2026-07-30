@@ -124,6 +124,29 @@
     }, []);
 
     useEffect(() => {
+      const root = document.documentElement;
+      const updateBottomOffset = () => {
+        const viewport = window.visualViewport;
+        const coveredBottom = viewport
+          ? Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop)
+          : 0;
+        root.style.setProperty('--cleanup-visual-bottom-offset', `${Math.round(coveredBottom)}px`);
+      };
+
+      updateBottomOffset();
+      window.visualViewport?.addEventListener('resize', updateBottomOffset);
+      window.visualViewport?.addEventListener('scroll', updateBottomOffset);
+      window.addEventListener('orientationchange', updateBottomOffset);
+
+      return () => {
+        root.style.removeProperty('--cleanup-visual-bottom-offset');
+        window.visualViewport?.removeEventListener('resize', updateBottomOffset);
+        window.visualViewport?.removeEventListener('scroll', updateBottomOffset);
+        window.removeEventListener('orientationchange', updateBottomOffset);
+      };
+    }, []);
+
+    useEffect(() => {
       const sendHeight = () => {
         try {
           window.parent?.postMessage({
@@ -324,7 +347,7 @@
     }
 
     return (
-      <div className="min-h-screen bg-white text-slate-900 p-4 pb-28 sm:p-6 sm:pb-6">
+      <div className="min-h-screen bg-white text-slate-900 p-4 pb-36 sm:p-6 sm:pb-6">
         <div className="max-w-4xl mx-auto">
           <div className="flex items-center justify-between gap-3 mb-5">
             <div className="flex items-center gap-3">
@@ -588,7 +611,7 @@
             </Card>
           </div>
         </div>
-        <div className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white/95 px-4 py-3 shadow-[0_-10px_30px_rgba(15,23,42,0.12)] backdrop-blur sm:hidden">
+        <div className="fixed left-3 right-3 z-30 rounded-2xl border border-slate-200 bg-white/95 px-3 py-3 shadow-[0_16px_50px_rgba(15,23,42,0.24)] backdrop-blur sm:hidden bottom-[calc(var(--cleanup-visual-bottom-offset,0px)+env(safe-area-inset-bottom,0px)+14px)]">
           <div className="mx-auto flex max-w-4xl items-center gap-3">
             <button
               type="button"
