@@ -94,8 +94,8 @@
       success: 'bg-emerald-600 text-white hover:bg-emerald-700 active:bg-emerald-800',
     };
     const sizes = {
-      sm: iconOnly ? 'h-8 w-8' : 'h-8 px-3 text-sm',
-      md: iconOnly ? 'h-10 w-10' : 'h-10 px-4 text-sm',
+      sm: iconOnly ? 'h-11 w-11' : 'h-11 px-3 text-sm',
+      md: iconOnly ? 'h-11 w-11' : 'h-11 px-4 text-sm',
       lg: iconOnly ? 'h-12 w-12' : 'h-12 px-5 text-base',
     };
     return (

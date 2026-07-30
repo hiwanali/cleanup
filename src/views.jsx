@@ -71,6 +71,7 @@
     const [slots, setSlots] = useState([]);
     const [error, setError] = useState('');
     const [confirmation, setConfirmation] = useState(null);
+    const [choosingService, setChoosingService] = useState(false);
     const [form, setForm] = useState({
       serviceType: 'standard_cleaning',
       homeFrequency: 'one_time',
@@ -109,6 +110,13 @@
     const canChooseSlot = !!form.serviceType && canContinueDetails;
     const canSubmit = canContinueDetails && form.selectedSlotId && form.customerName.trim().length >= 2 && form.customerEmail.includes('@') &&
       form.customerPhone.trim().length >= 6 && form.address.trim().length >= 3 && form.consent && form.policyAccepted && !submitting;
+    const primaryDisabled = (step === 1 && !canContinueDetails) || (step === 2 && !form.selectedSlotId) || (step === 3 && !canSubmit);
+    const primaryLabel = step < 3 ? 'Fortsätt' : 'Skicka förfrågan';
+    const mobileSummary = isQuoteService
+      ? `${serviceLabel(form.serviceType)} · telefontid`
+      : estimatedPrice == null
+        ? `${serviceLabel(form.serviceType)} · ange yta`
+        : `${estimatedPrice.toLocaleString('sv-SE')} kr${isHomeCleaning ? ' / tillfälle' : ''}`;
 
     useEffect(() => {
       document.body.classList.add('bg-white');
@@ -131,7 +139,21 @@
         clearTimeout(id);
         window.removeEventListener('resize', sendHeight);
       };
-    }, [step, slots.length, error, confirmation]);
+    }, [
+      step,
+      slots.length,
+      error,
+      confirmation,
+      choosingService,
+      form.serviceType,
+      form.homeFrequency,
+      form.areaSqm,
+      form.rooms,
+      form.bathrooms,
+      form.windows,
+      form.oven,
+      form.selectedSlotId,
+    ]);
 
     useEffect(() => {
       if (!canChooseSlot || !supabaseUrl) {
@@ -180,7 +202,19 @@
     }, [form.serviceType, supabaseUrl, bookingDurationMinutes, canChooseSlot]);
 
     function update(key, value) {
-      setForm(f => ({ ...f, [key]: value }));
+      const clearsSlot = ['serviceType', 'homeFrequency', 'areaSqm', 'rooms', 'bathrooms'].includes(key);
+      setForm(f => ({
+        ...f,
+        [key]: value,
+        ...(clearsSlot && f[key] !== value ? { selectedSlotId: '' } : {}),
+      }));
+      if (key === 'serviceType') setChoosingService(false);
+    }
+
+    function goNext() {
+      if (primaryDisabled) return;
+      if (step < 3) setStep(s => Math.min(3, s + 1));
+      else submit();
     }
 
     async function submit() {
@@ -290,7 +324,7 @@
     }
 
     return (
-      <div className="min-h-screen bg-white text-slate-900 p-4 sm:p-6">
+      <div className="min-h-screen bg-white text-slate-900 p-4 pb-28 sm:p-6 sm:pb-6">
         <div className="max-w-4xl mx-auto">
           <div className="flex items-center justify-between gap-3 mb-5">
             <div className="flex items-center gap-3">
@@ -314,22 +348,33 @@
               {step === 1 && (
                 <div>
                   <h1 className="text-xl font-extrabold text-slate-900">Vad behöver du hjälp med?</h1>
-                  <div className="grid sm:grid-cols-2 gap-3 mt-4">
-                    {PUBLIC_BOOKING_SERVICES.map(({ id, label, mode }) => (
-                      <button
-                        key={id}
-                        type="button"
-                        onClick={() => update('serviceType', id)}
-                        className={cx(
-                          'text-left rounded-xl border p-4 transition-colors',
-                          form.serviceType === id ? 'border-brand-500 bg-brand-50' : 'border-slate-200 hover:bg-slate-50',
-                        )}
-                      >
-                        <p className="font-bold text-slate-900">{label}</p>
-                        {mode === 'quote' && <p className="mt-1 text-xs text-slate-500">Offert via telefontid</p>}
-                      </button>
-                    ))}
-                  </div>
+                  {!choosingService ? (
+                    <div className="mt-4 flex items-center justify-between gap-3 rounded-2xl border border-brand-100 bg-brand-50/50 p-3">
+                      <div className="min-w-0">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-brand-700">Vald tjänst</p>
+                        <p className="truncate text-base font-extrabold text-slate-900">{serviceLabel(form.serviceType)}</p>
+                        {isQuoteService && <p className="mt-0.5 text-xs text-slate-600">Offert via telefontid</p>}
+                      </div>
+                      <Button variant="secondary" size="sm" onClick={() => setChoosingService(true)}>Ändra</Button>
+                    </div>
+                  ) : (
+                    <div className="grid sm:grid-cols-2 gap-3 mt-4">
+                      {PUBLIC_BOOKING_SERVICES.map(({ id, label, mode }) => (
+                        <button
+                          key={id}
+                          type="button"
+                          onClick={() => update('serviceType', id)}
+                          className={cx(
+                            'min-h-[58px] text-left rounded-xl border p-4 transition-colors',
+                            form.serviceType === id ? 'border-brand-500 bg-brand-50' : 'border-slate-200 hover:bg-slate-50',
+                          )}
+                        >
+                          <p className="font-bold text-slate-900">{label}</p>
+                          {mode === 'quote' && <p className="mt-1 text-xs text-slate-500">Offert via telefontid</p>}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   {form.serviceType === 'standard_cleaning' && (
                     <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
                       <p className="text-sm font-bold text-slate-900">Hur ofta vill du ha hemstädning?</p>
@@ -496,12 +541,12 @@
                 </div>
               )}
 
-              <div className="mt-6 flex items-center justify-between gap-2">
+              <div className="mt-6 hidden items-center justify-between gap-2 sm:flex">
                 <Button variant="ghost" disabled={step === 1 || submitting} onClick={() => setStep(s => Math.max(1, s - 1))}>Tillbaka</Button>
                 {step < 3 ? (
-                  <Button disabled={(step === 1 && !canContinueDetails) || (step === 2 && !form.selectedSlotId)} onClick={() => setStep(s => Math.min(3, s + 1))}>Fortsätt</Button>
+                  <Button disabled={primaryDisabled} onClick={goNext}>Fortsätt</Button>
                 ) : (
-                  <Button icon="send" loading={submitting} disabled={!canSubmit} onClick={submit}>Skicka förfrågan</Button>
+                  <Button icon="send" loading={submitting} disabled={primaryDisabled} onClick={goNext}>Skicka förfrågan</Button>
                 )}
               </div>
             </Card>
@@ -541,6 +586,25 @@
                 </p>
               )}
             </Card>
+          </div>
+        </div>
+        <div className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white/95 px-4 py-3 shadow-[0_-10px_30px_rgba(15,23,42,0.12)] backdrop-blur sm:hidden">
+          <div className="mx-auto flex max-w-4xl items-center gap-3">
+            <button
+              type="button"
+              disabled={step === 1 || submitting}
+              onClick={() => setStep(s => Math.max(1, s - 1))}
+              className="h-11 rounded-xl px-3 text-sm font-semibold text-slate-600 disabled:text-slate-300"
+            >
+              Tillbaka
+            </button>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-xs font-semibold uppercase text-slate-500">Steg {step} av 3</p>
+              <p className="truncate text-sm font-extrabold text-slate-900">{mobileSummary}</p>
+            </div>
+            <Button icon={step === 3 ? 'send' : undefined} loading={submitting} disabled={primaryDisabled} onClick={goNext}>
+              {primaryLabel}
+            </Button>
           </div>
         </div>
       </div>
@@ -1273,6 +1337,8 @@
     const role = session.user.role;
     const isCustomerView = role === 'customer' || role === 'customer_employee';
     const requests = db.requestsForShift(shift);
+    const bookingRequest = db.bookingRequestForShift(shift.id);
+    const publicBookingWish = bookingRequest?.message?.trim();
 
     const [body, setBody] = useState('');
     const [scope, setScope] = useState('single');
@@ -1322,7 +1388,17 @@
           <Icon name="message-square" className="w-5 h-5 text-slate-300" />
         </div>
 
-        {requests.length === 0 ? (
+        {publicBookingWish && (
+          <div className="mb-3 rounded-xl border border-brand-100 bg-brand-50/50 p-3">
+            <div className="mb-1.5 flex flex-wrap items-center gap-2">
+              <Badge variant="brand">Från bokningsformuläret</Badge>
+              <span className="text-[11px] text-slate-500">Kundens kommentar</span>
+            </div>
+            <p className="text-sm text-slate-800 whitespace-pre-wrap break-words">{publicBookingWish}</p>
+          </div>
+        )}
+
+        {requests.length === 0 && !publicBookingWish ? (
           <EmptyState icon="info" title="Inga önskemål" description={isCustomerView ? 'Skriv ett önskemål nedan.' : 'Kunden har inte lämnat några önskemål.'} className="py-6" />
         ) : (
           <ul className="space-y-2.5 mb-1">
@@ -3741,7 +3817,7 @@
             type="button"
             onClick={() => onChange(opt.id)}
             className={cx(
-              'inline-flex items-center gap-1.5 rounded-lg px-3 h-9 text-sm font-semibold transition-colors',
+              'inline-flex items-center gap-1.5 rounded-lg px-3 h-11 text-sm font-semibold transition-colors',
               view === opt.id ? 'bg-brand-600 text-white' : 'text-slate-600 hover:bg-slate-100',
             )}
           >
@@ -4337,7 +4413,11 @@
     const [customerFilter, setCustomerFilter] = useState('all');
     const [dateRange, setDateRange] = useState('upcoming');
     const [createOpen, setCreateOpen] = useState(false);
-    const [view, setView] = useState('calendar');
+    const [view, setView] = useState(() => (
+      typeof window !== 'undefined' && window.matchMedia?.('(max-width: 767px)').matches
+        ? 'list'
+        : 'calendar'
+    ));
 
     const cleaners = db.state.users.filter(u => u.role === 'cleaner' && u.active);
     const customers = db.state.customers;
