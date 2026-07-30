@@ -75,8 +75,8 @@
     const [form, setForm] = useState({
       serviceType: 'standard_cleaning',
       homeFrequency: 'one_time',
-      areaSqm: '',
-      rooms: '',
+      areaSqm: '20',
+      rooms: '1',
       bathrooms: '1',
       windows: false,
       oven: false,
@@ -98,6 +98,8 @@
     const selectedServiceMode = PUBLIC_BOOKING_SERVICE_BY_ID[form.serviceType]?.mode || 'quote';
     const isQuoteService = selectedServiceMode === 'quote';
     const isPricedService = !isQuoteService;
+    const areaMin = isPricedService ? 20 : 0;
+    const roomsMin = isPricedService ? 1 : 0;
     const priceDetails = getPublicBookingPriceDetails(form);
     const areaNumber = Number(form.areaSqm);
     const roomsNumber = Number(form.rooms);
@@ -226,9 +228,18 @@
 
     function update(key, value) {
       const clearsSlot = ['serviceType', 'homeFrequency', 'areaSqm', 'rooms', 'bathrooms'].includes(key);
+      const nextValues = { [key]: value };
+      const nextServiceMode = key === 'serviceType'
+        ? PUBLIC_BOOKING_SERVICE_BY_ID[value]?.mode
+        : selectedServiceMode;
+      if (key === 'serviceType' && nextServiceMode === 'priced') {
+        if (!Number.isFinite(Number(form.areaSqm)) || Number(form.areaSqm) < 20) nextValues.areaSqm = '20';
+        if (!Number.isFinite(Number(form.rooms)) || Number(form.rooms) < 1) nextValues.rooms = '1';
+        if (!Number.isFinite(Number(form.bathrooms)) || form.bathrooms === '') nextValues.bathrooms = '1';
+      }
       setForm(f => ({
         ...f,
-        [key]: value,
+        ...nextValues,
         ...(clearsSlot && f[key] !== value ? { selectedSlotId: '' } : {}),
       }));
       if (key === 'serviceType') setChoosingService(false);
@@ -438,7 +449,7 @@
                       hint="Dra eller skriv exakt yta."
                       value={form.areaSqm}
                       onChange={v => update('areaSqm', v)}
-                      min={0}
+                      min={areaMin}
                       max={300}
                       step={5}
                       unit="kvm"
@@ -448,7 +459,7 @@
                       hint="Dra eller skriv antal rum."
                       value={form.rooms}
                       onChange={v => update('rooms', v)}
-                      min={0}
+                      min={roomsMin}
                       max={12}
                       step={1}
                       unit="rum"
@@ -458,7 +469,7 @@
                       hint="Dra eller skriv antal badrum."
                       value={form.bathrooms}
                       onChange={v => update('bathrooms', v)}
-                      min={1}
+                      min={0}
                       max={6}
                       step={1}
                       unit="badrum"
@@ -711,7 +722,7 @@
 
     const area = Math.max(0, Number(form.areaSqm || 0));
     const rooms = Math.max(0, Number(form.rooms || 0));
-    const bathrooms = Math.max(1, Number(form.bathrooms || 1));
+    const bathrooms = Math.max(0, Number(form.bathrooms || 0));
     const baseByService = {
       standard_cleaning: 590,
       deep_cleaning: 990,
