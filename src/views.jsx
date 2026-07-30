@@ -1368,6 +1368,13 @@
     const [portalInviteSending, setPortalInviteSending] = useState(false);
     const [newChecklistTitle, setNewChecklistTitle] = useState('');
     const [checklistSaving, setChecklistSaving] = useState(false);
+    const [templateApplying, setTemplateApplying] = useState(false);
+    const serviceTemplateTitles = bookingRequest
+      ? db.serviceChecklistForBooking(bookingRequest.service_type, bookingAddons)
+      : [];
+    const normalizeChecklistTitle = (value) => String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    const existingChecklistTitles = new Set(checklist.map(item => normalizeChecklistTitle(item.title)));
+    const missingTemplateTitles = serviceTemplateTitles.filter(title => !existingChecklistTitles.has(normalizeChecklistTitle(title)));
 
     useEffect(() => {
       if (total > 0) return;
@@ -1612,12 +1619,28 @@
                       `${done} av ${total} punkter utförda${pct === 100 ? ' — klart!' : ''}`}
                   </p>
                 </div>
-                {total > 0 && (
-                  <div className="text-right">
+                <div className="flex flex-col items-end gap-2 text-right">
+                  {total > 0 && (
                     <p className="text-2xl font-extrabold text-brand-700 leading-none">{pct}%</p>
-                  </div>
-                )}
+                  )}
+                  {canAdminEditChecklist && missingTemplateTitles.length > 0 && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      icon="plus"
+                      loading={templateApplying}
+                      onClick={addMissingServiceTemplatePoints}
+                    >
+                      Fyll på från tjänstemall
+                    </Button>
+                  )}
+                </div>
               </div>
+              {canAdminEditChecklist && missingTemplateTitles.length > 0 && (
+                <p className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                  {missingTemplateTitles.length} punkt{missingTemplateTitles.length === 1 ? '' : 'er'} från tjänstemallen saknas på passet.
+                </p>
+              )}
               {total > 0 && (
                 <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden mb-4">
                   <div className="h-full bg-emerald-500 transition-all" style={{ width: pct + '%' }} />
@@ -2314,6 +2337,26 @@
         }
       } finally {
         setSaving(false);
+      }
+    }
+
+    async function addMissingServiceTemplatePoints() {
+      if (!missingTemplateTitles.length || templateApplying) return;
+      setTemplateApplying(true);
+      let added = 0;
+      try {
+        for (const title of missingTemplateTitles) {
+          const r = await db.addShiftChecklistItem({ shiftId: shift.id, title, actorUserId: session.userId });
+          if (r?.ok) {
+            added += 1;
+          } else {
+            toast.error('Kunde inte fylla på hela tjänstemallen.');
+            return;
+          }
+        }
+        toast.success(`${added} mallpunkt${added === 1 ? '' : 'er'} tillagd${added === 1 ? '' : 'a'}.`);
+      } finally {
+        setTemplateApplying(false);
       }
     }
 

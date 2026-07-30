@@ -891,3 +891,17 @@ Klientflode:
 5. PDF-bekräftelsen innehåller sektionen `Städmall som kopplas till bokningen`.
 
 Ingen ny SQL kravs for fas 15. Mallen ligger i appens interna tjänstekatalog och använder befintlig checklist-snapshot.
+
+## 33. Kundportal fas 16: fyll på saknade tjänstemallpunkter
+
+Syfte: admin ska kunna återställa eller komplettera passets städschema från tjänstemallen utan att skapa dubbletter.
+
+Klientflode:
+
+1. Admin öppnar ett pass med publik bokningsförfrågan.
+2. Appen jämför passets aktuella städschema med tjänstemallen för vald tjänst och tillägg.
+3. Om punkter saknas visas antal saknade punkter och knappen `Fyll på från tjänstemall`.
+4. Admin klickar knappen och appen lägger bara till saknade punkter.
+5. Befintliga manuella punkter och redan utförda punkter lämnas orörda.
+
+Ingen ny SQL kravs for fas 16. Befintlig `addShiftChecklistItem` och checklist-snapshot används.
