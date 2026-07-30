@@ -446,7 +446,7 @@
   }
 
   function serviceChecklistForBooking(serviceType, addons = {}) {
-    const base = PUBLIC_BOOKING_SERVICE_CHECKLISTS[serviceType] || PUBLIC_BOOKING_SERVICE_CHECKLISTS.standard_cleaning;
+    const base = PUBLIC_BOOKING_SERVICE_CHECKLISTS[serviceType] || [];
     const titles = base.slice();
     if (serviceType !== 'moving_cleaning' && truthyAddon(addons.windows)) {
       titles.push('Tillägg: fönsterputs enligt överenskommelse');

@@ -40,10 +40,18 @@ function serviceLabel(serviceType: string | null | undefined): string {
       return "Hemstädning";
     case "deep_cleaning":
       return "Storstädning";
-    case "move_cleaning":
+    case "moving_cleaning":
       return "Flyttstädning";
     case "window_cleaning":
       return "Fönsterputs";
+    case "office_cleaning":
+      return "Kontorsstädning";
+    case "stair_cleaning":
+      return "Trappstädning";
+    case "construction_cleaning":
+      return "Byggstädning";
+    case "construction_services":
+      return "Byggtjänster";
     default:
       return "Städning";
   }

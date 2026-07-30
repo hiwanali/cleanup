@@ -9,6 +9,17 @@
   const { useState, useMemo, useEffect } = React;
   const CLEANUP_BOOKING_TERMS_VERSION = 'booking_terms_v1_2026-07-30';
   const CLEANUP_PRIVACY_NOTICE_VERSION = 'privacy_notice_v1_2026-07-30';
+  const PUBLIC_BOOKING_SERVICES = [
+    { id: 'standard_cleaning', label: 'Hemstädning', mode: 'priced' },
+    { id: 'deep_cleaning', label: 'Storstädning', mode: 'priced' },
+    { id: 'moving_cleaning', label: 'Flyttstädning', mode: 'priced' },
+    { id: 'window_cleaning', label: 'Fönsterputs', mode: 'quote' },
+    { id: 'office_cleaning', label: 'Kontorsstädning', mode: 'quote' },
+    { id: 'stair_cleaning', label: 'Trappstädning', mode: 'quote' },
+    { id: 'construction_cleaning', label: 'Byggstädning', mode: 'quote' },
+    { id: 'construction_services', label: 'Byggtjänster', mode: 'quote' },
+  ];
+  const PUBLIC_BOOKING_SERVICE_BY_ID = Object.fromEntries(PUBLIC_BOOKING_SERVICES.map(service => [service.id, service]));
 
   /* ============================================================
    * LOGIN (Supabase Auth)
@@ -82,14 +93,19 @@
     });
 
     const selectedSlot = slots.find(s => s.id === form.selectedSlotId);
+    const isHomeCleaning = form.serviceType === 'standard_cleaning';
+    const selectedServiceMode = PUBLIC_BOOKING_SERVICE_BY_ID[form.serviceType]?.mode || 'quote';
+    const isQuoteService = selectedServiceMode === 'quote';
+    const isPricedService = !isQuoteService;
     const priceDetails = getPublicBookingPriceDetails(form);
     const areaNumber = Number(form.areaSqm);
     const roomsNumber = Number(form.rooms);
     const hasValidArea = Number.isFinite(areaNumber) && areaNumber > 0;
     const hasValidRooms = Number.isFinite(roomsNumber) && roomsNumber > 0;
-    const canContinueDetails = hasValidArea && hasValidRooms;
-    const estimatedPrice = canContinueDetails ? priceDetails.price : null;
-    const bookingDurationMinutes = canContinueDetails && priceDetails.hours ? Math.round(priceDetails.hours * 60) : 0;
+    const canContinueDetails = isQuoteService || (hasValidArea && hasValidRooms);
+    const estimatedPrice = isPricedService && canContinueDetails ? priceDetails.price : null;
+    const bookingDurationMinutes = isQuoteService ? 60 : (canContinueDetails && priceDetails.hours ? Math.round(priceDetails.hours * 60) : 0);
+    const bookingBufferMinutes = isQuoteService ? 60 : 30;
     const canChooseSlot = !!form.serviceType && canContinueDetails;
     const canSubmit = canContinueDetails && form.selectedSlotId && form.customerName.trim().length >= 2 && form.customerEmail.includes('@') &&
       form.customerPhone.trim().length >= 6 && form.address.trim().length >= 3 && form.consent && form.policyAccepted && !submitting;
@@ -137,7 +153,7 @@
           if (bookingDurationMinutes > 0) {
             url.searchParams.set('duration_minutes', String(bookingDurationMinutes));
             url.searchParams.set('step_minutes', '30');
-            url.searchParams.set('buffer_minutes', '30');
+            url.searchParams.set('buffer_minutes', String(bookingBufferMinutes));
           }
           const res = await fetch(url.toString(), {
             headers: anonKey ? { apikey: anonKey } : {},
@@ -192,17 +208,19 @@
             area_sqm: form.areaSqm ? Number(form.areaSqm) : null,
             rooms: form.rooms ? Number(form.rooms) : null,
             addons: {
-              windows: form.windows,
-              oven: form.oven,
+              windows: isPricedService && form.windows,
+              oven: isPricedService && form.oven,
               bathrooms: Number(form.bathrooms || 1),
-              home_frequency: form.serviceType === 'standard_cleaning' ? form.homeFrequency : null,
-              home_frequency_label: form.serviceType === 'standard_cleaning' ? priceDetails.frequencyLabel : null,
+              home_frequency: isHomeCleaning ? form.homeFrequency : null,
+              home_frequency_label: isHomeCleaning ? priceDetails.frequencyLabel : null,
               estimated_hours: priceDetails.hours,
               booking_duration_minutes: bookingDurationMinutes || null,
-              booking_buffer_minutes: bookingDurationMinutes ? 30 : null,
+              booking_buffer_minutes: bookingDurationMinutes ? bookingBufferMinutes : null,
               booking_step_minutes: bookingDurationMinutes ? 30 : null,
               hourly_price_after_rut: priceDetails.hourlyRate,
-              rut_included: form.serviceType === 'standard_cleaning',
+              rut_included: isHomeCleaning,
+              request_kind: isQuoteService ? 'phone_quote_request' : 'price_booking_request',
+              phone_quote: isQuoteService,
               requires_admin_price_review: !!form.message.trim(),
               policy_accepted: form.policyAccepted,
               policy_version: CLEANUP_BOOKING_TERMS_VERSION,
@@ -297,12 +315,7 @@
                 <div>
                   <h1 className="text-xl font-extrabold text-slate-900">Vad behöver du hjälp med?</h1>
                   <div className="grid sm:grid-cols-2 gap-3 mt-4">
-                    {[
-                      ['standard_cleaning', 'Hemstädning'],
-                      ['deep_cleaning', 'Storstädning'],
-                      ['moving_cleaning', 'Flyttstädning'],
-                      ['window_cleaning', 'Fönsterputs'],
-                    ].map(([id, label]) => (
+                    {PUBLIC_BOOKING_SERVICES.map(({ id, label, mode }) => (
                       <button
                         key={id}
                         type="button"
@@ -313,6 +326,7 @@
                         )}
                       >
                         <p className="font-bold text-slate-900">{label}</p>
+                        {mode === 'quote' && <p className="mt-1 text-xs text-slate-500">Offert via telefontid</p>}
                       </button>
                     ))}
                   </div>
@@ -339,6 +353,15 @@
                           </button>
                         ))}
                       </div>
+                    </div>
+                  )}
+                  {isQuoteService && (
+                    <div className="mt-4 rounded-2xl border border-brand-100 bg-brand-50/40 p-4 text-sm text-brand-950">
+                      <p className="font-bold">Boka telefontid för offert</p>
+                      <p className="mt-1 leading-relaxed text-brand-950/80">
+                        Lämna gärna yta, rum och kort beskrivning om uppdraget. Vi ringer upp på vald tid,
+                        går igenom behovet och återkommer med pris manuellt.
+                      </p>
                     </div>
                   )}
                   <div className="grid md:grid-cols-2 gap-3 mt-4">
@@ -378,28 +401,30 @@
                       Fyll i ungefärlig yta och antal rum för att se rätt pris och lediga tider.
                     </div>
                   )}
-                  <div className="grid sm:grid-cols-2 gap-3 mt-4">
-                    <ToggleOptionCard
-                      label="Fönsterputs"
-                      description="Lägg till putsning av fönster."
-                      price="+450 kr"
-                      checked={form.windows}
-                      onChange={v => update('windows', v)}
-                    />
-                    <ToggleOptionCard
-                      label="Ugnsrengöring"
-                      description="Lägg till rengöring av ugn."
-                      price="+250 kr"
-                      checked={form.oven}
-                      onChange={v => update('oven', v)}
-                    />
-                  </div>
+                  {isPricedService && (
+                    <div className="grid sm:grid-cols-2 gap-3 mt-4">
+                      <ToggleOptionCard
+                        label="Fönsterputs"
+                        description="Lägg till putsning av fönster."
+                        price="+450 kr"
+                        checked={form.windows}
+                        onChange={v => update('windows', v)}
+                      />
+                      <ToggleOptionCard
+                        label="Ugnsrengöring"
+                        description="Lägg till rengöring av ugn."
+                        price="+250 kr"
+                        checked={form.oven}
+                        onChange={v => update('oven', v)}
+                      />
+                    </div>
+                  )}
                 </div>
               )}
 
               {step === 2 && (
                 <div>
-                  <h1 className="text-xl font-extrabold text-slate-900">Välj en ledig tid</h1>
+                  <h1 className="text-xl font-extrabold text-slate-900">{isQuoteService ? 'Välj telefontid' : 'Välj en ledig tid'}</h1>
                   {loadingSlots ? (
                     <div className="mt-4 grid sm:grid-cols-2 gap-3">
                       <Skeleton className="h-20" />
@@ -482,30 +507,35 @@
             </Card>
 
             <Card padding="md" className="h-fit">
-              <p className="text-xs font-semibold uppercase text-slate-500">Uppskattat pris</p>
+              <p className="text-xs font-semibold uppercase text-slate-500">{isPricedService ? 'Uppskattat pris' : 'Nästa steg'}</p>
               <p className="mt-2 text-3xl font-extrabold text-slate-900">
-                {estimatedPrice == null
+                {isQuoteService
+                  ? 'Telefontid'
+                  : estimatedPrice == null
                   ? 'Ange yta'
-                  : `${estimatedPrice.toLocaleString('sv-SE')} kr${form.serviceType === 'standard_cleaning' ? ' per tillfälle' : ''}`}
+                  : `${estimatedPrice.toLocaleString('sv-SE')} kr${isHomeCleaning ? ' per tillfälle' : ''}`}
               </p>
               <p className="mt-1 text-xs text-slate-500">
-                {estimatedPrice == null
+                {isQuoteService
+                  ? 'Vi ringer upp på vald tid, går igenom uppdraget och lämnar pris manuellt.'
+                  : estimatedPrice == null
                   ? 'Pris och lediga tider visas när yta och rum är ifyllda.'
-                  : form.serviceType === 'standard_cleaning'
-                  ? 'Preliminär beräkning ink. RUT-avdrag per städtillfälle. Slutligt upplägg och pris bekräftas efter genomgång.'
-                  : 'Prisförslag ink. RUT-avdrag. Slutligt upplägg och pris bekräftas efter genomgång.'}
+                  : isHomeCleaning
+                    ? 'Preliminär beräkning ink. RUT-avdrag per städtillfälle. Slutligt upplägg och pris bekräftas efter genomgång.'
+                    : 'Prisförslag ink. RUT-avdrag. Slutligt upplägg och pris bekräftas efter genomgång.'}
               </p>
               <div className="mt-4 space-y-2 text-sm text-slate-600">
                 <p><span className="font-semibold text-slate-900">Tjänst:</span> {serviceLabel(form.serviceType)}</p>
-                {form.serviceType === 'standard_cleaning' && (
+                {isHomeCleaning && (
                   <>
                     <p><span className="font-semibold text-slate-900">Frekvens:</span> {priceDetails.frequencyLabel}</p>
                     {canContinueDetails && <p><span className="font-semibold text-slate-900">Städning:</span> {priceDetails.hours} tim · {priceDetails.hourlyRate} kr/h</p>}
                   </>
                 )}
+                {isQuoteService && <p><span className="font-semibold text-slate-900">Samtal:</span> 60 min · 60 min buffer</p>}
                 {selectedSlot && <p><span className="font-semibold text-slate-900">Tid:</span> {formatDate(selectedSlot.starts_at)} {formatTime(selectedSlot.starts_at)}-{formatTime(selectedSlot.ends_at)}</p>}
               </div>
-              {form.serviceType === 'standard_cleaning' && (
+              {isHomeCleaning && (
                 <p className="mt-4 border-t border-slate-100 pt-3 text-[11px] leading-relaxed text-slate-500">
                   Tiden är preliminär. Vi klockar varje städning med in- och utcheckning/GPS i vårt system och debiterar faktisk tid om passet blir kortare eller längre. Om RUT-avdrag inte kan nyttjas faktureras ordinarie belopp. Mätning av objektet kan vid behov göras på plats.
                 </p>
@@ -536,11 +566,14 @@
 
   function PublicBookingTermsSummary({ serviceType }) {
     const isHomeCleaning = serviceType === 'standard_cleaning';
+    const isQuoteService = (PUBLIC_BOOKING_SERVICE_BY_ID[serviceType]?.mode || 'quote') === 'quote';
     const items = [
       'Förfrågan är inte bindande förrän CleanUp har gått igenom upplägg, pris och tid med dig.',
       isHomeCleaning
         ? 'Hemstädning beräknas per tillfälle. Vi klockar städningen med in- och utcheckning/GPS och debiterar faktisk tid om passet blir kortare eller längre.'
-        : 'Prisförslaget är preliminärt. Slutligt pris och upplägg bekräftas efter genomgång.',
+        : isQuoteService
+          ? 'Telefontiden används för att gå igenom uppdraget. Pris lämnas manuellt efter samtalet.'
+          : 'Prisförslaget är preliminärt. Slutligt pris och upplägg bekräftas efter genomgång.',
       'Om RUT-avdrag inte kan nyttjas faktureras ordinarie belopp.',
       'Mätning av objektet kan vid behov göras på plats.',
       'Vi behandlar endast uppgifter som behövs för att hantera förfrågan, bokning, kundkontakt och administration.',
@@ -577,6 +610,15 @@
         hours,
         hourlyRate: frequency.hourlyRate,
         frequencyLabel: frequency.label,
+      };
+    }
+
+    if ((PUBLIC_BOOKING_SERVICE_BY_ID[form.serviceType]?.mode || 'quote') === 'quote') {
+      return {
+        price: null,
+        hours: null,
+        hourlyRate: null,
+        frequencyLabel: '',
       };
     }
 
@@ -4051,6 +4093,10 @@
       deep_cleaning: 'Storstädning',
       moving_cleaning: 'Flyttstädning',
       window_cleaning: 'Fönsterputs',
+      office_cleaning: 'Kontorsstädning',
+      stair_cleaning: 'Trappstädning',
+      construction_cleaning: 'Byggstädning',
+      construction_services: 'Byggtjänster',
     };
     return labels[serviceType] || serviceType || 'Tjänst';
   }
@@ -4242,10 +4288,9 @@
         <div className="grid md:grid-cols-2 gap-3 mt-3">
           <Field label="Tjänst" required>
             <Select value={serviceType} onChange={e => setServiceType(e.target.value)}>
-              <option value="standard_cleaning">Hemstädning</option>
-              <option value="deep_cleaning">Storstädning</option>
-              <option value="moving_cleaning">Flyttstädning</option>
-              <option value="window_cleaning">Fönsterputs</option>
+              {PUBLIC_BOOKING_SERVICES.map(service => (
+                <option key={service.id} value={service.id}>{service.label}</option>
+              ))}
             </Select>
           </Field>
           <Field label="Kapacitet" required hint="V1: använd oftast 1.">

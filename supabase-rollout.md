@@ -905,3 +905,25 @@ Klientflode:
 5. Befintliga manuella punkter och redan utförda punkter lämnas orörda.
 
 Ingen ny SQL kravs for fas 16. Befintlig `addShiftChecklistItem` och checklist-snapshot används.
+
+## 34. Publik widget: prisade tjänster och telefontider
+
+Syfte: widgeten ska spegla tjänsterna på cleanup.nu utan att visa pris på de tjänster där CleanUp först behöver ringa upp och lämna offert.
+
+Pris visas direkt för:
+
+1. Hemstädning
+2. Storstädning
+3. Flyttstädning
+
+Telefontid/offert utan pris används för:
+
+1. Fönsterputs
+2. Kontorsstädning
+3. Trappstädning
+4. Byggstädning
+5. Byggtjänster
+
+Telefontider använder 60 minuters samtalstid och 60 minuters buffer. Admin skapar tidsluckor per tjänst i `/admin/tillganglighet`; databasen kräver att förfrågans `service_type` matchar tidsluckans `service_type`, så ingen gemensam "alla offerttjänster"-slot används i denna fas.
+
+Ingen ny SQL krävs för fas 34.
