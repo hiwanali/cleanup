@@ -1400,6 +1400,26 @@
       }
     }
 
+    async function addMissingServiceTemplatePoints() {
+      if (!missingTemplateTitles.length || templateApplying) return;
+      setTemplateApplying(true);
+      let added = 0;
+      try {
+        for (const title of missingTemplateTitles) {
+          const r = await db.addShiftChecklistItem({ shiftId: shift.id, title, actorUserId: session.userId });
+          if (r?.ok) {
+            added += 1;
+          } else {
+            toast.error('Kunde inte fylla på hela tjänstemallen.');
+            return;
+          }
+        }
+        toast.success(`${added} mallpunkt${added === 1 ? '' : 'er'} tillagd${added === 1 ? '' : 'a'}.`);
+      } finally {
+        setTemplateApplying(false);
+      }
+    }
+
     return (
       <div>
         <PageHeader
@@ -2337,26 +2357,6 @@
         }
       } finally {
         setSaving(false);
-      }
-    }
-
-    async function addMissingServiceTemplatePoints() {
-      if (!missingTemplateTitles.length || templateApplying) return;
-      setTemplateApplying(true);
-      let added = 0;
-      try {
-        for (const title of missingTemplateTitles) {
-          const r = await db.addShiftChecklistItem({ shiftId: shift.id, title, actorUserId: session.userId });
-          if (r?.ok) {
-            added += 1;
-          } else {
-            toast.error('Kunde inte fylla på hela tjänstemallen.');
-            return;
-          }
-        }
-        toast.success(`${added} mallpunkt${added === 1 ? '' : 'er'} tillagd${added === 1 ? '' : 'a'}.`);
-      } finally {
-        setTemplateApplying(false);
       }
     }
 
