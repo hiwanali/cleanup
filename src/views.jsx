@@ -998,6 +998,81 @@
     );
   }
 
+  function CustomerHomeCleaningPlanCard({ shift, bookingRequest, bookingAddons, session }) {
+    useDb();
+    if (!bookingRequest || bookingRequest.service_type !== 'standard_cleaning') return null;
+
+    const frequencyKey = bookingAddons.home_frequency || 'one_time';
+    const isRecurring = frequencyKey === 'weekly' || frequencyKey === 'biweekly';
+    const frequencyLabel = bookingAddons.home_frequency_label || getHomeCleaningFrequency(frequencyKey).label;
+    const nextShift = db.shiftsForCustomerUser(session.userId)
+      .filter(s => (
+        s.id !== shift.id
+        && s.property_id === shift.property_id
+        && !['Avbokat', 'Borttaget'].includes(s.status)
+        && new Date(s.start_at).getTime() > Date.now()
+      ))
+      .sort((a, b) => new Date(a.start_at) - new Date(b.start_at))[0];
+
+    const rows = [
+      { label: 'Upplägg', value: frequencyLabel },
+      {
+        label: 'Pris',
+        value: bookingRequest.estimated_price_sek != null
+          ? `${Number(bookingRequest.estimated_price_sek).toLocaleString('sv-SE')} kr per tillfälle`
+          : 'Bekräftas av CleanUp',
+      },
+      {
+        label: 'Beräknad tid',
+        value: bookingAddons.estimated_hours
+          ? `${bookingAddons.estimated_hours} timmar`
+          : 'Bekräftas av CleanUp',
+      },
+      {
+        label: 'Timpris',
+        value: bookingAddons.hourly_price_after_rut
+          ? `${bookingAddons.hourly_price_after_rut} kr/h efter RUT`
+          : 'Bekräftas av CleanUp',
+      },
+    ];
+
+    return (
+      <Card padding="md" className="border-emerald-200 bg-emerald-50/40">
+        <div className="flex items-start gap-2 mb-3">
+          <Icon name="sparkles" className="mt-0.5 h-4 w-4 flex-shrink-0 text-emerald-700" />
+          <div>
+            <h3 className="font-bold text-emerald-950">Hemstädning</h3>
+            <p className="text-xs text-emerald-800/80">
+              {isRecurring ? 'Återkommande upplägg' : 'Engångsupplägg'} från din bokningsförfrågan.
+            </p>
+          </div>
+        </div>
+        <dl className="grid gap-2 text-sm">
+          {rows.map(row => (
+            <div key={row.label} className="flex items-start justify-between gap-3 rounded-xl bg-white/70 px-3 py-2 ring-1 ring-emerald-100">
+              <dt className="text-xs font-semibold text-emerald-800">{row.label}</dt>
+              <dd className="text-right font-semibold text-slate-900">{row.value}</dd>
+            </div>
+          ))}
+        </dl>
+        {nextShift && (
+          <div className="mt-3 rounded-xl bg-white/70 px-3 py-2 text-xs text-emerald-950 ring-1 ring-emerald-100">
+            <span className="font-semibold">Nästa pass på objektet:</span>{' '}
+            {formatDateLong(nextShift.start_at)} kl. {formatTime(nextShift.start_at)}-{formatTime(nextShift.end_at)}
+          </div>
+        )}
+        <p className="mt-3 text-[11px] leading-relaxed text-emerald-900/80">
+          Priset är per städtillfälle och inkluderar RUT när avdrag kan nyttjas. CleanUp klockar varje städning med in- och utcheckning/GPS och debiterar faktisk tid om passet blir kortare eller längre.
+        </p>
+        {isRecurring && (
+          <p className="mt-2 text-[11px] leading-relaxed text-emerald-900/80">
+            Kommande tillfällen visas i Schema & bokningar när de är bekräftade eller upplagda av CleanUp.
+          </p>
+        )}
+      </Card>
+    );
+  }
+
   /* ============================================================
    * Gemensamma kort
    * ============================================================ */
@@ -1683,6 +1758,14 @@
 
             {role === 'admin' && <AdminShiftActions shift={shift} session={session} onClose={onBack} />}
             {isCustomerView && <CustomerShiftProgressCard shift={shift} />}
+            {isCustomerView && (
+              <CustomerHomeCleaningPlanCard
+                shift={shift}
+                bookingRequest={customerBookingRequest}
+                bookingAddons={customerBookingAddons}
+                session={session}
+              />
+            )}
             {isCustomerView && (
               <Card padding="md">
                 <h3 className="font-bold text-slate-900 mb-1">Dokument</h3>

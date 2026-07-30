@@ -849,3 +849,17 @@ Klientflode:
 5. PDF-bekräftelsen använder samma versions-id som formuläret.
 
 Ingen ny SQL kravs for fas 12. Befintligt `addons`-fält används.
+
+## 30. Kundportal fas 13: hemstädningsupplägg i kundens passvy
+
+Syfte: kunden ska tydligt se upplägget för hemstädning, särskilt återkommande städning varje vecka eller varannan vecka.
+
+Klientflode:
+
+1. Kunden öppnar ett hemstädningspass i kundportalen.
+2. Passvyn visar ett separat kort för `Hemstädning`.
+3. Kortet visar frekvens, pris per tillfälle, beräknad tid och timpris efter RUT.
+4. Om fler pass på samma objekt finns visar kortet nästa planerade pass.
+5. Kortet förklarar att faktisk tid debiteras utifrån in- och utcheckning/GPS.
+
+Ingen ny SQL kravs for fas 13. Befintliga värden i `booking_requests.addons` används.
