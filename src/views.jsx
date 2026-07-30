@@ -83,10 +83,15 @@
 
     const selectedSlot = slots.find(s => s.id === form.selectedSlotId);
     const priceDetails = getPublicBookingPriceDetails(form);
-    const estimatedPrice = priceDetails.price;
-    const bookingDurationMinutes = priceDetails.hours ? Math.round(priceDetails.hours * 60) : 0;
-    const canChooseSlot = !!form.serviceType;
-    const canSubmit = form.selectedSlotId && form.customerName.trim().length >= 2 && form.customerEmail.includes('@') &&
+    const areaNumber = Number(form.areaSqm);
+    const roomsNumber = Number(form.rooms);
+    const hasValidArea = Number.isFinite(areaNumber) && areaNumber > 0;
+    const hasValidRooms = Number.isFinite(roomsNumber) && roomsNumber > 0;
+    const canContinueDetails = hasValidArea && hasValidRooms;
+    const estimatedPrice = canContinueDetails ? priceDetails.price : null;
+    const bookingDurationMinutes = canContinueDetails && priceDetails.hours ? Math.round(priceDetails.hours * 60) : 0;
+    const canChooseSlot = !!form.serviceType && canContinueDetails;
+    const canSubmit = canContinueDetails && form.selectedSlotId && form.customerName.trim().length >= 2 && form.customerEmail.includes('@') &&
       form.customerPhone.trim().length >= 6 && form.address.trim().length >= 3 && form.consent && form.policyAccepted && !submitting;
 
     useEffect(() => {
@@ -113,7 +118,11 @@
     }, [step, slots.length, error, confirmation]);
 
     useEffect(() => {
-      if (!canChooseSlot || !supabaseUrl) return;
+      if (!canChooseSlot || !supabaseUrl) {
+        setSlots([]);
+        setForm(f => f.selectedSlotId ? { ...f, selectedSlotId: '' } : f);
+        return;
+      }
       let cancelled = false;
       async function loadSlots() {
         setLoadingSlots(true);
@@ -152,7 +161,7 @@
       }
       loadSlots();
       return () => { cancelled = true; };
-    }, [form.serviceType, supabaseUrl, bookingDurationMinutes]);
+    }, [form.serviceType, supabaseUrl, bookingDurationMinutes, canChooseSlot]);
 
     function update(key, value) {
       setForm(f => ({ ...f, [key]: value }));
@@ -364,6 +373,11 @@
                       unit="badrum"
                     />
                   </div>
+                  {!canContinueDetails && (
+                    <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                      Fyll i ungefärlig yta och antal rum för att se rätt pris och lediga tider.
+                    </div>
+                  )}
                   <div className="grid sm:grid-cols-2 gap-3 mt-4">
                     <ToggleOptionCard
                       label="Fönsterputs"
@@ -460,7 +474,7 @@
               <div className="mt-6 flex items-center justify-between gap-2">
                 <Button variant="ghost" disabled={step === 1 || submitting} onClick={() => setStep(s => Math.max(1, s - 1))}>Tillbaka</Button>
                 {step < 3 ? (
-                  <Button disabled={step === 2 && !form.selectedSlotId} onClick={() => setStep(s => Math.min(3, s + 1))}>Fortsätt</Button>
+                  <Button disabled={(step === 1 && !canContinueDetails) || (step === 2 && !form.selectedSlotId)} onClick={() => setStep(s => Math.min(3, s + 1))}>Fortsätt</Button>
                 ) : (
                   <Button icon="send" loading={submitting} disabled={!canSubmit} onClick={submit}>Skicka förfrågan</Button>
                 )}
@@ -470,10 +484,14 @@
             <Card padding="md" className="h-fit">
               <p className="text-xs font-semibold uppercase text-slate-500">Uppskattat pris</p>
               <p className="mt-2 text-3xl font-extrabold text-slate-900">
-                {estimatedPrice.toLocaleString('sv-SE')} kr{form.serviceType === 'standard_cleaning' ? ' per tillfälle' : ''}
+                {estimatedPrice == null
+                  ? 'Ange yta'
+                  : `${estimatedPrice.toLocaleString('sv-SE')} kr${form.serviceType === 'standard_cleaning' ? ' per tillfälle' : ''}`}
               </p>
               <p className="mt-1 text-xs text-slate-500">
-                {form.serviceType === 'standard_cleaning'
+                {estimatedPrice == null
+                  ? 'Pris och lediga tider visas när yta och rum är ifyllda.'
+                  : form.serviceType === 'standard_cleaning'
                   ? 'Preliminär beräkning ink. RUT-avdrag per städtillfälle. Slutligt upplägg och pris bekräftas efter genomgång.'
                   : 'Prisförslag ink. RUT-avdrag. Slutligt upplägg och pris bekräftas efter genomgång.'}
               </p>
@@ -482,7 +500,7 @@
                 {form.serviceType === 'standard_cleaning' && (
                   <>
                     <p><span className="font-semibold text-slate-900">Frekvens:</span> {priceDetails.frequencyLabel}</p>
-                    <p><span className="font-semibold text-slate-900">Städning:</span> {priceDetails.hours} tim · {priceDetails.hourlyRate} kr/h</p>
+                    {canContinueDetails && <p><span className="font-semibold text-slate-900">Städning:</span> {priceDetails.hours} tim · {priceDetails.hourlyRate} kr/h</p>}
                   </>
                 )}
                 {selectedSlot && <p><span className="font-semibold text-slate-900">Tid:</span> {formatDate(selectedSlot.starts_at)} {formatTime(selectedSlot.starts_at)}-{formatTime(selectedSlot.ends_at)}</p>}
@@ -743,8 +761,10 @@
               pulse ? 'scale-105 bg-brand-600 text-white shadow-lg shadow-brand-200' : 'bg-brand-50 text-brand-800',
             )}
           >
-            <span className="text-lg font-extrabold">{value === '' ? min : safeValue}</span>
-            {unit && <span className="ml-1 text-xs font-bold opacity-80">{unit}</span>}
+            <span className={cx('font-extrabold', value === '' ? 'text-sm' : 'text-lg')}>
+              {value === '' ? 'Ange' : safeValue}
+            </span>
+            {value !== '' && unit && <span className="ml-1 text-xs font-bold opacity-80">{unit}</span>}
           </div>
         </div>
         <div className="mt-4 grid grid-cols-[1fr_96px] items-center gap-3">
