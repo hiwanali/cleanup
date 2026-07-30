@@ -625,6 +625,9 @@
     bookingRequestForShift(shiftId) {
       return state.booking_requests.find(r => r.shift_id === shiftId) || null;
     },
+    serviceChecklistForBooking(serviceType, addons = {}) {
+      return serviceChecklistForBooking(serviceType, addons);
+    },
     reservedBookingCountForSlot(slotId) {
       const active = new Set(['new', 'linked_to_shift', 'approved']);
       return state.booking_requests.filter(r => r.availability_slot_id === slotId && active.has(r.status)).length;

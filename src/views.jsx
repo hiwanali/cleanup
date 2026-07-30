@@ -675,6 +675,13 @@
     if (consentRows.length) {
       sections.push({ title: 'Samtycke och policy', headers: ['Fält', 'Värde'], rows: consentRows });
     }
+    if (bookingRequest) {
+      const checklistRows = db.serviceChecklistForBooking(bookingRequest.service_type, bookingAddons)
+        .map((title, index) => ({ Nr: index + 1, Punkt: title }));
+      if (checklistRows.length) {
+        sections.push({ title: 'Städmall som kopplas till bokningen', headers: ['Nr', 'Punkt'], rows: checklistRows });
+      }
+    }
 
     await window.ReportExport.exportReportPdf({
       filename: `cleanup-bokningsbekraftelse-${safeFilePart(customerName)}-${formatDateShort(startsAt)}.pdf`,
@@ -1074,6 +1081,37 @@
           </p>
         )}
       </Card>
+    );
+  }
+
+  function BookingServiceChecklistPreview({ bookingRequest, bookingAddons }) {
+    useDb();
+    if (!bookingRequest) return null;
+    const titles = db.serviceChecklistForBooking(bookingRequest.service_type, bookingAddons);
+    if (!titles.length) return null;
+    return (
+      <div className="mt-4 rounded-2xl border border-slate-200 bg-white px-3 py-3">
+        <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <p className="text-sm font-bold text-slate-900">Städmall som följer med</p>
+            <p className="text-xs text-slate-500">
+              {serviceLabel(bookingRequest.service_type)} · {titles.length} punkter skapas på passets städschema.
+            </p>
+          </div>
+          <Badge variant="slate">Tjänstemall</Badge>
+        </div>
+        <ol className="grid gap-1.5 text-xs text-slate-700 sm:grid-cols-2">
+          {titles.map((title, index) => (
+            <li key={`${title}-${index}`} className="flex gap-2 rounded-xl bg-slate-50 px-2 py-1.5">
+              <span className="font-semibold text-slate-400">{index + 1}.</span>
+              <span>{title}</span>
+            </li>
+          ))}
+        </ol>
+        <p className="mt-2 text-[11px] leading-relaxed text-slate-500">
+          Admin kan fortfarande lägga till eller ta bort punkter på det enskilda passet efter att mallen skapats.
+        </p>
+      </div>
     );
   }
 
@@ -1560,6 +1598,7 @@
                 {bookingRequest.message && (
                   <p className="mt-4 rounded-xl bg-white p-3 text-sm text-slate-700 ring-1 ring-brand-100">{bookingRequest.message}</p>
                 )}
+                <BookingServiceChecklistPreview bookingRequest={bookingRequest} bookingAddons={bookingAddons} />
               </Card>
             )}
 

@@ -877,3 +877,17 @@ Klientflode:
 5. Adminvyn, kundens hemstädningskort och PDF-bekräftelsen visar bekräftat pris när priset är justerat.
 
 Ingen ny SQL kravs for fas 14. Produktion verifierad: `booking_requests.estimated_price_sek`, `booking_requests.addons` och admin-update-policy finns.
+
+## 32. Kundportal fas 15: tjänstemallar för städschema
+
+Syfte: admin ska tydligt se vilken städmall som kopplas till en publik bokning, och samma mall ska följa med i PDF-underlaget.
+
+Klientflode:
+
+1. Publika bokningar använder intern tjänstemall för hemstädning, storstädning, flyttstädning och fönsterputs.
+2. Tillägg som fönsterputs och ugnsrengöring läggs automatiskt till i mallen när kunden valt dem.
+3. Admin ser en förhandsvisning av mallen direkt på bokningsförfrågan.
+4. När bokningen godkänns skapas passets städschema från samma mall om passet saknar städschema.
+5. PDF-bekräftelsen innehåller sektionen `Städmall som kopplas till bokningen`.
+
+Ingen ny SQL kravs for fas 15. Mallen ligger i appens interna tjänstekatalog och använder befintlig checklist-snapshot.
