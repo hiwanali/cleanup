@@ -602,6 +602,24 @@
     return { ok: true };
   }
 
+  async function persistUpdateSelfProfile({ userId, name, phone }) {
+    if (!enabled || !sb || !isUuid(userId)) {
+      return { ok: true, skipped: true };
+    }
+
+    const { error } = await sb.from('users').update({
+      name,
+      phone: phone || null,
+    }).eq('id', userId);
+
+    if (error) {
+      console.error('[persist] updateSelfProfile:', error.message);
+      return { ok: false, code: error.code || null, message: error.message };
+    }
+
+    return { ok: true };
+  }
+
   window.dbAuth = {
     enabled,
     changeOwnPassword,
@@ -2016,5 +2034,6 @@
     updateBookingAvailabilitySlot: persistUpdateBookingAvailabilitySlot,
     sendCustomerPortalInvite: persistSendCustomerPortalInvite,
     markCustomerPortalActive: persistMarkCustomerPortalActive,
+    updateSelfProfile: persistUpdateSelfProfile,
   };
 })();

@@ -3389,6 +3389,33 @@
       return { ok: true, organization: org, user };
     },
 
+    async updateSelfProfile(userId, { name, phone }) {
+      const user = db.userById(userId);
+      if (!user || !['customer', 'customer_employee'].includes(user.role)) return { error: 'FORBIDDEN' };
+
+      const trimmedName = (name || '').trim();
+      if (trimmedName.length < 2) return { error: 'INVALID_NAME' };
+
+      const snapshot = { name: user.name, phone: user.phone };
+      user.name = trimmedName;
+      user.phone = (phone || '').trim();
+      user.updated_at = new Date();
+      bump();
+
+      const persist = window.dbPersist && window.dbPersist.updateSelfProfile;
+      if (persist) {
+        const r = await persist({ userId, name: user.name, phone: user.phone });
+        if (!r.ok) {
+          user.name = snapshot.name;
+          user.phone = snapshot.phone;
+          bump();
+          return { error: 'PERSIST_FAILED', message: r.message };
+        }
+      }
+
+      return { ok: true, user };
+    },
+
     // §7.7 admin redigerar kund + huvudkontakt
     async updateCustomer(customerId, { name, orgNumber, notes, contactName, contactEmail, contactPhone }) {
       const cust = db.customerById(customerId);

@@ -5558,6 +5558,78 @@
     );
   }
 
+  function CustomerSelfProfileCard({ session, title = 'Din profil', description = 'Uppdatera kontaktuppgifter som CleanUp använder vid bokningar.' }) {
+    useDb();
+    const [name, setName] = useState(session.user.name || '');
+    const [phone, setPhone] = useState(session.user.phone || '');
+    const [saving, setSaving] = useState(false);
+    const [error, setError] = useState('');
+
+    useEffect(() => {
+      setName(session.user.name || '');
+      setPhone(session.user.phone || '');
+      setError('');
+    }, [session.user.id, session.user.name, session.user.phone]);
+
+    const dirty = name.trim() !== (session.user.name || '') || phone.trim() !== (session.user.phone || '');
+    const valid = name.trim().length >= 2;
+
+    async function save() {
+      setError('');
+      setSaving(true);
+      try {
+        const r = await db.updateSelfProfile(session.userId, { name, phone });
+        if (r?.ok) {
+          toast.success('Profilen uppdaterad.');
+        } else if (r?.error === 'INVALID_NAME') {
+          setError('Namnet måste vara minst 2 tecken.');
+        } else if (r?.error === 'FORBIDDEN') {
+          setError('Du har inte behörighet att ändra den här profilen.');
+        } else {
+          setError('Kunde inte spara profilen. Försök igen.');
+        }
+      } finally {
+        setSaving(false);
+      }
+    }
+
+    return (
+      <Card padding="md">
+        <h3 className="font-bold text-slate-900 mb-1">{title}</h3>
+        <p className="text-xs text-slate-500 mb-4">{description}</p>
+        <div className="space-y-3">
+          <Field label="Namn *">
+            <Input value={name} onChange={e => { setName(e.target.value); setError(''); }} />
+          </Field>
+          <Field label="Telefon">
+            <Input type="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="+46 70 123 45 67" />
+          </Field>
+          <Field label="E-post">
+            <Input type="email" value={session.user.email} disabled />
+            <p className="mt-1 text-xs text-slate-500">E-post används för inloggning och magic-link. Kontakta CleanUp om den behöver ändras.</p>
+          </Field>
+          {error && <p className="text-xs text-rose-600">{error}</p>}
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="ghost"
+              disabled={!dirty || saving}
+              onClick={() => {
+                setName(session.user.name || '');
+                setPhone(session.user.phone || '');
+                setError('');
+              }}
+            >
+              Återställ
+            </Button>
+            <Button variant="primary" icon="check" disabled={!dirty || !valid || saving} onClick={save}>
+              {saving ? 'Sparar…' : 'Spara profil'}
+            </Button>
+          </div>
+        </div>
+      </Card>
+    );
+  }
+
   function CustomerSettingsView({ session }) {
     useDb();
     const customer = db.customerForUser(session.userId);
@@ -5573,14 +5645,16 @@
       return (
         <div>
           <PageHeader title="Inställningar" subtitle="Din profil som kundanställd" />
+          <div className="mb-4">
+            <CustomerSelfProfileCard
+              session={session}
+              title="Din profil"
+              description="Uppdatera namn och telefon för din kundportal."
+            />
+          </div>
           <Card padding="md" className="mb-4">
-            <h3 className="font-bold text-slate-900 mb-3">Din profil</h3>
+            <h3 className="font-bold text-slate-900 mb-3">Kundåtkomst</h3>
             <dl className="text-sm space-y-2">
-              <div><dt className="text-xs text-slate-500">Namn</dt><dd className="font-medium">{session.user.name}</dd></div>
-              <div><dt className="text-xs text-slate-500">Mejl</dt><dd className="font-medium">{session.user.email}</dd></div>
-              {session.user.phone && (
-                <div><dt className="text-xs text-slate-500">Telefon</dt><dd className="font-medium">{session.user.phone}</dd></div>
-              )}
               <div><dt className="text-xs text-slate-500">Företag</dt><dd className="font-medium">{customer.name}</dd></div>
               <div><dt className="text-xs text-slate-500">Åtkomst</dt><dd className="font-medium">{ce?.scope === 'all_properties' ? 'Alla objekt' : `${myProps.length} valda objekt`}</dd></div>
             </dl>
@@ -5604,16 +5678,19 @@
             <AdminCustomerEmployeesCard customer={customer} properties={properties} session={session} />
           </div>
           <div>
-            <Card padding="md">
-              <h3 className="font-bold text-slate-900 mb-3">Huvudkontakt (du)</h3>
-              <div className="flex items-center gap-3 mb-3">
-                <Avatar name={session.user.name} />
-                <div>
-                  <p className="font-semibold text-slate-900">{session.user.name}</p>
-                  <p className="text-xs text-slate-500">{session.user.email}</p>
-                </div>
-              </div>
-              <p className="text-xs text-slate-500">Org.nr {customer.org_number}. Ändring av företagsuppgifter görs via admin på CleanUp.</p>
+            <CustomerSelfProfileCard
+              session={session}
+              title="Huvudkontakt (du)"
+              description="Uppdatera dina kontaktuppgifter för bokningar och kundportal."
+            />
+            <Card padding="md" className="mt-4">
+              <h3 className="font-bold text-slate-900 mb-2">Företagsuppgifter</h3>
+              <dl className="text-sm space-y-2">
+                <div><dt className="text-xs text-slate-500">Kund</dt><dd className="font-medium">{customer.name}</dd></div>
+                <div><dt className="text-xs text-slate-500">Org.nr</dt><dd className="font-medium">{customer.org_number || '—'}</dd></div>
+                <div><dt className="text-xs text-slate-500">Objekt</dt><dd className="font-medium">{properties.length}</dd></div>
+              </dl>
+              <p className="mt-3 text-xs text-slate-500">Ändring av företagsuppgifter görs via admin på CleanUp.</p>
             </Card>
             <ChangePasswordCard className="mt-4" />
             {customer.notes && (

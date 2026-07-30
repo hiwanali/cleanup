@@ -773,3 +773,16 @@ Klientflode:
 5. Klick pa en rad oppnar samma passdetalj som magic-linken.
 
 Ingen ny SQL kravs for fas 7.
+
+## 25. Kundportal fas 8: egen profil
+
+Syfte: kunden ska kunna hålla sina egna kontaktuppgifter uppdaterade i portalen utan att skapa ny profil.
+
+Klientflode:
+
+1. Kund och kundanställd kan ändra namn och telefon på `Inställningar`.
+2. E-post visas men är låst eftersom den används för Supabase Auth och magic-link.
+3. Byte av e-post hanteras senare som en separat säker Auth-fas.
+4. Uppdateringen sparas på inloggad användares egen `public.users`-rad.
+
+Ingen ny SQL kravs for fas 8. Befintlig RLS-policy `users_self_update` används.
