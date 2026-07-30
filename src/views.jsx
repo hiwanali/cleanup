@@ -7525,7 +7525,12 @@
         </section>
 
         <section>
-          <h2 className="text-lg font-bold text-slate-900 mb-3">Kommande pass</h2>
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <h2 className="text-lg font-bold text-slate-900">Kommande pass</h2>
+            {upcoming.length > 0 && (
+              <Button variant="ghost" size="sm" onClick={() => onNavigate('/kund/schema')}>Visa alla bokningar</Button>
+            )}
+          </div>
           {upcoming.length === 0 ? (
             <Card padding="md"><EmptyState icon="inbox" title="Inga kommande pass" /></Card>
           ) : (
@@ -8482,24 +8487,149 @@
     );
   }
 
+  function CustomerBookingTabs({ active, counts, onChange }) {
+    const tabs = [
+      { id: 'upcoming', label: 'Kommande', count: counts.upcoming },
+      { id: 'pending', label: 'Väntar', count: counts.pending },
+      { id: 'history', label: 'Historik', count: counts.history },
+      { id: 'cancelled', label: 'Avbokade', count: counts.cancelled },
+      { id: 'all', label: 'Alla', count: counts.all },
+    ];
+    return (
+      <div className="flex flex-wrap gap-2">
+        {tabs.map(tab => (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => onChange(tab.id)}
+            className={cx(
+              'inline-flex h-9 items-center gap-2 rounded-xl border px-3 text-sm font-semibold transition-colors',
+              active === tab.id
+                ? 'border-brand-200 bg-brand-50 text-brand-700'
+                : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50',
+            )}
+          >
+            {tab.label}
+            <span className={cx(
+              'min-w-5 rounded-full px-1.5 py-0.5 text-[11px] leading-none',
+              active === tab.id ? 'bg-brand-100 text-brand-700' : 'bg-slate-100 text-slate-500',
+            )}>
+              {tab.count}
+            </span>
+          </button>
+        ))}
+      </div>
+    );
+  }
+
+  function CustomerBookingList({ shifts, onNavigate }) {
+    if (shifts.length === 0) {
+      return (
+        <Card padding="lg">
+          <EmptyState icon="inbox" title="Inga bokningar" description="Det finns inga pass som matchar filtret." />
+        </Card>
+      );
+    }
+
+    return (
+      <Card padding="sm">
+        <div className="divide-y divide-slate-100">
+          {shifts.map(shift => {
+            const prop = db.propertyById(shift.property_id);
+            const isPast = new Date(shift.end_at).getTime() < Date.now();
+            return (
+              <button
+                key={shift.id}
+                type="button"
+                onClick={() => onNavigate(`/kund/pass/${shift.id}`)}
+                className="grid w-full gap-3 px-3 py-4 text-left transition-colors hover:bg-slate-50 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"
+              >
+                <div className="min-w-0">
+                  <div className="mb-1.5 flex flex-wrap items-center gap-2">
+                    <p className="font-semibold text-slate-900">{relativeDay(shift.start_at)}</p>
+                    <StatusBadge status={shift.status} />
+                    {isPast && shift.status !== 'Avbokat' && <Badge variant="slate">Historik</Badge>}
+                  </div>
+                  <p className="text-sm text-slate-700">
+                    <ShiftTimeDisplay shift={shift} />
+                  </p>
+                  <p className="mt-1 text-sm font-medium text-slate-900 truncate">{prop?.name || 'Objekt'}</p>
+                  <p className="text-xs text-slate-500 truncate">{prop?.address || 'Ingen adress angiven'}</p>
+                </div>
+                <div className="flex items-center justify-between gap-3 sm:justify-end">
+                  <div className="flex items-center gap-2 text-xs text-slate-600">
+                    <Avatar size="xs" name="Städare" anonymous />
+                    <span>Städare</span>
+                  </div>
+                  <Icon name="chevron-right" className="h-5 w-5 text-slate-300" />
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </Card>
+    );
+  }
+
   function CustomerScheduleView({ session, onNavigate }) {
     useDb();
     const [requestOpen, setRequestOpen] = useState(false);
+    const [viewMode, setViewMode] = useState('calendar');
+    const [bookingFilter, setBookingFilter] = useState('upcoming');
     const shifts = db.shiftsForCustomerUser(session.userId);
+    const now = Date.now();
+    const activeStatuses = ['Godkänt', 'Planerat', 'Sjukanmäld', 'Pausat (kundledighet)', 'Pågående'];
+    const upcoming = shifts.filter(s => new Date(s.end_at).getTime() >= now && activeStatuses.includes(s.status));
+    const pending = shifts.filter(s => s.status === 'Planerat');
+    const cancelled = shifts.filter(s => ['Avbokat', 'Borttaget'].includes(s.status));
+    const history = shifts.filter(s => !['Avbokat', 'Borttaget'].includes(s.status) && (new Date(s.end_at).getTime() < now || s.status === 'Utfört'));
+    const counts = {
+      all: shifts.length,
+      upcoming: upcoming.length,
+      pending: pending.length,
+      history: history.length,
+      cancelled: cancelled.length,
+    };
+    const filtered = {
+      all: shifts,
+      upcoming,
+      pending,
+      history,
+      cancelled,
+    }[bookingFilter] || upcoming;
+
     return (
       <div>
         <PageHeader
-          title="Schema"
-          subtitle="Kalenderöversikt över alla pass på dina objekt. Grå = väntar på godkännande, grön = godkänt."
+          title="Schema & bokningar"
+          subtitle="Se kommande, väntande och historiska bokningar för dina objekt."
           actions={
-            <Button icon="plus" onClick={() => setRequestOpen(true)}>Begär städning</Button>
+            <div className="flex flex-wrap gap-2">
+              <CalendarListToggle view={viewMode} onChange={setViewMode} />
+              <Button icon="plus" onClick={() => setRequestOpen(true)}>Begär städning</Button>
+            </div>
           }
         />
-        <ScheduleCalendar
-          shifts={shifts}
-          viewerRole={session.user.role}
-          onSelectShift={s => onNavigate(`/kund/pass/${s.id}`)}
-        />
+
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+          <Stat label="Kommande" value={counts.upcoming} icon="calendar" tone="brand" />
+          <Stat label="Väntar" value={counts.pending} icon="clock" tone="amber" />
+          <Stat label="Historik" value={counts.history} icon="check" tone="emerald" />
+          <Stat label="Avbokade" value={counts.cancelled} icon="x" tone="rose" />
+        </div>
+
+        {viewMode === 'calendar' ? (
+          <ScheduleCalendar
+            shifts={shifts}
+            viewerRole={session.user.role}
+            onSelectShift={s => onNavigate(`/kund/pass/${s.id}`)}
+          />
+        ) : (
+          <div className="space-y-4">
+            <CustomerBookingTabs active={bookingFilter} counts={counts} onChange={setBookingFilter} />
+            <CustomerBookingList shifts={filtered} onNavigate={onNavigate} />
+          </div>
+        )}
         <CustomerShiftRequestModal open={requestOpen} onClose={() => setRequestOpen(false)} session={session} />
       </div>
     );

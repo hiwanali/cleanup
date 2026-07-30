@@ -759,3 +759,17 @@ Klientflode:
 4. Nar kunden landar pa översikten finns knapp vidare till schema och kommande pass syns direkt.
 
 Ingen ny SQL kravs for fas 6.
+
+## 24. Kundportal fas 7: Mina bokningar
+
+Syfte: kunden ska kunna se sina bokningar både som kalender och som tydlig lista.
+
+Klientflode:
+
+1. Kundens `Schema`-vy heter nu `Schema & bokningar`.
+2. Kunden kan växla mellan kalender och lista.
+3. Listan har filter for `Kommande`, `Väntar`, `Historik`, `Avbokade` och `Alla`.
+4. Varje rad visar datum, tid, objekt, adress och status.
+5. Klick pa en rad oppnar samma passdetalj som magic-linken.
+
+Ingen ny SQL kravs for fas 7.
