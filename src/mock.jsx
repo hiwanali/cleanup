@@ -1650,6 +1650,47 @@
       return { ok: true };
     },
 
+    async updateBookingRequestPricing(shiftId, actorUserId, { estimatedPriceSek, note = '' } = {}) {
+      const bookingRequest = db.bookingRequestForShift(shiftId);
+      if (!bookingRequest) return { error: 'NOT_FOUND' };
+      const price = Number(estimatedPriceSek);
+      if (!Number.isFinite(price) || price < 0) return { error: 'INVALID_PRICE' };
+
+      const snapshot = {
+        estimated_price_sek: bookingRequest.estimated_price_sek,
+        addons: { ...(bookingRequest.addons || {}) },
+      };
+      const adjustedAt = new Date();
+      bookingRequest.estimated_price_sek = Math.round(price);
+      bookingRequest.addons = {
+        ...(bookingRequest.addons || {}),
+        admin_adjusted_price_sek: Math.round(price),
+        admin_price_note: (note || '').trim(),
+        admin_price_adjusted_at: adjustedAt,
+        admin_price_adjusted_by: actorUserId,
+        price_confirmed_by_admin: true,
+        requires_admin_price_review: false,
+      };
+      bump();
+
+      const persist = window.dbPersist && window.dbPersist.updateBookingRequestPricing;
+      if (persist) {
+        const r = await persist({
+          requestId: bookingRequest.id,
+          estimatedPriceSek: bookingRequest.estimated_price_sek,
+          addons: bookingRequest.addons,
+        });
+        if (!r.ok) {
+          bookingRequest.estimated_price_sek = snapshot.estimated_price_sek;
+          bookingRequest.addons = snapshot.addons;
+          bump();
+          return { error: 'PERSIST_FAILED', message: r.message };
+        }
+      }
+
+      return { ok: true };
+    },
+
     async declineShift(shiftId, actorUserId) {
       const s = db.shiftById(shiftId);
       if (!s) return { error: 'NOT_FOUND' };

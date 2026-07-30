@@ -630,10 +630,14 @@
     }
 
     const isHomeCleaning = bookingRequest?.service_type === 'standard_cleaning';
+    const priceLabel = bookingAddons.price_confirmed_by_admin
+      ? (isHomeCleaning ? 'Bekräftat pris per tillfälle' : 'Bekräftat pris')
+      : (isHomeCleaning ? 'Prisförslag per tillfälle' : 'Prisförslag');
     const priceRows = bookingRequest ? [
-      { Fält: isHomeCleaning ? 'Prisförslag per tillfälle' : 'Prisförslag', Värde: bookingRequest.estimated_price_sek != null ? `${Number(bookingRequest.estimated_price_sek).toLocaleString('sv-SE')} kr${isHomeCleaning ? ' per tillfälle' : ''}` : 'Bekräftas efter genomgång' },
+      { Fält: priceLabel, Värde: bookingRequest.estimated_price_sek != null ? `${Number(bookingRequest.estimated_price_sek).toLocaleString('sv-SE')} kr${isHomeCleaning ? ' per tillfälle' : ''}` : 'Bekräftas efter genomgång' },
       { Fält: 'RUT-avdrag', Värde: bookingAddons.rut_included ? 'Prisförslag ink. RUT-avdrag' : 'Bekräftas efter genomgång' },
       { Fält: 'Prisjustering', Värde: 'Slutligt upplägg och pris bekräftas av CleanUp efter genomgång med kund.' },
+      { Fält: 'Adminnotering pris', Värde: bookingAddons.admin_price_note || '' },
       { Fält: 'Debitering av tid', Värde: isHomeCleaning ? 'Beräkningen är preliminär. CleanUp klockar varje städning med in- och utcheckning/GPS och debiterar faktisk tid om passet blir kortare eller längre.' : '' },
       { Fält: 'Mätning', Värde: 'Mätning av objektet kan vid behov göras på plats.' },
       { Fält: 'Om RUT ej kan nyttjas', Värde: 'Om RUT-avdrag inte kan nyttjas faktureras ordinarie belopp.' },
@@ -1019,7 +1023,7 @@
       {
         label: 'Pris',
         value: bookingRequest.estimated_price_sek != null
-          ? `${Number(bookingRequest.estimated_price_sek).toLocaleString('sv-SE')} kr per tillfälle`
+          ? `${bookingAddons.price_confirmed_by_admin ? 'Bekräftat: ' : ''}${Number(bookingRequest.estimated_price_sek).toLocaleString('sv-SE')} kr per tillfälle`
           : 'Bekräftas av CleanUp',
       },
       {
@@ -1437,11 +1441,16 @@
                       {bookingRequest.estimated_price_sek != null && (
                         <div className="rounded-xl bg-white px-4 py-3 text-right shadow-sm ring-1 ring-brand-100">
                           <p className="text-[11px] font-bold uppercase text-slate-500">
-                            {bookingRequest.service_type === 'standard_cleaning' ? 'Prisförslag per tillfälle' : 'Prisförslag'}
+                            {bookingAddons.price_confirmed_by_admin
+                              ? (bookingRequest.service_type === 'standard_cleaning' ? 'Bekräftat pris per tillfälle' : 'Bekräftat pris')
+                              : (bookingRequest.service_type === 'standard_cleaning' ? 'Prisförslag per tillfälle' : 'Prisförslag')}
                           </p>
                           <p className="text-xl font-extrabold text-slate-950">
                             {Number(bookingRequest.estimated_price_sek).toLocaleString('sv-SE')} kr{bookingRequest.service_type === 'standard_cleaning' ? ' / tillfälle' : ''}
                           </p>
+                          {bookingAddons.admin_price_note && (
+                            <p className="mt-1 max-w-48 text-[11px] text-slate-500">{bookingAddons.admin_price_note}</p>
+                          )}
                         </div>
                       )}
                       {role === 'admin' && (
@@ -1544,6 +1553,9 @@
                   <Badge variant={bookingAddons.privacy_notice_accepted ? 'emerald' : 'amber'}>
                     GDPR {bookingAddons.privacy_notice_accepted ? 'godkänt' : 'saknas'}
                   </Badge>
+                  {bookingAddons.price_confirmed_by_admin && (
+                    <Badge variant="emerald">Pris bekräftat</Badge>
+                  )}
                 </div>
                 {bookingRequest.message && (
                   <p className="mt-4 rounded-xl bg-white p-3 text-sm text-slate-700 ring-1 ring-brand-100">{bookingRequest.message}</p>
@@ -1883,6 +1895,7 @@
     const [sickOpen, setSickOpen] = useState(false);
     const [approveOpen, setApproveOpen] = useState(false);
     const [declineOpen, setDeclineOpen] = useState(false);
+    const [priceOpen, setPriceOpen] = useState(false);
     const [acting, setActing] = useState(false);
     const isSick = shift.status === 'Sjukanmäld';
     const isAwaitingApproval = shift.status === 'Planerat';
@@ -1891,6 +1904,7 @@
     const isLive = shift.status === 'Pågående';
     const isBorttaget = shift.status === 'Borttaget';
     const cleaner = db.userById(shift.cleaner_user_id);
+    const bookingRequest = db.bookingRequestForShift(shift.id);
 
     async function handleApprove(cleanerUserId) {
       setActing(true);
@@ -2068,6 +2082,11 @@
               <Button variant="outline" icon="clock" className="w-full justify-start" onClick={() => setAdjustOpen(true)}>
                 Justera tid
               </Button>
+              {bookingRequest && (
+                <Button variant="outline" icon="edit" className="w-full justify-start" onClick={() => setPriceOpen(true)}>
+                  Justera pris
+                </Button>
+              )}
             </div>
           </Card>
           <AdminDeleteShiftSection shift={shift} session={session} onClose={onClose} />
@@ -2079,6 +2098,12 @@
             shift={shift}
             acting={acting}
             onApprove={handleApprove}
+          />
+          <AdjustBookingPriceModal
+            open={priceOpen}
+            onClose={() => setPriceOpen(false)}
+            shift={shift}
+            session={session}
           />
           <ConfirmDialog
             open={declineOpen}
@@ -2209,6 +2234,91 @@
         {candidates.length === 0 && (
           <p className="text-xs text-amber-700 mt-2">Inga tillgängliga städare utan tidskrock. Justera tiden eller tilldela manuellt via ”Byt städare”.</p>
         )}
+      </Modal>
+    );
+  }
+
+  function AdjustBookingPriceModal({ open, onClose, shift, session }) {
+    useDb();
+    const bookingRequest = shift ? db.bookingRequestForShift(shift.id) : null;
+    const bookingAddons = bookingRequest?.addons && typeof bookingRequest.addons === 'object' ? bookingRequest.addons : {};
+    const [price, setPrice] = useState('');
+    const [note, setNote] = useState('');
+    const [saving, setSaving] = useState(false);
+
+    useEffect(() => {
+      if (!open || !bookingRequest) return;
+      setPrice(bookingRequest.estimated_price_sek != null ? String(bookingRequest.estimated_price_sek) : '');
+      setNote(bookingAddons.admin_price_note || '');
+    }, [open, bookingRequest?.id]);
+
+    if (!open || !shift || !bookingRequest) return null;
+
+    const numericPrice = Number(price);
+    const valid = Number.isFinite(numericPrice) && numericPrice >= 0;
+
+    async function save() {
+      if (!valid || saving) return;
+      setSaving(true);
+      try {
+        const r = await db.updateBookingRequestPricing(shift.id, session.userId, {
+          estimatedPriceSek: numericPrice,
+          note,
+        });
+        if (r?.ok) {
+          toast.success('Prisunderlaget uppdaterat.');
+          onClose();
+        } else if (r?.error === 'INVALID_PRICE') {
+          toast.error('Ange ett giltigt pris.');
+        } else {
+          toast.error('Kunde inte spara priset just nu.');
+        }
+      } finally {
+        setSaving(false);
+      }
+    }
+
+    return (
+      <Modal
+        open={open}
+        onClose={() => { if (!saving) onClose(); }}
+        title="Justera pris"
+        size="md"
+        footer={
+          <>
+            <Button variant="ghost" onClick={onClose} disabled={saving}>Avbryt</Button>
+            <Button variant="primary" icon="check" disabled={!valid || saving} onClick={save}>
+              {saving ? 'Sparar…' : 'Spara pris'}
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-slate-600">
+            Spara det pris som är avstämt med kund innan bokningen godkänns. Det uppdaterade priset används i adminvyn, kundens hemstädningskort och PDF-bekräftelsen.
+          </p>
+          <Field label={bookingRequest.service_type === 'standard_cleaning' ? 'Pris per tillfälle' : 'Pris'} required>
+            <Input
+              type="number"
+              min="0"
+              step="10"
+              value={price}
+              onChange={e => setPrice(e.target.value)}
+              placeholder="Ex. 880"
+            />
+          </Field>
+          <Field label="Intern notering">
+            <Textarea
+              rows={3}
+              value={note}
+              onChange={e => setNote(e.target.value)}
+              placeholder="Ex. Pris avstämt via telefon med kund."
+            />
+          </Field>
+          <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-500">
+            Noteringen syns i admin/PDF-underlaget. Kunden ser priset i sin portal när bokningen är bekräftad.
+          </div>
+        </div>
       </Modal>
     );
   }

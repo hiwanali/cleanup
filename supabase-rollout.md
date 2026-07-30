@@ -863,3 +863,17 @@ Klientflode:
 5. Kortet förklarar att faktisk tid debiteras utifrån in- och utcheckning/GPS.
 
 Ingen ny SQL kravs for fas 13. Befintliga värden i `booking_requests.addons` används.
+
+## 31. Kundportal fas 14: adminjustering av pris före godkännande
+
+Syfte: admin ska kunna justera priset efter dialog med kund innan en publik bokningsförfrågan godkänns.
+
+Klientflode:
+
+1. Admin öppnar ett planerat pass som kommer från publik bokningsförfrågan.
+2. Admin klickar `Justera pris`.
+3. Admin anger nytt pris och valfri intern notering.
+4. Appen sparar nytt `estimated_price_sek` och prismetadata i `booking_requests.addons`.
+5. Adminvyn, kundens hemstädningskort och PDF-bekräftelsen visar bekräftat pris när priset är justerat.
+
+Ingen ny SQL kravs for fas 14. Produktion verifierad: `booking_requests.estimated_price_sek`, `booking_requests.addons` och admin-update-policy finns.

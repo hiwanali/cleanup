@@ -240,6 +240,32 @@
     return { ok: true, data };
   }
 
+  async function persistUpdateBookingRequestPricing({ requestId, estimatedPriceSek, addons }) {
+    if (!enabled || !sb || !isUuid(requestId)) {
+      return { ok: true, skipped: true };
+    }
+
+    const price = Number(estimatedPriceSek);
+    if (!Number.isFinite(price) || price < 0) {
+      return { ok: false, message: 'INVALID_PRICE' };
+    }
+
+    const { error } = await sb
+      .from('booking_requests')
+      .update({
+        estimated_price_sek: Math.round(price),
+        addons: addons || {},
+      })
+      .eq('id', requestId);
+
+    if (error) {
+      console.error('[persist] updateBookingRequestPricing:', error.message);
+      return { ok: false, message: error.message };
+    }
+
+    return { ok: true };
+  }
+
   async function persistMarkCustomerPortalActive({ shiftId }) {
     if (!enabled || !sb || !isUuid(shiftId)) {
       return { ok: true, skipped: true };
@@ -2033,6 +2059,7 @@
     createBookingAvailabilitySlot: persistCreateBookingAvailabilitySlot,
     updateBookingAvailabilitySlot: persistUpdateBookingAvailabilitySlot,
     sendCustomerPortalInvite: persistSendCustomerPortalInvite,
+    updateBookingRequestPricing: persistUpdateBookingRequestPricing,
     markCustomerPortalActive: persistMarkCustomerPortalActive,
     updateSelfProfile: persistUpdateSelfProfile,
   };
