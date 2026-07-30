@@ -446,28 +446,28 @@
                 <div>
                   <h1 className="text-xl font-extrabold text-slate-900">Kontaktuppgifter</h1>
                   <div className="grid sm:grid-cols-2 gap-3 mt-4">
-                    <Field label="Namn" required>
-                      <Input value={form.customerName} onChange={e => update('customerName', e.target.value)} />
+                    <Field label="Namn" required htmlFor="public-booking-customer-name">
+                      <Input id="public-booking-customer-name" aria-label="Namn" value={form.customerName} onChange={e => update('customerName', e.target.value)} />
                     </Field>
-                    <Field label="Telefon" required>
-                      <Input value={form.customerPhone} onChange={e => update('customerPhone', e.target.value)} />
+                    <Field label="Telefon" required htmlFor="public-booking-customer-phone">
+                      <Input id="public-booking-customer-phone" aria-label="Telefon" value={form.customerPhone} onChange={e => update('customerPhone', e.target.value)} />
                     </Field>
-                    <Field label="E-post" required>
-                      <Input type="email" value={form.customerEmail} onChange={e => update('customerEmail', e.target.value)} />
+                    <Field label="E-post" required htmlFor="public-booking-customer-email">
+                      <Input id="public-booking-customer-email" aria-label="E-post" type="email" value={form.customerEmail} onChange={e => update('customerEmail', e.target.value)} />
                     </Field>
-                    <Field label="Adress" required>
-                      <Input value={form.address} onChange={e => update('address', e.target.value)} />
+                    <Field label="Adress" required htmlFor="public-booking-address">
+                      <Input id="public-booking-address" aria-label="Adress" value={form.address} onChange={e => update('address', e.target.value)} />
                     </Field>
-                    <Field label="Postnummer">
-                      <Input value={form.postalCode} onChange={e => update('postalCode', e.target.value)} />
+                    <Field label="Postnummer" htmlFor="public-booking-postal-code">
+                      <Input id="public-booking-postal-code" aria-label="Postnummer" value={form.postalCode} onChange={e => update('postalCode', e.target.value)} />
                     </Field>
-                    <Field label="Ort">
-                      <Input value={form.city} onChange={e => update('city', e.target.value)} />
+                    <Field label="Ort" htmlFor="public-booking-city">
+                      <Input id="public-booking-city" aria-label="Ort" value={form.city} onChange={e => update('city', e.target.value)} />
                     </Field>
                   </div>
                   <div className="mt-3">
-                    <Field label="Kommentar">
-                      <Textarea rows={3} value={form.message} onChange={e => update('message', e.target.value)} />
+                    <Field label="Kommentar" htmlFor="public-booking-message">
+                      <Textarea id="public-booking-message" aria-label="Kommentar" rows={3} value={form.message} onChange={e => update('message', e.target.value)} />
                     </Field>
                   </div>
                   <input className="hidden" tabIndex="-1" autoComplete="off" value={form.website} onChange={e => update('website', e.target.value)} />
