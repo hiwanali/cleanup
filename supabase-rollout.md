@@ -835,3 +835,17 @@ Flode:
 6. Admin och städare får CTA till rätt schema-vy i portalen.
 
 Ingen ny SQL kravs for fas 11. Kräver att `RESEND_API_KEY`, `RESEND_FROM` och `CUSTOMER_PORTAL_SITE_URL` finns som Edge Function secrets.
+
+## 29. Kundportal fas 12: bokningsvillkor och GDPR i iframe
+
+Syfte: kunden ska förstå de viktigaste villkoren innan förfrågan skickas, och godkännandet ska kunna följas i admin/PDF.
+
+Klientflode:
+
+1. Kontaktsteget i iframe visar en kort sammanfattning av villkoren.
+2. Kunden måste godkänna bokningsvillkor och GDPR-information innan förfrågan skickas.
+3. Formuläret sparar `policy_accepted`, `policy_version`, `privacy_notice_accepted`, `privacy_notice_version` och `accepted_at_client` i `booking_requests.addons`.
+4. Tack-sidan bekräftar att godkännandet sparats med förfrågan.
+5. PDF-bekräftelsen använder samma versions-id som formuläret.
+
+Ingen ny SQL kravs for fas 12. Befintligt `addons`-fält används.

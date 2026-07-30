@@ -7,6 +7,8 @@
  */
 (function () {
   const { useState, useMemo, useEffect } = React;
+  const CLEANUP_BOOKING_TERMS_VERSION = 'booking_terms_v1_2026-07-30';
+  const CLEANUP_PRIVACY_NOTICE_VERSION = 'privacy_notice_v1_2026-07-30';
 
   /* ============================================================
    * LOGIN (Supabase Auth)
@@ -194,9 +196,9 @@
               rut_included: form.serviceType === 'standard_cleaning',
               requires_admin_price_review: !!form.message.trim(),
               policy_accepted: form.policyAccepted,
-              policy_version: 'booking_terms_v1_2026-07-28',
+              policy_version: CLEANUP_BOOKING_TERMS_VERSION,
               privacy_notice_accepted: form.consent,
-              privacy_notice_version: 'privacy_notice_v1_2026-07-28',
+              privacy_notice_version: CLEANUP_PRIVACY_NOTICE_VERSION,
               accepted_at_client: new Date().toISOString(),
             },
             estimated_price_sek: estimatedPrice,
@@ -249,6 +251,9 @@
                       {formatDateLong(confirmation.slot.starts_at)} kl. {formatTime(confirmation.slot.starts_at)}-{formatTime(confirmation.slot.ends_at)}
                     </p>
                   )}
+                  <p className="mt-4 rounded-xl border border-emerald-200 bg-white/70 p-3 text-xs leading-relaxed text-emerald-900">
+                    Vi har sparat ditt godkännande av bokningsvillkor och GDPR-information tillsammans med förfrågan. När CleanUp bekräftar upplägg och tid får du tillgång till bokningen i kundportalen.
+                  </p>
                 </div>
               </div>
             </Card>
@@ -427,10 +432,11 @@
                     </Field>
                   </div>
                   <input className="hidden" tabIndex="-1" autoComplete="off" value={form.website} onChange={e => update('website', e.target.value)} />
+                  <PublicBookingTermsSummary serviceType={form.serviceType} />
                   <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
                     <p className="text-sm font-bold text-slate-900">Villkor och personuppgifter</p>
                     <p className="mt-1 text-xs leading-relaxed text-slate-500">
-                      Prisförslaget är preliminärt och bekräftas efter genomgång. Vi kontaktar dig för att stämma av upplägg, tid och eventuella särskilda önskemål.
+                      Kryssa i båda rutorna för att skicka förfrågan. Godkännandet sparas med version {CLEANUP_BOOKING_TERMS_VERSION}.
                     </p>
                     <div className="mt-3 space-y-3">
                       <Checkbox
@@ -508,6 +514,40 @@
       weekly: { label: 'Varje vecka', hourlyRate: 220 },
     };
     return options[frequency] || options.one_time;
+  }
+
+  function PublicBookingTermsSummary({ serviceType }) {
+    const isHomeCleaning = serviceType === 'standard_cleaning';
+    const items = [
+      'Förfrågan är inte bindande förrän CleanUp har gått igenom upplägg, pris och tid med dig.',
+      isHomeCleaning
+        ? 'Hemstädning beräknas per tillfälle. Vi klockar städningen med in- och utcheckning/GPS och debiterar faktisk tid om passet blir kortare eller längre.'
+        : 'Prisförslaget är preliminärt. Slutligt pris och upplägg bekräftas efter genomgång.',
+      'Om RUT-avdrag inte kan nyttjas faktureras ordinarie belopp.',
+      'Mätning av objektet kan vid behov göras på plats.',
+      'Vi behandlar endast uppgifter som behövs för att hantera förfrågan, bokning, kundkontakt och administration.',
+    ];
+    return (
+      <div className="mt-4 rounded-2xl border border-brand-100 bg-brand-50/40 p-4">
+        <div className="flex items-start gap-2">
+          <Icon name="info" className="mt-0.5 h-4 w-4 flex-shrink-0 text-brand-700" />
+          <div>
+            <p className="text-sm font-bold text-brand-950">Kort om villkoren</p>
+            <ul className="mt-2 space-y-1.5 text-xs leading-relaxed text-brand-950/80">
+              {items.map((item) => (
+                <li key={item} className="flex gap-2">
+                  <span className="mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-brand-500" />
+                  <span>{item}</span>
+                </li>
+              ))}
+            </ul>
+            <p className="mt-3 text-[11px] leading-relaxed text-brand-900/70">
+              Villkorsversion: {CLEANUP_BOOKING_TERMS_VERSION}.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   function getPublicBookingPriceDetails(form) {
@@ -605,9 +645,9 @@
 
     const consentRows = bookingRequest ? [
       { Fält: 'Bokningsvillkor accepterade', Värde: yesNo(bookingAddons.policy_accepted) },
-      { Fält: 'Villkorsversion', Värde: bookingAddons.policy_version || 'booking_terms_v1_2026-07-28' },
+      { Fält: 'Villkorsversion', Värde: bookingAddons.policy_version || CLEANUP_BOOKING_TERMS_VERSION },
       { Fält: 'GDPR/personuppgifter accepterat', Värde: yesNo(bookingAddons.privacy_notice_accepted) },
-      { Fält: 'Integritetsversion', Värde: bookingAddons.privacy_notice_version || 'privacy_notice_v1_2026-07-28' },
+      { Fält: 'Integritetsversion', Värde: bookingAddons.privacy_notice_version || CLEANUP_PRIVACY_NOTICE_VERSION },
       { Fält: 'Tidpunkt i formuläret', Värde: bookingAddons.accepted_at_client ? `${formatDateLong(bookingAddons.accepted_at_client)} ${formatTime(bookingAddons.accepted_at_client)}` : '' },
     ] : [];
 
