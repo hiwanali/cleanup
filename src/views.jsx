@@ -1553,14 +1553,58 @@
   /* ============================================================
    * Gemensamma kort
    * ============================================================ */
+  function mapAddressUrl(address) {
+    const query = encodeURIComponent((address || '').trim());
+    const userAgent = typeof navigator !== 'undefined' ? `${navigator.userAgent} ${navigator.platform || ''}` : '';
+    const prefersAppleMaps = /iPad|iPhone|iPod|Macintosh|MacIntel|MacPPC|Mac68K/i.test(userAgent);
+    return prefersAppleMaps
+      ? `https://maps.apple.com/?q=${query}`
+      : `https://www.google.com/maps/search/?api=1&query=${query}`;
+  }
+
+  function MapAddressLink({ address, className = '', stopPropagation = false }) {
+    const value = (address || '').trim();
+    if (!value) return <span className={className}>Ingen adress angiven</span>;
+    return (
+      <a
+        href={mapAddressUrl(value)}
+        target="_blank"
+        rel="noopener noreferrer"
+        onClick={e => {
+          if (stopPropagation) e.stopPropagation();
+        }}
+        onKeyDown={e => {
+          if (stopPropagation) e.stopPropagation();
+        }}
+        className={cx('inline-flex max-w-full items-center gap-1 font-semibold text-brand-700 hover:text-brand-800 hover:underline', className)}
+        title={`Öppna ${value} i kartor`}
+      >
+        <span className="truncate">{value}</span>
+        <Icon name="map-pin" className="h-3.5 w-3.5 flex-shrink-0" />
+      </a>
+    );
+  }
+
   function ShiftCard({ shift, viewerRole, viewerUserId, onClick }) {
     const prop = db.propertyById(shift.property_id);
     const cleanerLabel = db.displayCleaner(shift.cleaner_user_id, viewerRole);
     const isAnon = viewerRole === 'customer' || viewerRole === 'customer_employee';
     const bookingRequest = viewerRole === 'admin' ? db.bookingRequestForShift(shift.id) : null;
+    const canOpenMaps = viewerRole === 'admin' || viewerRole === 'cleaner';
+    function openShift() {
+      onClick && onClick(shift);
+    }
     return (
-      <button
-        onClick={() => onClick && onClick(shift)}
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={openShift}
+        onKeyDown={e => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            openShift();
+          }
+        }}
         className="w-full text-left bg-white rounded-2xl border border-slate-200 p-4 hover:border-brand-300 hover:shadow-sm transition-all"
       >
         <div className="flex items-start justify-between gap-3">
@@ -1569,7 +1613,11 @@
               {relativeDay(shift.start_at)} · <ShiftTimeDisplay shift={shift} />
             </p>
             <p className="mt-1 font-semibold text-slate-900 truncate">{prop?.name}</p>
-            <p className="text-xs text-slate-500 truncate">{prop?.address}</p>
+            {canOpenMaps && prop?.address ? (
+              <MapAddressLink address={prop.address} stopPropagation className="mt-0.5 text-xs font-medium" />
+            ) : (
+              <p className="text-xs text-slate-500 truncate">{prop?.address}</p>
+            )}
             {bookingRequest && (
               <div className="mt-2 flex flex-wrap gap-1.5">
                 <Badge variant="brand" icon="send">Bokningsförfrågan</Badge>
@@ -1583,7 +1631,7 @@
           <Avatar size="xs" name={cleanerLabel} anonymous={isAnon} />
           <span className="font-medium">{cleanerLabel}</span>
         </div>
-      </button>
+      </div>
     );
   }
 
@@ -1798,6 +1846,7 @@
       : null;
     // Nyckel/larm: admin + städare med minst ett pass på objektet
     const canSeeAccess = role === 'admin' || (role === 'cleaner' && db.shiftsForCleaner(session.userId).some(s => s.property_id === shift.property_id));
+    const canOpenMaps = role === 'admin' || role === 'cleaner';
     const done = checklist.filter(c => c.done_at).length;
     const total = checklist.length;
     const pct = total === 0 ? 0 : Math.round((done / total) * 100);
@@ -1872,7 +1921,21 @@
         <PageHeader
           breadcrumbs={breadcrumbs}
           title={prop?.name || 'Pass'}
-          subtitle={<>{relativeDay(shift.start_at)} · <ShiftTimeDisplay shift={shift} /> · {prop?.address || ''}</>}
+          subtitle={(
+            <>
+              {relativeDay(shift.start_at)} · <ShiftTimeDisplay shift={shift} />
+              {prop?.address && (
+                <>
+                  {' · '}
+                  {canOpenMaps ? (
+                    <MapAddressLink address={prop.address} className="font-medium" />
+                  ) : (
+                    prop.address
+                  )}
+                </>
+              )}
+            </>
+          )}
           actions={
             <div className="flex items-center gap-2">
               {onBack && <Button variant="ghost" icon="chevron-left" onClick={onBack}>Tillbaka</Button>}
@@ -2265,7 +2328,9 @@
                   <Icon name="map-pin" className="w-4 h-4 text-slate-400 mt-0.5" />
                   <div className="flex-1">
                     <dt className="text-xs text-slate-500">Adress</dt>
-                    <dd className="font-medium text-slate-900">{prop?.address}</dd>
+                    <dd className="font-medium text-slate-900">
+                      {canOpenMaps ? <MapAddressLink address={prop?.address} /> : prop?.address}
+                    </dd>
                   </div>
                 </div>
                 <div className="flex items-start gap-2">
@@ -7848,7 +7913,7 @@
             { label: prop.name },
           ]}
           title={prop.name}
-          subtitle={prop.address || 'Ingen adress angiven'}
+          subtitle={prop.address ? <MapAddressLink address={prop.address} /> : 'Ingen adress angiven'}
           actions={
             <>
               <Button variant="outline" icon="edit" onClick={() => setTab('uppgifter')}>Redigera</Button>
