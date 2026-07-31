@@ -108,6 +108,7 @@
     const selectedServiceMode = selectedService?.mode || '';
     const isQuoteService = hasSelectedService && selectedServiceMode === 'quote';
     const isPricedService = hasSelectedService && !isQuoteService;
+    const canAddWindowCleaning = form.serviceType === 'standard_cleaning' || form.serviceType === 'deep_cleaning';
     const areaMin = isPricedService ? 20 : 0;
     const roomsMin = isPricedService ? 1 : 0;
     const priceDetails = getPublicBookingPriceDetails(form);
@@ -303,9 +304,9 @@
             area_sqm: form.areaSqm ? Number(form.areaSqm) : null,
             rooms: form.rooms ? Number(form.rooms) : null,
             addons: {
-              windows: isPricedService && !isHomeCleaning && form.windows,
-              window_count: isPricedService && !isHomeCleaning && form.windows ? Number(form.windowCount || 1) : 0,
-              window_price_after_rut: isPricedService && !isHomeCleaning && form.windows ? priceDetails.windowAddonPrice : 0,
+              windows: canAddWindowCleaning && form.windows,
+              window_count: canAddWindowCleaning && form.windows ? Number(form.windowCount || 1) : 0,
+              window_price_after_rut: canAddWindowCleaning && form.windows ? priceDetails.windowAddonPrice : 0,
               oven: isPricedService && !isHomeCleaning && form.oven,
               bathrooms: Number(form.bathrooms || 0),
               home_frequency: isHomeCleaning ? form.homeFrequency : null,
@@ -548,7 +549,25 @@
                           checked={form.ironing}
                           onChange={v => update('ironing', v)}
                         />
+                        <ToggleOptionCard
+                          label="Fönsterputs"
+                          description="Ange antal fönster. Priset räknas in i totalen."
+                          checked={form.windows}
+                          onChange={v => update('windows', v)}
+                        />
                       </div>
+                      {form.windows && (
+                        <RangeNumberField
+                          label="Antal fönster"
+                          hint="Priset räknas automatiskt in i totalen."
+                          value={form.windowCount}
+                          onChange={v => update('windowCount', v)}
+                          min={1}
+                          max={60}
+                          step={1}
+                          unit="fönster"
+                        />
+                      )}
                       {form.bedLinen && (
                         <RangeNumberField
                           label="Antal sängar"
@@ -584,13 +603,14 @@
                   )}
                   {isPricedService && !isHomeCleaning && (
                     <div className="grid sm:grid-cols-2 gap-3 mt-4">
-                      <ToggleOptionCard
-                        label="Fönsterputs"
-                        description="Lägg till putsning av fönster."
-                        price={form.windows ? `+${getWindowCleaningAddonPrice(form.windowCount).toLocaleString('sv-SE')} kr` : '+450 kr bas'}
-                        checked={form.windows}
-                        onChange={v => update('windows', v)}
-                      />
+                      {canAddWindowCleaning && (
+                        <ToggleOptionCard
+                          label="Fönsterputs"
+                          description="Ange antal fönster. Priset räknas in i totalen."
+                          checked={form.windows}
+                          onChange={v => update('windows', v)}
+                        />
+                      )}
                       <ToggleOptionCard
                         label="Ugnsrengöring"
                         description="Lägg till rengöring av ugn."
@@ -598,11 +618,11 @@
                         checked={form.oven}
                         onChange={v => update('oven', v)}
                       />
-                      {form.windows && (
+                      {canAddWindowCleaning && form.windows && (
                         <div className="sm:col-span-2">
                           <RangeNumberField
                             label="Antal fönster"
-                            hint="Fönsterputs räknas som 450 kr bas + 60 kr per fönster."
+                            hint="Priset räknas automatiskt in i totalen."
                             value={form.windowCount}
                             onChange={v => update('windowCount', v)}
                             min={1}
@@ -735,13 +755,16 @@
                     {priceDetails.ironingPrice > 0 && (
                       <p><span className="font-semibold text-slate-900">Strykning:</span> {priceDetails.ironingItemCount} plagg · {priceDetails.ironingPrice.toLocaleString('sv-SE')} kr</p>
                     )}
+                    {priceDetails.windowAddonPrice > 0 && (
+                      <p><span className="font-semibold text-slate-900">Fönsterputs:</span> {form.windowCount} fönster</p>
+                    )}
                   </>
                 )}
                 {!isHomeCleaning && isPricedService && priceDetails.areaRate && (
                   <p><span className="font-semibold text-slate-900">Ytpris:</span> {priceDetails.areaRate} kr/kvm efter RUT</p>
                 )}
                 {!isHomeCleaning && isPricedService && priceDetails.windowAddonPrice > 0 && (
-                  <p><span className="font-semibold text-slate-900">Fönsterputs:</span> {form.windowCount} fönster · {priceDetails.windowAddonPrice.toLocaleString('sv-SE')} kr</p>
+                  <p><span className="font-semibold text-slate-900">Fönsterputs:</span> {form.windowCount} fönster</p>
                 )}
                 {!isHomeCleaning && isPricedService && priceDetails.ovenPrice > 0 && (
                   <p><span className="font-semibold text-slate-900">Ugnsrengöring:</span> {priceDetails.ovenPrice.toLocaleString('sv-SE')} kr</p>
@@ -829,7 +852,7 @@
 
   function getWindowCleaningAddonPrice(windowCount) {
     const count = Math.max(1, toPositiveInt(windowCount, 1));
-    return 450 + count * 60;
+    return 450 + count * 40;
   }
 
   function getMovingCleaningAreaRate(areaSqm) {
@@ -890,8 +913,9 @@
       const hours = getHomeCleaningHours(form.areaSqm);
       const bedLinenPrice = form.bedLinen ? getHomeBedLinenPrice(form.bedCount) : 0;
       const ironing = form.ironing ? getHomeIroningDetails(form) : { counts: {}, itemCount: 0, price: 0 };
+      const windowAddonPrice = form.windows ? getWindowCleaningAddonPrice(form.windowCount) : 0;
       return {
-        price: hours * frequency.hourlyRate + bedLinenPrice + ironing.price,
+        price: hours * frequency.hourlyRate + bedLinenPrice + ironing.price + windowAddonPrice,
         hours,
         hourlyRate: frequency.hourlyRate,
         frequencyLabel: frequency.label,
@@ -899,6 +923,7 @@
         ironingPrice: ironing.price,
         ironingItemCount: ironing.itemCount,
         ironingCounts: ironing.counts,
+        windowAddonPrice,
       };
     }
 
@@ -924,7 +949,7 @@
     let price = form.serviceType === 'moving_cleaning'
       ? area * areaRate
       : (baseByService[form.serviceType] || 590) + area * areaRate + rooms * 80;
-    const windowAddonPrice = form.windows ? getWindowCleaningAddonPrice(form.windowCount) : 0;
+    const windowAddonPrice = form.serviceType === 'deep_cleaning' && form.windows ? getWindowCleaningAddonPrice(form.windowCount) : 0;
     price += windowAddonPrice;
     if (form.oven) price += 250;
     return {
@@ -1215,9 +1240,11 @@
             <span className="mt-0.5 block text-xs text-slate-500">{description}</span>
           </span>
         </span>
-        <span className={cx('flex-shrink-0 rounded-full px-3 py-1 text-xs font-bold', checked ? 'bg-white text-brand-700' : 'bg-slate-100 text-slate-600')}>
-          {price}
-        </span>
+        {price && (
+          <span className={cx('flex-shrink-0 rounded-full px-3 py-1 text-xs font-bold', checked ? 'bg-white text-brand-700' : 'bg-slate-100 text-slate-600')}>
+            {price}
+          </span>
+        )}
       </button>
     );
   }
