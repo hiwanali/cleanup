@@ -10,14 +10,14 @@
   const CLEANUP_BOOKING_TERMS_VERSION = 'booking_terms_v1_2026-07-30';
   const CLEANUP_PRIVACY_NOTICE_VERSION = 'privacy_notice_v1_2026-07-30';
   const PUBLIC_BOOKING_SERVICES = [
-    { id: 'standard_cleaning', label: 'Hemstädning', mode: 'priced' },
-    { id: 'deep_cleaning', label: 'Storstädning', mode: 'priced' },
-    { id: 'moving_cleaning', label: 'Flyttstädning', mode: 'priced' },
-    { id: 'window_cleaning', label: 'Fönsterputs', mode: 'quote' },
-    { id: 'office_cleaning', label: 'Kontorsstädning', mode: 'quote' },
-    { id: 'stair_cleaning', label: 'Trappstädning', mode: 'quote' },
-    { id: 'construction_cleaning', label: 'Byggstädning', mode: 'quote' },
-    { id: 'construction_services', label: 'Byggtjänster', mode: 'quote' },
+    { id: 'standard_cleaning', label: 'Hemstädning', mode: 'priced', icon: 'home' },
+    { id: 'deep_cleaning', label: 'Storstädning', mode: 'priced', icon: 'sparkles' },
+    { id: 'moving_cleaning', label: 'Flyttstädning', mode: 'priced', icon: 'briefcase' },
+    { id: 'window_cleaning', label: 'Fönsterputs', mode: 'quote', icon: 'image' },
+    { id: 'office_cleaning', label: 'Kontorsstädning', mode: 'quote', icon: 'building' },
+    { id: 'stair_cleaning', label: 'Trappstädning', mode: 'quote', icon: 'list' },
+    { id: 'construction_cleaning', label: 'Byggstädning', mode: 'quote', icon: 'settings' },
+    { id: 'construction_services', label: 'Byggtjänster', mode: 'quote', icon: 'briefcase' },
   ];
   const PUBLIC_BOOKING_SERVICE_BY_ID = Object.fromEntries(PUBLIC_BOOKING_SERVICES.map(service => [service.id, service]));
 
@@ -71,9 +71,9 @@
     const [slots, setSlots] = useState([]);
     const [error, setError] = useState('');
     const [confirmation, setConfirmation] = useState(null);
-    const [choosingService, setChoosingService] = useState(false);
+    const [choosingService, setChoosingService] = useState(true);
     const [form, setForm] = useState({
-      serviceType: 'standard_cleaning',
+      serviceType: '',
       homeFrequency: 'one_time',
       areaSqm: '20',
       rooms: '1',
@@ -102,10 +102,12 @@
     });
 
     const selectedSlot = slots.find(s => s.id === form.selectedSlotId);
+    const hasSelectedService = !!form.serviceType;
     const isHomeCleaning = form.serviceType === 'standard_cleaning';
-    const selectedServiceMode = PUBLIC_BOOKING_SERVICE_BY_ID[form.serviceType]?.mode || 'quote';
-    const isQuoteService = selectedServiceMode === 'quote';
-    const isPricedService = !isQuoteService;
+    const selectedService = PUBLIC_BOOKING_SERVICE_BY_ID[form.serviceType] || null;
+    const selectedServiceMode = selectedService?.mode || '';
+    const isQuoteService = hasSelectedService && selectedServiceMode === 'quote';
+    const isPricedService = hasSelectedService && !isQuoteService;
     const areaMin = isPricedService ? 20 : 0;
     const roomsMin = isPricedService ? 1 : 0;
     const priceDetails = getPublicBookingPriceDetails(form);
@@ -113,16 +115,18 @@
     const roomsNumber = Number(form.rooms);
     const hasValidArea = Number.isFinite(areaNumber) && areaNumber > 0;
     const hasValidRooms = Number.isFinite(roomsNumber) && roomsNumber > 0;
-    const canContinueDetails = isQuoteService || (hasValidArea && hasValidRooms);
+    const canContinueDetails = hasSelectedService && (isQuoteService || (hasValidArea && hasValidRooms));
     const estimatedPrice = isPricedService && canContinueDetails ? priceDetails.price : null;
     const bookingDurationMinutes = isQuoteService ? 60 : (canContinueDetails && priceDetails.hours ? Math.round(priceDetails.hours * 60) : 0);
     const bookingBufferMinutes = isQuoteService ? 60 : 30;
     const canChooseSlot = !!form.serviceType && canContinueDetails;
     const canSubmit = canContinueDetails && form.selectedSlotId && form.customerName.trim().length >= 2 && form.customerEmail.includes('@') &&
       form.customerPhone.trim().length >= 6 && form.address.trim().length >= 3 && form.consent && form.policyAccepted && !submitting;
-    const primaryDisabled = (step === 1 && !canContinueDetails) || (step === 2 && !form.selectedSlotId) || (step === 3 && !canSubmit);
+    const primaryDisabled = (step === 1 && (!hasSelectedService || !canContinueDetails)) || (step === 2 && !form.selectedSlotId) || (step === 3 && !canSubmit);
     const primaryLabel = step < 3 ? 'Fortsätt' : 'Skicka förfrågan';
-    const mobileSummary = isQuoteService
+    const mobileSummary = !hasSelectedService
+      ? 'Välj tjänst'
+      : isQuoteService
       ? `${serviceLabel(form.serviceType)} · telefontid`
       : estimatedPrice == null
         ? `${serviceLabel(form.serviceType)} · ange yta`
@@ -414,35 +418,47 @@
             <Card padding="md">
               {step === 1 && (
                 <div>
-                  <h1 className="text-xl font-extrabold text-slate-900">Vad behöver du hjälp med?</h1>
-                  {!choosingService ? (
+                  <h1 className="text-xl font-extrabold text-slate-900">{hasSelectedService ? 'Vad behöver du hjälp med?' : 'Välj tjänst'}</h1>
+                  {hasSelectedService && !choosingService ? (
                     <div className="mt-4 flex items-center justify-between gap-3 rounded-2xl border border-brand-100 bg-brand-50/50 p-3">
-                      <div className="min-w-0">
+                      <span className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl bg-white text-brand-700 shadow-sm ring-1 ring-brand-100">
+                        <Icon name={selectedService?.icon || 'sparkles'} className="h-5 w-5" />
+                      </span>
+                      <div className="min-w-0 flex-1">
                         <p className="text-xs font-semibold uppercase tracking-wide text-brand-700">Vald tjänst</p>
-                        <p className="truncate text-base font-extrabold text-slate-900">{serviceLabel(form.serviceType)}</p>
+                        <p className="truncate text-base font-extrabold text-slate-900">{selectedService.label}</p>
                         {isQuoteService && <p className="mt-0.5 text-xs text-slate-600">Offert via telefontid</p>}
                       </div>
                       <Button variant="secondary" size="sm" onClick={() => setChoosingService(true)}>Ändra</Button>
                     </div>
                   ) : (
                     <div className="grid sm:grid-cols-2 gap-3 mt-4">
-                      {PUBLIC_BOOKING_SERVICES.map(({ id, label, mode }) => (
+                      {PUBLIC_BOOKING_SERVICES.map(({ id, label, mode, icon }) => (
                         <button
                           key={id}
                           type="button"
                           onClick={() => update('serviceType', id)}
                           className={cx(
-                            'min-h-[58px] text-left rounded-xl border p-4 transition-colors',
-                            form.serviceType === id ? 'border-brand-500 bg-brand-50' : 'border-slate-200 hover:bg-slate-50',
+                            'min-h-[78px] text-left rounded-xl border p-4 transition-all duration-200',
+                            'flex items-center gap-3',
+                            form.serviceType === id ? 'border-brand-500 bg-brand-50 ring-2 ring-brand-100' : 'border-slate-200 hover:border-brand-200 hover:bg-slate-50',
                           )}
                         >
-                          <p className="font-bold text-slate-900">{label}</p>
-                          {mode === 'quote' && <p className="mt-1 text-xs text-slate-500">Offert via telefontid</p>}
+                          <span className={cx(
+                            'inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl',
+                            form.serviceType === id ? 'bg-brand-600 text-white' : 'bg-slate-100 text-slate-600',
+                          )}>
+                            <Icon name={icon} className="h-5 w-5" />
+                          </span>
+                          <span className="min-w-0">
+                            <span className="block font-bold text-slate-900">{label}</span>
+                            {mode === 'quote' && <span className="mt-1 block text-xs text-slate-500">Offert via telefontid</span>}
+                          </span>
                         </button>
                       ))}
                     </div>
                   )}
-                  {form.serviceType === 'standard_cleaning' && (
+                  {hasSelectedService && form.serviceType === 'standard_cleaning' && (
                     <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
                       <p className="text-sm font-bold text-slate-900">Hur ofta vill du ha hemstädning?</p>
                       <div className="mt-3 grid sm:grid-cols-3 gap-3">
@@ -467,7 +483,7 @@
                       </div>
                     </div>
                   )}
-                  {isQuoteService && (
+                  {hasSelectedService && isQuoteService && (
                     <div className="mt-4 rounded-2xl border border-brand-100 bg-brand-50/40 p-4 text-sm text-brand-950">
                       <p className="font-bold">Boka telefontid för offert</p>
                       <p className="mt-1 leading-relaxed text-brand-950/80">
@@ -476,39 +492,41 @@
                       </p>
                     </div>
                   )}
-                  <div className="grid md:grid-cols-2 gap-3 mt-4">
-                    <RangeNumberField
-                      label="Kvadratmeter"
-                      hint="Dra eller skriv exakt yta."
-                      value={form.areaSqm}
-                      onChange={v => update('areaSqm', v)}
-                      min={areaMin}
-                      max={300}
-                      step={5}
-                      unit="kvm"
-                    />
-                    <RangeNumberField
-                      label="Rum"
-                      hint="Dra eller skriv antal rum."
-                      value={form.rooms}
-                      onChange={v => update('rooms', v)}
-                      min={roomsMin}
-                      max={12}
-                      step={1}
-                      unit="rum"
-                    />
-                    <RangeNumberField
-                      label="Badrum"
-                      hint="Dra eller skriv antal badrum."
-                      value={form.bathrooms}
-                      onChange={v => update('bathrooms', v)}
-                      min={0}
-                      max={6}
-                      step={1}
-                      unit="badrum"
-                    />
-                  </div>
-                  {!canContinueDetails && (
+                  {hasSelectedService && (
+                    <div className="grid md:grid-cols-2 gap-3 mt-4">
+                      <RangeNumberField
+                        label="Kvadratmeter"
+                        hint="Dra eller skriv exakt yta."
+                        value={form.areaSqm}
+                        onChange={v => update('areaSqm', v)}
+                        min={areaMin}
+                        max={300}
+                        step={5}
+                        unit="kvm"
+                      />
+                      <RangeNumberField
+                        label="Rum"
+                        hint="Dra eller skriv antal rum."
+                        value={form.rooms}
+                        onChange={v => update('rooms', v)}
+                        min={roomsMin}
+                        max={12}
+                        step={1}
+                        unit="rum"
+                      />
+                      <RangeNumberField
+                        label="Badrum"
+                        hint="Dra eller skriv antal badrum."
+                        value={form.bathrooms}
+                        onChange={v => update('bathrooms', v)}
+                        min={0}
+                        max={6}
+                        step={1}
+                        unit="badrum"
+                      />
+                    </div>
+                  )}
+                  {hasSelectedService && !canContinueDetails && (
                     <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
                       Fyll i ungefärlig yta och antal rum för att se rätt pris och lediga tider.
                     </div>
@@ -686,14 +704,18 @@
             <Card padding="md" className="h-fit">
               <p className="text-xs font-semibold uppercase text-slate-500">{isPricedService ? 'Uppskattat pris' : 'Nästa steg'}</p>
               <p className="mt-2 text-3xl font-extrabold text-slate-900">
-                {isQuoteService
+                {!hasSelectedService
+                  ? 'Välj tjänst'
+                  : isQuoteService
                   ? 'Telefontid'
                   : estimatedPrice == null
                   ? 'Ange yta'
                   : `${estimatedPrice.toLocaleString('sv-SE')} kr${isHomeCleaning ? ' per tillfälle' : ''}`}
               </p>
               <p className="mt-1 text-xs text-slate-500">
-                {isQuoteService
+                {!hasSelectedService
+                  ? 'Börja med den tjänst som passar uppdraget.'
+                  : isQuoteService
                   ? 'Vi ringer upp på vald tid, går igenom uppdraget och lämnar pris manuellt.'
                   : estimatedPrice == null
                   ? 'Pris och lediga tider visas när yta och rum är ifyllda.'
@@ -702,7 +724,7 @@
                     : 'Prisförslag ink. RUT-avdrag. Slutligt upplägg och pris bekräftas efter genomgång.'}
               </p>
               <div className="mt-4 space-y-2 text-sm text-slate-600">
-                <p><span className="font-semibold text-slate-900">Tjänst:</span> {serviceLabel(form.serviceType)}</p>
+                {hasSelectedService && <p><span className="font-semibold text-slate-900">Tjänst:</span> {serviceLabel(form.serviceType)}</p>}
                 {isHomeCleaning && (
                   <>
                     <p><span className="font-semibold text-slate-900">Frekvens:</span> {priceDetails.frequencyLabel}</p>
