@@ -448,8 +448,17 @@
   function serviceChecklistForBooking(serviceType, addons = {}) {
     const base = PUBLIC_BOOKING_SERVICE_CHECKLISTS[serviceType] || [];
     const titles = base.slice();
-    if (serviceType !== 'moving_cleaning' && truthyAddon(addons.windows)) {
-      titles.push('Tillägg: fönsterputs enligt överenskommelse');
+    if (serviceType === 'standard_cleaning' && truthyAddon(addons.home_bed_linen)) {
+      const count = Math.max(1, Number(addons.home_bed_count || 1));
+      titles.push(`Tillägg: byt sängkläder (${count} säng${count === 1 ? '' : 'ar'})`);
+    }
+    if (serviceType === 'standard_cleaning' && truthyAddon(addons.home_ironing)) {
+      const count = Math.max(0, Number(addons.home_ironing_item_count || 0));
+      titles.push(`Tillägg: stryk kläder${count > 0 ? ` (${count} plagg)` : ''}`);
+    }
+    if (truthyAddon(addons.windows)) {
+      const count = Math.max(1, Number(addons.window_count || 1));
+      titles.push(`Tillägg: fönsterputs enligt överenskommelse (${count} fönster)`);
     }
     if (truthyAddon(addons.oven)) {
       titles.push('Tillägg: ugnsrengöring enligt överenskommelse');

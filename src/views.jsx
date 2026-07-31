@@ -79,7 +79,15 @@
       rooms: '1',
       bathrooms: '1',
       windows: false,
+      windowCount: '1',
       oven: false,
+      bedLinen: false,
+      bedCount: '1',
+      ironing: false,
+      ironingShirts: '0',
+      ironingTshirts: '0',
+      ironingPants: '0',
+      ironingSuitPants: '0',
       selectedSlotId: '',
       customerName: '',
       customerEmail: '',
@@ -176,7 +184,15 @@
       form.rooms,
       form.bathrooms,
       form.windows,
+      form.windowCount,
       form.oven,
+      form.bedLinen,
+      form.bedCount,
+      form.ironing,
+      form.ironingShirts,
+      form.ironingTshirts,
+      form.ironingPants,
+      form.ironingSuitPants,
       form.selectedSlotId,
     ]);
 
@@ -236,6 +252,13 @@
         if (!Number.isFinite(Number(form.areaSqm)) || Number(form.areaSqm) < 20) nextValues.areaSqm = '20';
         if (!Number.isFinite(Number(form.rooms)) || Number(form.rooms) < 1) nextValues.rooms = '1';
         if (!Number.isFinite(Number(form.bathrooms)) || form.bathrooms === '') nextValues.bathrooms = '1';
+        if (!Number.isFinite(Number(form.windowCount)) || Number(form.windowCount) < 1) nextValues.windowCount = '1';
+      }
+      if (key === 'windows' && value && (!Number.isFinite(Number(form.windowCount)) || Number(form.windowCount) < 1)) {
+        nextValues.windowCount = '1';
+      }
+      if (key === 'bedLinen' && value && (!Number.isFinite(Number(form.bedCount)) || Number(form.bedCount) < 1)) {
+        nextValues.bedCount = '1';
       }
       setForm(f => ({
         ...f,
@@ -276,17 +299,27 @@
             area_sqm: form.areaSqm ? Number(form.areaSqm) : null,
             rooms: form.rooms ? Number(form.rooms) : null,
             addons: {
-              windows: isPricedService && form.windows,
-              oven: isPricedService && form.oven,
-              bathrooms: Number(form.bathrooms || 1),
+              windows: isPricedService && !isHomeCleaning && form.windows,
+              window_count: isPricedService && !isHomeCleaning && form.windows ? Number(form.windowCount || 1) : 0,
+              window_price_after_rut: isPricedService && !isHomeCleaning && form.windows ? priceDetails.windowAddonPrice : 0,
+              oven: isPricedService && !isHomeCleaning && form.oven,
+              bathrooms: Number(form.bathrooms || 0),
               home_frequency: isHomeCleaning ? form.homeFrequency : null,
               home_frequency_label: isHomeCleaning ? priceDetails.frequencyLabel : null,
+              home_bed_linen: isHomeCleaning && form.bedLinen,
+              home_bed_count: isHomeCleaning && form.bedLinen ? Number(form.bedCount || 1) : 0,
+              home_bed_linen_price_after_rut: isHomeCleaning && form.bedLinen ? priceDetails.bedLinenPrice : 0,
+              home_ironing: isHomeCleaning && form.ironing,
+              home_ironing_items: isHomeCleaning && form.ironing ? priceDetails.ironingCounts : {},
+              home_ironing_item_count: isHomeCleaning && form.ironing ? priceDetails.ironingItemCount : 0,
+              home_ironing_price_after_rut: isHomeCleaning && form.ironing ? priceDetails.ironingPrice : 0,
               estimated_hours: priceDetails.hours,
               booking_duration_minutes: bookingDurationMinutes || null,
               booking_buffer_minutes: bookingDurationMinutes ? bookingBufferMinutes : null,
               booking_step_minutes: bookingDurationMinutes ? 30 : null,
               hourly_price_after_rut: priceDetails.hourlyRate,
-              rut_included: isHomeCleaning,
+              area_rate_after_rut: priceDetails.areaRate || null,
+              rut_included: isPricedService,
               request_kind: isQuoteService ? 'phone_quote_request' : 'price_booking_request',
               phone_quote: isQuoteService,
               requires_admin_price_review: !!form.message.trim(),
@@ -480,12 +513,63 @@
                       Fyll i ungefärlig yta och antal rum för att se rätt pris och lediga tider.
                     </div>
                   )}
-                  {isPricedService && (
+                  {isHomeCleaning && (
+                    <div className="mt-4 space-y-3">
+                      <div className="grid sm:grid-cols-2 gap-3">
+                        <ToggleOptionCard
+                          label="Byta sängkläder"
+                          description="Lägg gärna fram rena sängkläder på sängen."
+                          price={form.bedLinen ? `+${getHomeBedLinenPrice(form.bedCount).toLocaleString('sv-SE')} kr` : 'Från +85 kr'}
+                          checked={form.bedLinen}
+                          onChange={v => update('bedLinen', v)}
+                        />
+                        <ToggleOptionCard
+                          label="Stryka kläder"
+                          description="Strykjärn behöver finnas på plats och vara rent."
+                          price={getHomeIroningDetails(form).itemCount > 0 ? `+${getHomeIroningDetails(form).price.toLocaleString('sv-SE')} kr` : '129 kr/plagg'}
+                          checked={form.ironing}
+                          onChange={v => update('ironing', v)}
+                        />
+                      </div>
+                      {form.bedLinen && (
+                        <RangeNumberField
+                          label="Antal sängar"
+                          hint="Rena sängkläder får gärna ligga framme på respektive säng."
+                          value={form.bedCount}
+                          onChange={v => update('bedCount', v)}
+                          min={1}
+                          max={10}
+                          step={1}
+                          unit="säng"
+                        />
+                      )}
+                      {form.ironing && (
+                        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                          <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+                            <div>
+                              <p className="text-sm font-bold text-slate-900">Vilka plagg ska strykas?</p>
+                              <p className="text-xs text-slate-500">129 kr per plagg efter RUT. Vi tar inte med strykjärn.</p>
+                            </div>
+                            <p className="text-sm font-extrabold text-brand-700">
+                              {getHomeIroningDetails(form).price.toLocaleString('sv-SE')} kr
+                            </p>
+                          </div>
+                          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                            <AddonQuantityField label="Skjortor" value={form.ironingShirts} onChange={v => update('ironingShirts', v)} />
+                            <AddonQuantityField label="T-shirts" value={form.ironingTshirts} onChange={v => update('ironingTshirts', v)} />
+                            <AddonQuantityField label="Byxor" value={form.ironingPants} onChange={v => update('ironingPants', v)} />
+                            <AddonQuantityField label="Kostymbyxor" value={form.ironingSuitPants} onChange={v => update('ironingSuitPants', v)} />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {isPricedService && !isHomeCleaning && (
                     <div className="grid sm:grid-cols-2 gap-3 mt-4">
                       <ToggleOptionCard
                         label="Fönsterputs"
                         description="Lägg till putsning av fönster."
-                        price="+450 kr"
+                        price={form.windows ? `+${getWindowCleaningAddonPrice(form.windowCount).toLocaleString('sv-SE')} kr` : '+450 kr bas'}
                         checked={form.windows}
                         onChange={v => update('windows', v)}
                       />
@@ -496,6 +580,20 @@
                         checked={form.oven}
                         onChange={v => update('oven', v)}
                       />
+                      {form.windows && (
+                        <div className="sm:col-span-2">
+                          <RangeNumberField
+                            label="Antal fönster"
+                            hint="Fönsterputs räknas som 450 kr bas + 60 kr per fönster."
+                            value={form.windowCount}
+                            onChange={v => update('windowCount', v)}
+                            min={1}
+                            max={60}
+                            step={1}
+                            unit="fönster"
+                          />
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -609,7 +707,22 @@
                   <>
                     <p><span className="font-semibold text-slate-900">Frekvens:</span> {priceDetails.frequencyLabel}</p>
                     {canContinueDetails && <p><span className="font-semibold text-slate-900">Städning:</span> {priceDetails.hours} tim · {priceDetails.hourlyRate} kr/h</p>}
+                    {priceDetails.bedLinenPrice > 0 && (
+                      <p><span className="font-semibold text-slate-900">Sängkläder:</span> {form.bedCount} säng{Number(form.bedCount) === 1 ? '' : 'ar'} · {priceDetails.bedLinenPrice.toLocaleString('sv-SE')} kr</p>
+                    )}
+                    {priceDetails.ironingPrice > 0 && (
+                      <p><span className="font-semibold text-slate-900">Strykning:</span> {priceDetails.ironingItemCount} plagg · {priceDetails.ironingPrice.toLocaleString('sv-SE')} kr</p>
+                    )}
                   </>
+                )}
+                {!isHomeCleaning && isPricedService && priceDetails.areaRate && (
+                  <p><span className="font-semibold text-slate-900">Ytpris:</span> {priceDetails.areaRate} kr/kvm efter RUT</p>
+                )}
+                {!isHomeCleaning && isPricedService && priceDetails.windowAddonPrice > 0 && (
+                  <p><span className="font-semibold text-slate-900">Fönsterputs:</span> {form.windowCount} fönster · {priceDetails.windowAddonPrice.toLocaleString('sv-SE')} kr</p>
+                )}
+                {!isHomeCleaning && isPricedService && priceDetails.ovenPrice > 0 && (
+                  <p><span className="font-semibold text-slate-900">Ugnsrengöring:</span> {priceDetails.ovenPrice.toLocaleString('sv-SE')} kr</p>
                 )}
                 {isQuoteService && <p><span className="font-semibold text-slate-900">Samtal:</span> 60 min · 60 min buffer</p>}
                 {selectedSlot && <p><span className="font-semibold text-slate-900">Tid:</span> {formatDate(selectedSlot.starts_at)} {formatTime(selectedSlot.starts_at)}-{formatTime(selectedSlot.ends_at)}</p>}
@@ -662,6 +775,56 @@
     return options[frequency] || options.one_time;
   }
 
+  function toPositiveInt(value, fallback = 0) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return fallback;
+    return Math.max(0, Math.round(n));
+  }
+
+  function getHomeBedLinenPrice(bedCount) {
+    const count = toPositiveInt(bedCount);
+    if (count <= 0) return 0;
+    if (count === 1) return 85;
+    if (count === 2) return 160;
+    if (count === 3) return 240;
+    return 240 + (count - 3) * 70;
+  }
+
+  function getHomeIroningDetails(form) {
+    const counts = {
+      shirts: toPositiveInt(form.ironingShirts),
+      tshirts: toPositiveInt(form.ironingTshirts),
+      pants: toPositiveInt(form.ironingPants),
+      suitPants: toPositiveInt(form.ironingSuitPants),
+    };
+    const itemCount = Object.values(counts).reduce((sum, count) => sum + count, 0);
+    return {
+      counts,
+      itemCount,
+      price: itemCount * 129,
+    };
+  }
+
+  function getWindowCleaningAddonPrice(windowCount) {
+    const count = Math.max(1, toPositiveInt(windowCount, 1));
+    return 450 + count * 60;
+  }
+
+  function getMovingCleaningAreaRate(areaSqm) {
+    const area = Math.max(0, Number(areaSqm || 0));
+    const tiers = [
+      { max: 20, rate: 55 },
+      { max: 30, rate: 53 },
+      { max: 35, rate: 52 },
+      { max: 45, rate: 49 },
+      { max: 50, rate: 47 },
+      { max: 67, rate: 45 },
+      { max: 77, rate: 42 },
+      { max: 99, rate: 40 },
+    ];
+    return (tiers.find(tier => area <= tier.max) || tiers[tiers.length - 1]).rate;
+  }
+
   function PublicBookingTermsSummary({ serviceType }) {
     const isHomeCleaning = serviceType === 'standard_cleaning';
     const isQuoteService = (PUBLIC_BOOKING_SERVICE_BY_ID[serviceType]?.mode || 'quote') === 'quote';
@@ -703,11 +866,17 @@
     if (form.serviceType === 'standard_cleaning') {
       const frequency = getHomeCleaningFrequency(form.homeFrequency);
       const hours = getHomeCleaningHours(form.areaSqm);
+      const bedLinenPrice = form.bedLinen ? getHomeBedLinenPrice(form.bedCount) : 0;
+      const ironing = form.ironing ? getHomeIroningDetails(form) : { counts: {}, itemCount: 0, price: 0 };
       return {
-        price: hours * frequency.hourlyRate,
+        price: hours * frequency.hourlyRate + bedLinenPrice + ironing.price,
         hours,
         hourlyRate: frequency.hourlyRate,
         frequencyLabel: frequency.label,
+        bedLinenPrice,
+        ironingPrice: ironing.price,
+        ironingItemCount: ironing.itemCount,
+        ironingCounts: ironing.counts,
       };
     }
 
@@ -729,15 +898,22 @@
       moving_cleaning: 1490,
       window_cleaning: 690,
     };
-    const areaRate = form.serviceType === 'moving_cleaning' ? 18 : form.serviceType === 'deep_cleaning' ? 14 : 9;
-    let price = (baseByService[form.serviceType] || 590) + area * areaRate + rooms * 80 + bathrooms * 120;
-    if (form.windows) price += 450;
+    const areaRate = form.serviceType === 'moving_cleaning' ? getMovingCleaningAreaRate(area) : form.serviceType === 'deep_cleaning' ? 14 : 9;
+    let price = form.serviceType === 'moving_cleaning'
+      ? area * areaRate
+      : (baseByService[form.serviceType] || 590) + area * areaRate + rooms * 80;
+    const windowAddonPrice = form.windows ? getWindowCleaningAddonPrice(form.windowCount) : 0;
+    price += windowAddonPrice;
     if (form.oven) price += 250;
     return {
-      price: Math.max(390, Math.round(price / 10) * 10),
+      price: Math.max(390, Math.round(price)),
       hours: null,
       hourlyRate: null,
       frequencyLabel: '',
+      areaRate,
+      bathrooms,
+      windowAddonPrice,
+      ovenPrice: form.oven ? 250 : 0,
     };
   }
 
@@ -785,6 +961,28 @@
         { Fält: 'Beräknad städtid', Värde: bookingAddons.estimated_hours ? `${bookingAddons.estimated_hours} timmar` : '' },
         { Fält: 'Timpris efter RUT', Värde: bookingAddons.hourly_price_after_rut ? `${bookingAddons.hourly_price_after_rut} kr/h` : '' },
       );
+      if (bookingAddons.home_bed_linen) {
+        serviceRows.push({
+          Fält: 'Tillägg sängkläder',
+          Värde: `${bookingAddons.home_bed_count || 1} säng${Number(bookingAddons.home_bed_count || 1) === 1 ? '' : 'ar'} · ${bookingAddons.home_bed_linen_price_after_rut || 0} kr`,
+        });
+      }
+      if (bookingAddons.home_ironing) {
+        serviceRows.push({
+          Fält: 'Tillägg strykning',
+          Värde: `${bookingAddons.home_ironing_item_count || 0} plagg · ${bookingAddons.home_ironing_price_after_rut || 0} kr`,
+        });
+      }
+    } else {
+      if (bookingAddons.windows) {
+        serviceRows.push({
+          Fält: 'Tillägg fönsterputs',
+          Värde: `${bookingAddons.window_count || 1} fönster · ${bookingAddons.window_price_after_rut || 0} kr`,
+        });
+      }
+      if (bookingAddons.oven) {
+        serviceRows.push({ Fält: 'Tillägg ugnsrengöring', Värde: '250 kr' });
+      }
     }
 
     const isHomeCleaning = bookingRequest?.service_type === 'standard_cleaning';
@@ -936,6 +1134,34 @@
           />
         </div>
       </div>
+    );
+  }
+
+  function AddonQuantityField({ label, value, onChange, min = 0, max = 99 }) {
+    function update(next) {
+      if (next === '') {
+        onChange('');
+        return;
+      }
+      const n = Number(next);
+      if (!Number.isFinite(n)) return;
+      onChange(String(Math.min(max, Math.max(min, Math.round(n)))));
+    }
+
+    return (
+      <label className="block rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+        <span className="block text-xs font-semibold text-slate-600">{label}</span>
+        <Input
+          type="text"
+          inputMode="numeric"
+          pattern="[0-9]*"
+          value={value}
+          onChange={e => update(e.target.value)}
+          onFocus={e => e.target.select()}
+          className="mt-1 text-center font-bold"
+          aria-label={label}
+        />
+      </label>
     );
   }
 
@@ -1765,6 +1991,31 @@
                         {bookingAddons.home_frequency_label || 'Engångsstädning'}
                         {bookingAddons.estimated_hours ? ` · ${bookingAddons.estimated_hours} tim` : ''}
                         {bookingAddons.hourly_price_after_rut ? ` · ${bookingAddons.hourly_price_after_rut} kr/h efter RUT` : ''}
+                        {(bookingAddons.home_bed_linen || bookingAddons.home_ironing) && (
+                          <span className="mt-1 block text-xs text-slate-500">
+                            {[
+                              bookingAddons.home_bed_linen
+                                ? `Sängkläder: ${bookingAddons.home_bed_count || 1} säng${Number(bookingAddons.home_bed_count || 1) === 1 ? '' : 'ar'}`
+                                : '',
+                              bookingAddons.home_ironing
+                                ? `Strykning: ${bookingAddons.home_ironing_item_count || 0} plagg`
+                                : '',
+                            ].filter(Boolean).join(' · ')}
+                          </span>
+                        )}
+                      </dd>
+                    </div>
+                  )}
+                  {bookingRequest.service_type !== 'standard_cleaning' && (bookingAddons.windows || bookingAddons.oven) && (
+                    <div>
+                      <dt className="text-xs font-semibold text-slate-500">Tillägg</dt>
+                      <dd className="text-slate-800">
+                        {[
+                          bookingAddons.windows
+                            ? `Fönsterputs: ${bookingAddons.window_count || 1} fönster`
+                            : '',
+                          bookingAddons.oven ? 'Ugnsrengöring' : '',
+                        ].filter(Boolean).join(' · ')}
                       </dd>
                     </div>
                   )}
