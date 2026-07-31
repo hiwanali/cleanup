@@ -5,6 +5,7 @@ const DEFAULT_ALLOWED_ORIGINS = [
   "https://cleanup.nu",
   "https://www.cleanup.nu",
   "https://logincleanup.app",
+  "https://www.logincleanup.app",
 ];
 
 const ACTIVE_REQUEST_STATUSES = ["new", "linked_to_shift", "approved"];
