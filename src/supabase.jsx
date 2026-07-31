@@ -2007,6 +2007,38 @@
     return { ok: true };
   }
 
+  async function persistDeleteBookingAvailabilitySlot({ slotId }) {
+    if (!enabled || !sb || !isUuid(slotId)) {
+      return { ok: true, skipped: true };
+    }
+
+    const { count, error: countError } = await sb
+      .from('booking_requests')
+      .select('id', { count: 'exact', head: true })
+      .eq('availability_slot_id', slotId)
+      .in('status', ['new', 'linked_to_shift', 'approved']);
+
+    if (countError) {
+      console.error('[persist] deleteBookingAvailabilitySlot count:', countError.message);
+      return { ok: false, message: countError.message };
+    }
+    if ((count || 0) > 0) {
+      return { ok: false, code: 'HAS_RESERVATIONS', message: 'Tidsluckan har redan förfrågningar eller bokningar.' };
+    }
+
+    const { error } = await sb
+      .from('booking_availability_slots')
+      .delete()
+      .eq('id', slotId);
+
+    if (error) {
+      console.error('[persist] deleteBookingAvailabilitySlot:', error.message);
+      return { ok: false, message: error.message };
+    }
+
+    return { ok: true };
+  }
+
   window.dbPersist = {
     insertNotifications: persistInsertNotifications,
     adminDelete: persistAdminDelete,
@@ -2058,6 +2090,7 @@
     setCleanerProperties: persistSetCleanerProperties,
     createBookingAvailabilitySlot: persistCreateBookingAvailabilitySlot,
     updateBookingAvailabilitySlot: persistUpdateBookingAvailabilitySlot,
+    deleteBookingAvailabilitySlot: persistDeleteBookingAvailabilitySlot,
     sendCustomerPortalInvite: persistSendCustomerPortalInvite,
     updateBookingRequestPricing: persistUpdateBookingRequestPricing,
     markCustomerPortalActive: persistMarkCustomerPortalActive,

@@ -729,6 +729,29 @@
       return { ok: true, slot };
     },
 
+    async deleteBookingAvailabilitySlot(slotId, actorUserId) {
+      const actor = db.userById(actorUserId);
+      if (!actor || actor.role !== 'admin') return { error: 'FORBIDDEN' };
+      const slotIndex = state.booking_availability_slots.findIndex(s => s.id === slotId);
+      if (slotIndex < 0) return { error: 'NOT_FOUND' };
+      if (db.reservedBookingCountForSlot(slotId) > 0) return { error: 'HAS_RESERVATIONS' };
+
+      const [slot] = state.booking_availability_slots.splice(slotIndex, 1);
+      bump();
+
+      const persist = window.dbPersist && window.dbPersist.deleteBookingAvailabilitySlot;
+      if (persist && window.SUPABASE_ENABLED) {
+        const r = await persist({ slotId });
+        if (!r.ok) {
+          state.booking_availability_slots.splice(slotIndex, 0, slot);
+          bump();
+          return { error: 'PERSIST_FAILED', message: r.message };
+        }
+      }
+
+      return { ok: true, slot };
+    },
+
     checklistForShift(sid) {
       return state.shift_checklist_items
         .filter(c => c.shift_id === sid)

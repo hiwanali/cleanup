@@ -4177,6 +4177,7 @@
     mode = 'public',
     getReservedCount,
     onToggleSlot,
+    onDeleteSlot,
     onToggleDay,
   }) {
     const [cursor, setCursor] = useState(() => calStartOfMonth(new Date()));
@@ -4259,10 +4260,26 @@
                 </p>
               )}
             </button>
-            {isAdmin && onToggleSlot && (
-              <Button variant="outline" size="sm" icon={slot.active === false ? 'check' : 'pause'} onClick={() => onToggleSlot(slot)}>
-                {slot.active === false ? 'Öppna' : 'Pausa'}
-              </Button>
+            {isAdmin && (
+              <div className="flex flex-wrap justify-end gap-2">
+                {onToggleSlot && (
+                  <Button variant="outline" size="sm" icon={slot.active === false ? 'check' : 'pause'} onClick={() => onToggleSlot(slot)}>
+                    {slot.active === false ? 'Öppna' : 'Pausa'}
+                  </Button>
+                )}
+                {onDeleteSlot && (
+                  <Button
+                    variant="danger-ghost"
+                    size="sm"
+                    icon="trash"
+                    disabled={reserved > 0}
+                    title={reserved > 0 ? 'Tidsluckan har reserveringar och kan inte tas bort.' : 'Ta bort tidslucka'}
+                    onClick={() => onDeleteSlot(slot)}
+                  >
+                    Ta bort
+                  </Button>
+                )}
+              </div>
             )}
           </div>
           {isAdmin && slot.note && <p className="mt-3 text-sm text-slate-500">{slot.note}</p>}
@@ -4545,6 +4562,26 @@
       toast.success(active ? 'Dagens tider öppnade.' : 'Dagens tider pausade.');
     }
 
+    async function deleteSlot(slot) {
+      const reserved = db.reservedBookingCountForSlot(slot.id);
+      if (reserved > 0) {
+        toast.error('Tidsluckan har redan förfrågningar eller bokningar. Pausa den istället.');
+        return;
+      }
+      const ok = confirm(`Ta bort tiden ${formatDateLong(slot.starts_at)} ${formatTime(slot.starts_at)}-${formatTime(slot.ends_at)} för ${serviceLabel(slot.service_type)}?`);
+      if (!ok) return;
+      const r = await db.deleteBookingAvailabilitySlot(slot.id, session.userId);
+      if (r?.error === 'HAS_RESERVATIONS') {
+        toast.error('Tidsluckan har redan förfrågningar eller bokningar. Pausa den istället.');
+        return;
+      }
+      if (r?.error) {
+        toast.error(r.message || 'Kunde inte ta bort tidsluckan.');
+        return;
+      }
+      toast.success('Tidsluckan är borttagen.');
+    }
+
     return (
       <div>
         <PageHeader
@@ -4588,6 +4625,7 @@
               slots={visibleSlots}
               getReservedCount={slot => db.reservedBookingCountForSlot(slot.id)}
               onToggleSlot={toggleSlot}
+              onDeleteSlot={deleteSlot}
               onToggleDay={toggleDaySlots}
             />
           </Card>
