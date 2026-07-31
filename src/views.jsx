@@ -398,7 +398,7 @@
     return (
       <div className="min-h-screen bg-white text-slate-900 p-4 pb-36 sm:p-6 sm:pb-6">
         <div className="max-w-4xl mx-auto">
-          <div className="flex items-center justify-between gap-3 mb-5">
+          <div className="flex items-center justify-between gap-3 mb-5 pr-16 md:pr-20 lg:pr-0">
             <div className="flex items-center gap-3">
               <BrandLogo size="md" />
               <div>

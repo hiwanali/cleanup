@@ -449,6 +449,92 @@ window.addEventListener('message', event => {
 });
 ```
 
+### Rekommenderad popup-placering för stäng-knapp
+
+Om bokningen öppnas i en popup/modal på `cleanup.nu` ska stäng-knappen inte ligga som en bred svart kapsel ovanpå iframens egna header. Det skapar visuell krock med `Steg 1 av 3`, särskilt på mobil.
+
+Rekommenderat:
+
+- använd en liten rund ikonknapp, minst `44x44px` för touch
+- placera den absolut i popupens övre högra hörn
+- låt den ligga utanför eller precis i kanten av iframe-ytan
+- ge iframen lite toppmarginal/padding om knappen ligger inne i samma vita modal
+
+```html
+<div class="cleanup-booking-modal" role="dialog" aria-modal="true" aria-label="Boka städning">
+  <button class="cleanup-booking-close" type="button" aria-label="Stäng bokningen">
+    ×
+  </button>
+
+  <iframe
+    id="cleanup-booking-frame"
+    src="https://www.logincleanup.app/CleanUp.html#/embed/booking"
+    title="Boka städning med CleanUp"
+    loading="lazy"
+  ></iframe>
+</div>
+
+<style>
+  .cleanup-booking-modal {
+    position: relative;
+    width: min(940px, calc(100vw - 24px));
+    max-height: min(92vh, 900px);
+    margin: 0 auto;
+    border-radius: 18px;
+    background: #fff;
+    overflow: hidden;
+    box-shadow: 0 24px 70px rgba(15, 23, 42, 0.28);
+  }
+
+  .cleanup-booking-close {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    z-index: 3;
+    width: 44px;
+    height: 44px;
+    border: 0;
+    border-radius: 999px;
+    background: #07142d;
+    color: #fff;
+    font-size: 28px;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-shadow: 0 10px 24px rgba(15, 23, 42, 0.18);
+  }
+
+  .cleanup-booking-modal iframe {
+    width: 100%;
+    min-height: 760px;
+    border: 0;
+    display: block;
+  }
+
+  @media (max-width: 640px) {
+    .cleanup-booking-modal {
+      width: 100vw;
+      max-height: 100dvh;
+      border-radius: 0;
+    }
+
+    .cleanup-booking-close {
+      top: calc(env(safe-area-inset-top, 0px) + 8px);
+      right: 8px;
+      width: 44px;
+      height: 44px;
+    }
+
+    .cleanup-booking-modal iframe {
+      min-height: 100dvh;
+      padding-top: env(safe-area-inset-top, 0px);
+    }
+  }
+</style>
+```
+
 Hostingkrav på `logincleanup.app`: sidan måste få ramas in från `cleanup.nu`. I Vercel görs detta med `Content-Security-Policy: frame-ancestors ...` och utan `X-Frame-Options: DENY`.
 
 ## Adminflöde i `logincleanup.app`
