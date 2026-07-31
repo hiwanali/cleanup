@@ -457,7 +457,7 @@ Rekommenderat:
 
 - använd en liten rund ikonknapp, minst `44x44px` för touch
 - placera den absolut i popupens övre högra hörn
-- låt den ligga utanför eller precis i kanten av iframe-ytan
+- låt den hänga lite utanför formulärets kant, inte ligga som en bred kapsel ovanpå headern
 - ge iframen lite toppmarginal/padding om knappen ligger inne i samma vita modal
 
 ```html
@@ -482,19 +482,24 @@ Rekommenderat:
     margin: 0 auto;
     border-radius: 18px;
     background: #fff;
-    overflow: hidden;
+    overflow: visible;
     box-shadow: 0 24px 70px rgba(15, 23, 42, 0.28);
   }
 
   .cleanup-booking-close {
     position: absolute;
-    top: 10px;
-    right: 10px;
+    top: 0;
+    right: 0;
+    transform: translate(34%, -34%);
     z-index: 3;
-    width: 44px;
-    height: 44px;
-    border: 0;
-    border-radius: 999px;
+    width: 44px !important;
+    min-width: 44px !important;
+    max-width: 44px !important;
+    height: 44px !important;
+    min-height: 44px !important;
+    padding: 0 !important;
+    border: 3px solid #fff;
+    border-radius: 999px !important;
     background: #07142d;
     color: #fff;
     font-size: 28px;
@@ -510,6 +515,7 @@ Rekommenderat:
     width: 100%;
     min-height: 760px;
     border: 0;
+    border-radius: inherit;
     display: block;
   }
 
@@ -521,8 +527,9 @@ Rekommenderat:
     }
 
     .cleanup-booking-close {
-      top: calc(env(safe-area-inset-top, 0px) + 8px);
-      right: 8px;
+      top: calc(env(safe-area-inset-top, 0px) + 10px);
+      right: 10px;
+      transform: none;
       width: 44px;
       height: 44px;
     }
