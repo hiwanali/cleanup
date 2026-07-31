@@ -4646,6 +4646,7 @@
     const [note, setNote] = useState('');
     const [repeatWeekly, setRepeatWeekly] = useState(false);
     const [repeatWeeks, setRepeatWeeks] = useState(8);
+    const [repeatIndefinitely, setRepeatIndefinitely] = useState(false);
     const [saving, setSaving] = useState(false);
 
     useEffect(() => {
@@ -4659,6 +4660,7 @@
       setNote('');
       setRepeatWeekly(false);
       setRepeatWeeks(8);
+      setRepeatIndefinitely(false);
       setSaving(false);
     }, [open]);
 
@@ -4702,7 +4704,13 @@
             return;
           }
         }
-        toast.success(occurrenceCount === 1 ? 'Tidsluckan är skapad.' : `${occurrenceCount} tidsluckor är skapade.`);
+        toast.success(
+          repeatIndefinitely
+            ? 'Tillsvidare är satt som rullande 52 veckor.'
+            : occurrenceCount === 1
+              ? 'Tidsluckan är skapad.'
+              : `${occurrenceCount} tidsluckor är skapade.`,
+        );
         onClose();
       } finally {
         setSaving(false);
@@ -4753,9 +4761,30 @@
         <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
           <Checkbox
             checked={repeatWeekly}
-            onChange={setRepeatWeekly}
+            onChange={next => {
+              setRepeatWeekly(next);
+              if (!next) setRepeatIndefinitely(false);
+            }}
             label={`Upprepa varje ${weekdayLabel(date) || 'vecka'}`}
           />
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <Button
+              variant={repeatIndefinitely ? 'primary' : 'outline'}
+              size="sm"
+              icon="refresh"
+              onClick={() => {
+                setRepeatWeekly(true);
+                setRepeatIndefinitely(true);
+                setRepeatWeeks(52);
+              }}
+            >
+              Tillsvidare
+            </Button>
+            {repeatIndefinitely && <Badge variant="brand">Rullande 52 veckor</Badge>}
+            <p className="text-xs text-slate-500">
+              Tillsvidare skapar ett års veckotider nu och kan förlängas igen vid behov.
+            </p>
+          </div>
           {repeatWeekly && (
             <div className="mt-3 grid md:grid-cols-2 gap-3">
               <Field label="Antal veckor" required hint="Max 52. Inkluderar valt startdatum.">
@@ -4764,12 +4793,19 @@
                   min="1"
                   max="52"
                   value={repeatWeeks}
-                  onChange={e => setRepeatWeeks(e.target.value)}
+                  onChange={e => {
+                    setRepeatWeeks(e.target.value);
+                    setRepeatIndefinitely(false);
+                  }}
                 />
               </Field>
               <div className="rounded-lg bg-white border border-slate-200 p-3 text-sm text-slate-600">
                 <p className="font-semibold text-slate-900">Skapas i kalendern</p>
-                <p className="mt-1">{validRepeat ? occurrenceCount : 0} tidsluckor, en per vecka.</p>
+                <p className="mt-1">
+                  {repeatIndefinitely
+                    ? '52 tidsluckor, en per vecka. Tanken är att schemat fortsätter rullande.'
+                    : `${validRepeat ? occurrenceCount : 0} tidsluckor, en per vecka.`}
+                </p>
               </div>
             </div>
           )}
