@@ -862,12 +862,12 @@
       { max: 30, rate: 53 },
       { max: 35, rate: 52 },
       { max: 45, rate: 49 },
-      { max: 50, rate: 47 },
-      { max: 67, rate: 45 },
-      { max: 77, rate: 42 },
-      { max: 99, rate: 40 },
+      { max: 50, rate: 45 },
+      { max: 67, rate: 42 },
+      { max: 77, rate: 37 },
+      { max: 99, rate: 35 },
     ];
-    return (tiers.find(tier => area <= tier.max) || tiers[tiers.length - 1]).rate;
+    return (tiers.find(tier => area <= tier.max) || { rate: 33 }).rate;
   }
 
   function PublicBookingTermsSummary({ serviceType }) {
