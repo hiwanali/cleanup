@@ -30,11 +30,13 @@ function writeConfig(outFile) {
     'https://bkmnlcdsbvpucpqmaycx.supabase.co';
 
   const anonKey =
-    process.env.SUPABASE_ANON_KEY ||
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-    process.env.SUPABASE_PUBLISHABLE_KEY ||
     process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+    process.env.SUPABASE_PUBLISHABLE_KEY ||
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+    process.env.SUPABASE_ANON_KEY ||
     '';
+
+  assertPublicSupabaseKey(anonKey);
 
   const body = `/* Auto-genererad – redigera inte för hand. Värden kommer från miljövariabler. */
 (function () {
@@ -48,6 +50,25 @@ function writeConfig(outFile) {
   fs.mkdirSync(path.dirname(outFile), { recursive: true });
   fs.writeFileSync(outFile, body, 'utf8');
   console.log('Wrote', outFile, anonKey ? '(anon key set)' : '(WARN: no anon key)');
+}
+
+function decodeJwtPayload(token) {
+  const parts = String(token || '').split('.');
+  if (parts.length !== 3) return null;
+  try {
+    const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const json = Buffer.from(base64, 'base64').toString('utf8');
+    return JSON.parse(json);
+  } catch (_) {
+    return null;
+  }
+}
+
+function assertPublicSupabaseKey(key) {
+  const payload = decodeJwtPayload(key);
+  if (payload?.role === 'service_role') {
+    throw new Error('SUPABASE_ANON_KEY points to a service_role key. Never expose service_role in frontend config.');
+  }
 }
 
 module.exports = { writeConfig };
