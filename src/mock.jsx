@@ -1685,6 +1685,21 @@
       return { ok: true };
     },
 
+    async sendCustomerLoginLink(customerId) {
+      const customer = db.customerById(customerId);
+      if (!customer) return { error: 'NOT_FOUND' };
+      const main = db.userById(customer.primary_contact_user_id);
+      if (!main || main.role !== 'customer' || !main.active) return { error: 'NO_ACTIVE_CONTACT' };
+
+      const persist = window.dbPersist && window.dbPersist.sendCustomerLoginLink;
+      if (!persist) return { ok: true, skipped: true };
+
+      const r = await persist({ customerId });
+      if (!r.ok) return { error: 'PERSIST_FAILED', message: r.message };
+
+      return { ok: true };
+    },
+
     async updateBookingRequestPricing(shiftId, actorUserId, { estimatedPriceSek, note = '' } = {}) {
       const bookingRequest = db.bookingRequestForShift(shiftId);
       if (!bookingRequest) return { error: 'NOT_FOUND' };

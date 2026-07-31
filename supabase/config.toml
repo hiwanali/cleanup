@@ -410,6 +410,11 @@ enabled = true
 verify_jwt = true
 entrypoint = "./functions/send-customer-portal-invite/index.ts"
 
+[functions.send-customer-login-link]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/send-customer-login-link/index.ts"
+
 [functions.send-notification-email]
 enabled = true
 verify_jwt = true

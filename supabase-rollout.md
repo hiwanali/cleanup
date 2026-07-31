@@ -693,6 +693,34 @@ Admin kan ocksa skicka/skicka om kundlanken fran bokningskortet pa passets detal
 
 Viktigt i Supabase Auth URL configuration: lagg till redirect URL for `https://www.logincleanup.app/CleanUp.html` sa magic-link-redirecten tillats.
 
+## 20.1 Kundportal: magic-link for manuellt skapad kund
+
+Syfte: adminskapad kund ska fa atkomst pa samma sakra satt som kund fran publik bokning: personlig magic-link till kundportalen, inte delat/default-losenord.
+
+Deploya Edge Function:
+
+```bash
+supabase functions deploy send-customer-login-link --project-ref bkmnlcdsbvpucpqmaycx --use-api
+```
+
+Secrets ar samma som for `send-customer-portal-invite`:
+
+- `SUPABASE_URL`
+- `SUPABASE_ANON_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `RESEND_API_KEY`
+- `RESEND_FROM`
+- `CUSTOMER_PORTAL_SITE_URL` - rekommenderat: `https://www.logincleanup.app/CleanUp.html`
+
+Flode:
+
+1. Admin skapar kund via `Admin -> Kunder -> Ny kund`.
+2. Admin oppnar kundens sida.
+3. Under `Huvudkontakt` klickar admin `Skicka kundlank`.
+4. `send-customer-login-link` kontrollerar att anroparen ar aktiv admin i samma org.
+5. Funktionen hamtar kundens huvudkontakt och genererar magic-link.
+6. Kunden landar pa `/kund/oversikt` via `portalRedirect`.
+
 ## 21. Kundportal fas 4: aktiv portalstatus
 
 Syfte: nar kunden faktiskt oppnar magic-linken och landar pa sitt pass ska bokningsforfragan markeras som aktiv i admin.

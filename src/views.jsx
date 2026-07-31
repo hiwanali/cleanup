@@ -7693,10 +7693,30 @@
     useDb();
     const [editOpen, setEditOpen] = useState(false);
     const [createPropertyOpen, setCreatePropertyOpen] = useState(false);
+    const [customerLinkSending, setCustomerLinkSending] = useState(false);
     const cust = db.customerById(customerId);
     if (!cust) return <ComingSoonView title="Kund saknas" section="—" />;
     const props = db.state.properties.filter(p => p.customer_id === cust.id);
     const main = db.userById(cust.primary_contact_user_id);
+    const canSendCustomerLink = !!main && main.role === 'customer' && main.active;
+
+    async function sendCustomerLink() {
+      setCustomerLinkSending(true);
+      try {
+        const r = await db.sendCustomerLoginLink(cust.id);
+        if (r?.ok) {
+          toast.success('Kundlänk skickad.');
+        } else if (r?.error === 'NO_ACTIVE_CONTACT') {
+          toast.error('Kunden saknar aktiv huvudkontakt.');
+        } else if (r?.error === 'PERSIST_FAILED') {
+          toast.error('Kundlänken kunde inte skickas just nu.');
+        } else {
+          toast.error('Kundlänken kunde inte skickas.');
+        }
+      } finally {
+        setCustomerLinkSending(false);
+      }
+    }
 
     return (
       <div>
@@ -7765,7 +7785,20 @@
             <Card padding="md">
               <div className="flex items-center justify-between gap-2 mb-3">
                 <h3 className="font-bold text-slate-900">Huvudkontakt</h3>
-                <Button variant="ghost" size="sm" icon="edit" onClick={() => setEditOpen(true)}>Redigera</Button>
+                <div className="flex items-center gap-1.5">
+                  {canSendCustomerLink && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      icon="send"
+                      loading={customerLinkSending}
+                      onClick={sendCustomerLink}
+                    >
+                      Skicka kundlänk
+                    </Button>
+                  )}
+                  <Button variant="ghost" size="sm" icon="edit" onClick={() => setEditOpen(true)}>Redigera</Button>
+                </div>
               </div>
               {main ? (
                 <div className="flex items-center gap-3">
@@ -7777,6 +7810,11 @@
                   </div>
                 </div>
               ) : <p className="text-sm text-slate-500">Ingen huvudkontakt satt.</p>}
+              {main && (
+                <p className="mt-3 text-xs leading-relaxed text-slate-500">
+                  Kundlänken skickas som magic-link till huvudkontaktens e-post och öppnar kundportalen.
+                </p>
+              )}
             </Card>
 
             <AdminCustomerEmployeesCard customer={cust} properties={props} session={session} />

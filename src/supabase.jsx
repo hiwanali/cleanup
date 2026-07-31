@@ -240,6 +240,28 @@
     return { ok: true, data };
   }
 
+  async function persistSendCustomerLoginLink({ customerId }) {
+    if (!enabled || !sb || !isUuid(customerId)) {
+      return { ok: true, skipped: true };
+    }
+
+    const { data, error } = await sb.functions.invoke('send-customer-login-link', {
+      body: { customer_id: customerId },
+    });
+
+    if (error) {
+      console.warn('[persist] customer login link:', error.message);
+      return { ok: false, message: error.message };
+    }
+
+    if (data?.error) {
+      console.warn('[persist] customer login link:', data.error);
+      return { ok: false, code: data.error, message: data.error };
+    }
+
+    return { ok: true, data };
+  }
+
   async function persistUpdateBookingRequestPricing({ requestId, estimatedPriceSek, addons }) {
     if (!enabled || !sb || !isUuid(requestId)) {
       return { ok: true, skipped: true };
@@ -2092,6 +2114,7 @@
     updateBookingAvailabilitySlot: persistUpdateBookingAvailabilitySlot,
     deleteBookingAvailabilitySlot: persistDeleteBookingAvailabilitySlot,
     sendCustomerPortalInvite: persistSendCustomerPortalInvite,
+    sendCustomerLoginLink: persistSendCustomerLoginLink,
     updateBookingRequestPricing: persistUpdateBookingRequestPricing,
     markCustomerPortalActive: persistMarkCustomerPortalActive,
     updateSelfProfile: persistUpdateSelfProfile,
