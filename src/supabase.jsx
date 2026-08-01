@@ -39,6 +39,7 @@
     customer_employees: ['created_at'],
     customer_employee_properties: [],
     properties: ['created_at', 'updated_at'],
+    property_access_info: ['updated_at'],
     property_cleaners: ['created_at'],
     recurring_schedules: ['created_at'],
     shifts: ['start_at', 'end_at', 'original_start_at', 'original_end_at', 'checked_in_at', 'checked_out_at', 'sick_finalized_at', 'created_at', 'updated_at'],
@@ -98,6 +99,7 @@
       customer_employees,
       customer_employee_properties,
       propertiesRaw,
+      property_access_info,
       property_cleaners,
       recurring_schedules,
       shifts,
@@ -121,6 +123,7 @@
       fetchTable('customer_employee_properties'),
       // Kundroller läser objekt via vyn (utan access_info)
       isCustomerRole ? fetchTable('properties', { source: 'properties_customer' }) : fetchTable('properties'),
+      fetchTable('property_access_info'),
       fetchTable('property_cleaners'),
       fetchTable('recurring_schedules'),
       fetchTable('shifts'),
@@ -139,8 +142,11 @@
       fetchTable('booking_requests'),
     ]);
 
-    // Vyn saknar access_info – lägg till tom sträng så vy-koden inte kraschar
-    const properties = propertiesRaw.map(p => ('access_info' in p ? p : { ...p, access_info: '' }));
+    // Nyckel/larm ligger i separat RLS-skyddad tabell. Kundroller får tomt värde.
+    const accessInfoByProperty = new Map(
+      (property_access_info || []).map(row => [row.property_id, row.access_info || '']),
+    );
+    const properties = propertiesRaw.map(p => ({ ...p, access_info: accessInfoByProperty.get(p.id) || '' }));
 
     return {
       organizations,
@@ -410,14 +416,27 @@
     if ('name' in fields) row.name = fields.name;
     if ('address' in fields) row.address = fields.address ?? '';
     if ('area_sqm' in fields) row.area_sqm = fields.area_sqm;
-    if ('access_info' in fields) row.access_info = fields.access_info ?? '';
     if ('notes' in fields) row.notes = fields.notes ?? '';
 
-    const { error } = await sb.from('properties').update(row).eq('id', propertyId);
+    if (Object.keys(row).length > 0) {
+      const { error } = await sb.from('properties').update(row).eq('id', propertyId);
 
-    if (error) {
-      console.error('[persist] updateProperty:', error.message);
-      return { ok: false, message: error.message };
+      if (error) {
+        console.error('[persist] updateProperty:', error.message);
+        return { ok: false, message: error.message };
+      }
+    }
+
+    if (Object.prototype.hasOwnProperty.call(fields, 'access_info')) {
+      const { error: accessErr } = await sb.from('property_access_info').upsert({
+        property_id: propertyId,
+        access_info: fields.access_info ?? '',
+      });
+
+      if (accessErr) {
+        console.error('[persist] updateProperty access_info:', accessErr.message);
+        return { ok: false, message: accessErr.message };
+      }
     }
 
     return { ok: true };
@@ -558,13 +577,25 @@
       name: property.name,
       address: property.address || '',
       area_sqm: property.area_sqm,
-      access_info: property.access_info || '',
       notes: property.notes || '',
     });
 
     if (error) {
       console.error('[persist] createProperty:', error.message);
       return { ok: false, message: error.message };
+    }
+
+    if (property.access_info) {
+      const { error: accessErr } = await sb.from('property_access_info').upsert({
+        property_id: property.id,
+        access_info: property.access_info || '',
+      });
+
+      if (accessErr) {
+        console.error('[persist] createProperty access_info:', accessErr.message);
+        await sb.from('properties').delete().eq('id', property.id);
+        return { ok: false, message: accessErr.message };
+      }
     }
 
     const ids = (cleanerUserIds || []).filter(isUuid);
