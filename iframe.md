@@ -455,15 +455,18 @@ Om bokningen öppnas i en popup/modal på `cleanup.nu` ska stäng-knappen inte l
 
 Rekommenderat:
 
-- använd en liten rund ikonknapp, minst `44x44px` för touch
-- placera den absolut i popupens övre högra hörn
-- låt den hänga lite utanför formulärets kant, inte ligga som en bred kapsel ovanpå headern
+- använd en cirkulär ikonknapp, minst `44x44px` för touch
+- placera den absolut i popupens övre högra hörn, ovanför iframen
+- låt den hänga lite utanför formulärets kant på desktop, men ligga tryggt innanför safe-area på mobil
+- nolla globala knappstilar så den inte kan bli en bred pill/kapsel
 - ge iframen lite toppmarginal/padding om knappen ligger inne i samma vita modal
 
 ```html
 <div class="cleanup-booking-modal" role="dialog" aria-modal="true" aria-label="Boka städning">
   <button class="cleanup-booking-close" type="button" aria-label="Stäng bokningen">
-    ×
+    <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+      <path d="M6 6l12 12M18 6 6 18" />
+    </svg>
   </button>
 
   <iframe
@@ -487,28 +490,62 @@ Rekommenderat:
   }
 
   .cleanup-booking-close {
+    appearance: none;
     position: absolute;
-    top: 0;
-    right: 0;
-    transform: translate(34%, -34%);
+    top: 12px;
+    right: 12px;
+    transform: translate(42%, -42%);
     z-index: 3;
-    width: 44px !important;
-    min-width: 44px !important;
-    max-width: 44px !important;
-    height: 44px !important;
-    min-height: 44px !important;
+    inline-size: 48px !important;
+    min-inline-size: 48px !important;
+    max-inline-size: 48px !important;
+    block-size: 48px !important;
+    min-block-size: 48px !important;
+    max-block-size: 48px !important;
+    aspect-ratio: 1 / 1;
     padding: 0 !important;
+    margin: 0 !important;
     border: 3px solid #fff;
-    border-radius: 999px !important;
+    border-radius: 50% !important;
     background: #07142d;
     color: #fff;
-    font-size: 28px;
-    line-height: 1;
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    flex: 0 0 auto;
+    overflow: hidden;
     cursor: pointer;
-    box-shadow: 0 10px 24px rgba(15, 23, 42, 0.18);
+    touch-action: manipulation;
+    box-shadow: 0 12px 28px rgba(15, 23, 42, 0.24);
+    transition: background-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+  }
+
+  .cleanup-booking-close svg {
+    inline-size: 22px;
+    block-size: 22px;
+    display: block;
+    flex: 0 0 auto;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2.5;
+    stroke-linecap: round;
+  }
+
+  .cleanup-booking-close:hover {
+    background: #0b1b3a;
+    box-shadow: 0 14px 32px rgba(15, 23, 42, 0.28);
+  }
+
+  .cleanup-booking-close:active {
+    transform: translate(42%, -42%) scale(0.96);
+  }
+
+  .cleanup-booking-close:focus-visible {
+    outline: 0;
+    box-shadow:
+      0 0 0 3px rgba(255, 255, 255, 0.95),
+      0 0 0 6px rgba(37, 99, 235, 0.55),
+      0 14px 32px rgba(15, 23, 42, 0.28);
   }
 
   .cleanup-booking-modal iframe {
@@ -530,8 +567,16 @@ Rekommenderat:
       top: calc(env(safe-area-inset-top, 0px) + 10px);
       right: 10px;
       transform: none;
-      width: 44px;
-      height: 44px;
+      inline-size: 48px !important;
+      min-inline-size: 48px !important;
+      max-inline-size: 48px !important;
+      block-size: 48px !important;
+      min-block-size: 48px !important;
+      max-block-size: 48px !important;
+    }
+
+    .cleanup-booking-close:active {
+      transform: scale(0.96);
     }
 
     .cleanup-booking-modal iframe {
