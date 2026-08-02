@@ -445,6 +445,24 @@
     return value === true || value === 'true' || value === 1 || value === '1';
   }
 
+  function publicBookingIroningSummary(addons = {}) {
+    const items = addons.home_ironing_items && typeof addons.home_ironing_items === 'object'
+      ? addons.home_ironing_items
+      : {};
+    return [
+      ['shirts', 'skjortor'],
+      ['tshirts', 'T-shirts'],
+      ['pants', 'byxor'],
+      ['suitPants', 'kostymbyxor'],
+    ]
+      .map(([key, label]) => {
+        const count = Math.max(0, Number(items[key] || 0));
+        return count > 0 ? `${count} ${label}` : '';
+      })
+      .filter(Boolean)
+      .join('; ');
+  }
+
   function serviceChecklistForBooking(serviceType, addons = {}) {
     const base = PUBLIC_BOOKING_SERVICE_CHECKLISTS[serviceType] || [];
     const titles = base.slice();
@@ -454,9 +472,12 @@
     }
     if (serviceType === 'standard_cleaning' && truthyAddon(addons.home_ironing)) {
       const count = Math.max(0, Number(addons.home_ironing_item_count || 0));
-      titles.push(`Tillägg: stryk kläder${count > 0 ? ` (${count} plagg)` : ''}`);
+      const summary = publicBookingIroningSummary(addons);
+      if (summary && count > 0) titles.push(`Tillägg: stryk kläder (${count} plagg: ${summary})`);
+      else if (summary) titles.push(`Tillägg: stryk kläder (${summary})`);
+      else titles.push(`Tillägg: stryk kläder${count > 0 ? ` (${count} plagg)` : ''}`);
     }
-    if (truthyAddon(addons.windows)) {
+    if (truthyAddon(addons.windows) && serviceType !== 'moving_cleaning') {
       const count = Math.max(1, Number(addons.window_count || 1));
       titles.push(`Tillägg: fönsterputs enligt överenskommelse (${count} fönster)`);
     }

@@ -92,6 +92,7 @@
     const me = users.find(u => u.id === authUserId);
     const role = me ? me.role : 'customer';
     const isCustomerRole = role === 'customer' || role === 'customer_employee';
+    const canReadBookingRequests = role === 'admin' || isCustomerRole;
 
     const [
       organizations,
@@ -139,7 +140,7 @@
       fetchTable('thread_reads'),
       fetchTable('shift_requests'),
       fetchTable('booking_availability_slots'),
-      fetchTable('booking_requests'),
+      canReadBookingRequests ? fetchTable('booking_requests') : Promise.resolve([]),
     ]);
 
     // Nyckel/larm ligger i separat RLS-skyddad tabell. Kundroller får tomt värde.

@@ -26,6 +26,7 @@ type BookingBody = {
   message?: unknown;
   website?: unknown;
   company?: unknown;
+  form_started_at?: unknown;
 };
 
 function allowedOrigins(): string[] {
@@ -55,7 +56,7 @@ function json(req: Request, body: unknown, status = 200): Response {
 
 function rejectBadOrigin(req: Request): Response | null {
   const origin = req.headers.get("origin");
-  if (!origin) return null;
+  if (!origin) return json(req, { error: "Origin not allowed" }, 403);
   if (allowedOrigins().includes(origin)) return null;
   return json(req, { error: "Origin not allowed" }, 403);
 }
@@ -96,6 +97,18 @@ function asIsoDateString(value: unknown): string | null {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return null;
   return parsed.toISOString();
+}
+
+function validateSubmissionTiming(value: unknown): string | null {
+  const submittedAt = Date.now();
+  const startedAtIso = asIsoDateString(value);
+  if (!startedAtIso) return "missing_form_started_at";
+
+  const startedAt = new Date(startedAtIso).getTime();
+  const ageMs = submittedAt - startedAt;
+  if (ageMs < 4000) return "form_submitted_too_fast";
+  if (ageMs > 24 * 60 * 60 * 1000) return "form_session_expired";
+  return null;
 }
 
 function sourceDomain(req: Request): string {
@@ -200,6 +213,11 @@ Deno.serve(async (req) => {
   // Honeypot fields. Return success-shaped response but do not create records.
   if (asString(body.website, 120) || asString(body.company, 120)) {
     return json(req, { ok: true, status: "received" });
+  }
+
+  const timingError = validateSubmissionTiming(body.form_started_at);
+  if (timingError) {
+    return json(req, { error: timingError }, 400);
   }
 
   const parsed = validate(body);

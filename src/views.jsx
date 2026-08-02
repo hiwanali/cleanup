@@ -72,6 +72,7 @@
     const [error, setError] = useState('');
     const [confirmation, setConfirmation] = useState(null);
     const [choosingService, setChoosingService] = useState(true);
+    const [formStartedAt] = useState(() => new Date().toISOString());
     const [form, setForm] = useState({
       serviceType: '',
       homeFrequency: 'one_time',
@@ -99,6 +100,7 @@
       consent: false,
       policyAccepted: false,
       website: '',
+      company: '',
     });
 
     const selectedSlot = slots.find(s => s.id === form.selectedSlotId);
@@ -337,6 +339,8 @@
             estimated_price_sek: estimatedPrice,
             message: form.message,
             website: form.website,
+            company: form.company,
+            form_started_at: formStartedAt,
           }),
         });
         const data = await res.json().catch(() => ({}));
@@ -685,7 +689,8 @@
                       <Textarea id="public-booking-message" aria-label="Kommentar" rows={3} value={form.message} onChange={e => update('message', e.target.value)} />
                     </Field>
                   </div>
-                  <input className="hidden" tabIndex="-1" autoComplete="off" value={form.website} onChange={e => update('website', e.target.value)} />
+                  <input className="hidden" tabIndex="-1" autoComplete="off" aria-hidden="true" value={form.website} onChange={e => update('website', e.target.value)} />
+                  <input className="hidden" tabIndex="-1" autoComplete="off" aria-hidden="true" value={form.company} onChange={e => update('company', e.target.value)} />
                   <PublicBookingTermsSummary serviceType={form.serviceType} />
                   <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
                     <p className="text-sm font-bold text-slate-900">Villkor och personuppgifter</p>
