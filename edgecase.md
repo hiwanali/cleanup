@@ -160,7 +160,7 @@ Berörda ytor:
 
 ## Fas 5 - Separera telefontider från städtider
 
-Status: Ej startad
+Status: Klar
 
 Edge case: Övriga tjänster ska boka telefontid, inte råka använda samma logik som städuppdrag eller visa pris.
 
@@ -168,11 +168,23 @@ Slutmål: Hemstädning, flyttstädning och storstädning har prisflöde. Övriga
 
 Steg:
 
-1. Lista vilka tjänster som är prissatta respektive offert via samtal.
-2. Säkerställ att service type styr rätt flöde i widgeten.
-3. Separera availability för phone consultation från cleaning availability.
-4. Sätt 1h buffer för telefontider.
-5. Kontrollera att admin ser ärendet som telefontidsförfrågan, inte städpass.
+1. Klart: widgetens servicekatalog skiljer på `priced` och `quote`.
+2. Klart: hemstädning, storstädning och flyttstädning visar kalkylator/pris.
+3. Klart: fönsterputs, kontorsstädning, trappstädning, byggstädning och byggtjänster bokas som telefontid utan pris.
+4. Klart: telefontider skickas med `request_kind = phone_quote_request`, 60 minuters samtalstid och 60 minuters buffer.
+5. Klart: databasen skapar inte `properties`, `shifts`, checklistor eller `shift_events` för telefontidsförfrågningar.
+6. Klart: admin-dashboarden visar telefontidsförfrågningar separat med ring/mejl, och de ligger inte i städarnas schema.
+
+Implementerat:
+
+- Ny migration: `supabase/migrations/20260803044341_separate_phone_quote_requests.sql`.
+- `public.create_public_booking_request(...)` behåller samma interface, men implementationen grenar på `addons.request_kind`.
+- `price_booking_request` skapar fortsatt lead-objekt, `Planerat` pass, checklista, shift request och adminnotis.
+- `phone_quote_request` skapar bara en `booking_requests`-rad med `shift_id = null`, `status = new` och adminnotis.
+- `booking_requests` med `status = new` räknas fortsatt som aktiv reservation, så telefontiden blockeras med buffer.
+- `src/mock.jsx` har `pendingPhoneQuoteRequests()` och `adminActionables()` returnerar nu `phoneQuotes`.
+- `src/views.jsx` visar `Telefontider för offert` på admin-dashboarden.
+- `public-booking-request` är redeployad från lokal kod så Edge Function är synkad med `form_started_at` och nya RPC-beteendet.
 
 Verifiering:
 
@@ -180,6 +192,13 @@ Verifiering:
 - Övriga tjänster visar inte pris.
 - Telefontid skapas som rätt typ av förfrågan.
 - Städarnas schema fylls inte av rena samtalsbokningar om de inte ska det.
+- `npm run build` går igenom.
+- Migrationen är körd mot länkad Supabase med `supabase db query --linked --file`.
+- Rollback-test för `stair_cleaning` + `phone_quote_request` skapar `booking_requests.status = new`, `shift_id = null` och ingen ny rad i `shifts`.
+- Rollback-test för `standard_cleaning` + `price_booking_request` skapar fortsatt `booking_requests.status = linked_to_shift` och en ny `shifts`-rad.
+- Prissatt SQL-test kräver `request.jwt.claim.role = service_role`, eftersom checklistfunktionen är hårdad för admin/service_role.
+- Live Edge-test mot `public-booking-request` med temporär `stair_cleaning`-slot returnerar `status = new`, `request_kind = phone_quote_request`, `shift_id = null`, `property_id = null` och `estimated_price_sek = null`.
+- Edge-testets temporära `booking_request`, adminnotis och availability-slot raderades efter verifiering.
 
 Berörda ytor:
 

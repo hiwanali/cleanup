@@ -1157,6 +1157,18 @@
       return false;
     },
 
+    pendingPhoneQuoteRequests() {
+      return state.booking_requests
+        .filter(r => {
+          const addons = r.addons && typeof r.addons === 'object' ? r.addons : {};
+          const requestKind = addons.request_kind || (addons.phone_quote ? 'phone_quote_request' : 'price_booking_request');
+          return requestKind === 'phone_quote_request'
+            && !r.shift_id
+            && ['new', 'linked_to_shift'].includes(r.status);
+        })
+        .sort((a, b) => new Date(a.requested_starts_at) - new Date(b.requested_starts_at));
+    },
+
     adminActionables() {
       const sick = state.shifts.filter(s => s.status === 'Sjukanmäld' && !s.sick_finalized_at);
       const openIncidents = state.incidents.filter(i => i.status === 'open');
@@ -1164,7 +1176,8 @@
       const planned = state.shifts
         .filter(s => s.status === 'Planerat')
         .sort((a, b) => new Date(a.start_at) - new Date(b.start_at));
-      return { sick, openIncidents, todayShifts, planned };
+      const phoneQuotes = db.pendingPhoneQuoteRequests();
+      return { sick, openIncidents, todayShifts, planned, phoneQuotes };
     },
 
     /* —— Förhandsvisning kundledighet —— */

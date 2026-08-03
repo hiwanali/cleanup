@@ -8473,7 +8473,7 @@
   function AdminDashboardView({ session, onNavigate }) {
     const [createShiftOpen, setCreateShiftOpen] = useState(false);
     useDb();
-    const { sick, openIncidents, todayShifts, planned } = db.adminActionables();
+    const { sick, openIncidents, todayShifts, planned, phoneQuotes } = db.adminActionables();
     const totalCleaners = db.state.users.filter(u => u.role === 'cleaner' && u.active).length;
     const totalCustomers = db.state.customers.length;
     const todayAll = db.state.shifts.filter(s => formatDateShort(s.start_at) === formatDateShort(new Date()));
@@ -8496,7 +8496,7 @@
           <Stat label="Pass idag" value={todayAll.length} hint={`${todayAll.filter(s => s.status === 'Utfört').length} utförda`} icon="calendar" tone="brand" />
           <Stat label="Sjukanmälda" value={sick.length} hint={sick.length ? 'Kräver åtgärd' : 'Inget just nu'} icon="alert-circle" tone="amber" />
           <Stat label="Öppna avvikelser" value={openIncidents.length} icon="alert-triangle" tone="rose" />
-          <Stat label="Aktiva städare" value={totalCleaners} hint={`${totalCustomers} kunder`} icon="users" tone="emerald" />
+          <Stat label="Telefontider" value={phoneQuotes.length} hint={`${totalCleaners} aktiva städare · ${totalCustomers} kunder`} icon="phone" tone="emerald" />
         </div>
 
         <h2 className="text-lg font-bold text-slate-900 mb-3 flex items-center gap-2">
@@ -8504,12 +8504,25 @@
           Kräver din åtgärd
         </h2>
 
-        {sick.length === 0 && openIncidents.length === 0 && planned.length === 0 && todayShifts.length === 0 ? (
+        {sick.length === 0 && openIncidents.length === 0 && planned.length === 0 && phoneQuotes.length === 0 && todayShifts.length === 0 ? (
           <Card padding="lg">
             <EmptyState icon="check-circle" title="Allt är under kontroll" description="Inga väntande godkännanden, sjukanmälda pass eller öppna avvikelser just nu." />
           </Card>
         ) : (
           <div className="space-y-6">
+            {phoneQuotes.length > 0 && (
+              <section>
+                <h3 className="text-sm font-bold text-slate-700 mb-2 flex items-center gap-2">
+                  <Icon name="phone" className="w-4 h-4 text-emerald-600" />
+                  Telefontider för offert <Badge variant="emerald">{phoneQuotes.length}</Badge>
+                </h3>
+                <div className="grid md:grid-cols-2 gap-3">
+                  {phoneQuotes.map(request => (
+                    <PhoneQuoteRequestCard key={request.id} request={request} />
+                  ))}
+                </div>
+              </section>
+            )}
             {todayShifts.length > 0 && (
               <section>
                 <h3 className="text-sm font-bold text-slate-700 mb-2 flex items-center gap-2">
@@ -8584,6 +8597,50 @@
 
         <CreateShiftModal open={createShiftOpen} onClose={() => setCreateShiftOpen(false)} session={session} />
       </div>
+    );
+  }
+
+  function PhoneQuoteRequestCard({ request }) {
+    const addons = request?.addons && typeof request.addons === 'object' ? request.addons : {};
+    return (
+      <Card padding="md" className="border-emerald-100 bg-emerald-50/30">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <Badge variant="emerald">Telefontid</Badge>
+              <span className="text-xs font-semibold text-slate-500">{serviceLabel(request.service_type)}</span>
+            </div>
+            <p className="font-bold text-slate-900">{request.customer_name}</p>
+            <p className="mt-1 text-sm text-slate-700">
+              {formatDateLong(request.requested_starts_at)} · {formatTime(request.requested_starts_at)}-{formatTime(request.requested_ends_at)}
+            </p>
+            <p className="mt-1 text-sm text-slate-600">{request.address}{request.city ? `, ${request.city}` : ''}</p>
+            {request.message && <p className="mt-3 line-clamp-3 rounded-xl bg-white/80 p-3 text-sm text-slate-700 ring-1 ring-emerald-100">{request.message}</p>}
+            <p className="mt-3 text-xs text-emerald-900/75">
+              Ärendet är inte ett städpass och syns därför inte i städarnas schema.
+            </p>
+          </div>
+          <div className="flex flex-col gap-2">
+            <a
+              href={`tel:${request.customer_phone}`}
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50"
+            >
+              <Icon name="phone" className="h-4 w-4" />
+              Ring
+            </a>
+            <a
+              href={`mailto:${request.customer_email}`}
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50"
+            >
+              <Icon name="mail" className="h-4 w-4" />
+              Mejla
+            </a>
+          </div>
+        </div>
+        {addons.booking_buffer_minutes && (
+          <p className="mt-3 text-[11px] text-slate-500">Buffer: {addons.booking_buffer_minutes} minuter.</p>
+        )}
+      </Card>
     );
   }
 
