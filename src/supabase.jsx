@@ -54,6 +54,7 @@
     messages: ['created_at'],
     thread_reads: ['last_read_at'],
     shift_requests: ['created_at'],
+    booking_availability_series: ['created_at', 'updated_at'],
     booking_availability_slots: ['starts_at', 'ends_at', 'created_at', 'updated_at'],
     booking_requests: ['requested_starts_at', 'requested_ends_at', 'portal_access_created_at', 'portal_invited_at', 'portal_last_magic_link_sent_at', 'created_at', 'updated_at'],
   };
@@ -65,6 +66,10 @@
     });
     // Postgres time → 'HH:MM' (mocken använder kort form)
     if (table === 'recurring_schedules') {
+      if (typeof row.start_time === 'string') row.start_time = row.start_time.slice(0, 5);
+      if (typeof row.end_time === 'string') row.end_time = row.end_time.slice(0, 5);
+    }
+    if (table === 'booking_availability_series') {
       if (typeof row.start_time === 'string') row.start_time = row.start_time.slice(0, 5);
       if (typeof row.end_time === 'string') row.end_time = row.end_time.slice(0, 5);
     }
@@ -115,6 +120,7 @@
       messages,
       thread_reads,
       shift_requests,
+      booking_availability_series,
       booking_availability_slots,
       booking_requests,
     ] = await Promise.all([
@@ -139,6 +145,7 @@
       fetchTable('messages'),
       fetchTable('thread_reads'),
       fetchTable('shift_requests'),
+      fetchTable('booking_availability_series'),
       fetchTable('booking_availability_slots'),
       canReadBookingRequests ? fetchTable('booking_requests') : Promise.resolve([]),
     ]);
@@ -170,6 +177,7 @@
       messages,
       thread_reads,
       shift_requests,
+      booking_availability_series,
       booking_availability_slots,
       booking_requests,
     };
@@ -2035,6 +2043,36 @@
     return { ok: true, slotId: data?.id };
   }
 
+  async function persistCreateBookingAvailabilitySeries({ series }) {
+    if (!enabled || !sb || !series) {
+      return { ok: true, skipped: true };
+    }
+
+    const { data, error } = await sb.rpc('admin_create_booking_availability_series', {
+      p_org_id: series.org_id,
+      p_starts_on: series.starts_on,
+      p_start_time: series.start_time,
+      p_end_time: series.end_time,
+      p_capacity: series.capacity,
+      p_service_type: series.service_type,
+      p_note: series.note || '',
+      p_created_by_user_id: series.created_by_user_id,
+      p_horizon_weeks: series.horizon_weeks || 12,
+    });
+
+    if (error) {
+      console.error('[persist] createBookingAvailabilitySeries:', error.message);
+      return { ok: false, message: error.message };
+    }
+
+    return {
+      ok: true,
+      seriesId: data?.series_id,
+      materializedUntil: data?.materialized_until,
+      slotsCreatedOrUpdated: data?.slots_created_or_updated,
+    };
+  }
+
   async function persistUpdateBookingAvailabilitySlot({ slotId, fields }) {
     if (!enabled || !sb || !isUuid(slotId)) {
       return { ok: true, skipped: true };
@@ -2143,6 +2181,7 @@
     updateCleaner: persistUpdateCleaner,
     setCleanerProperties: persistSetCleanerProperties,
     createBookingAvailabilitySlot: persistCreateBookingAvailabilitySlot,
+    createBookingAvailabilitySeries: persistCreateBookingAvailabilitySeries,
     updateBookingAvailabilitySlot: persistUpdateBookingAvailabilitySlot,
     deleteBookingAvailabilitySlot: persistDeleteBookingAvailabilitySlot,
     sendCustomerPortalInvite: persistSendCustomerPortalInvite,

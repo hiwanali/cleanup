@@ -49,10 +49,31 @@
     x.setDate(x.getDate() + n);
     return x;
   }
+  function addWeeks(d, n) {
+    return addDays(d, n * 7);
+  }
   function setTime(d, hh, mm) {
     const x = new Date(d);
     x.setHours(hh, mm, 0, 0);
     return x;
+  }
+  function dateInput(d) {
+    const x = new Date(d);
+    const y = x.getFullYear();
+    const m = String(x.getMonth() + 1).padStart(2, '0');
+    const day = String(x.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+  function parseClock(value) {
+    const [hh, mm] = String(value || '').split(':').map(Number);
+    return {
+      hh: Number.isFinite(hh) ? hh : 0,
+      mm: Number.isFinite(mm) ? mm : 0,
+    };
+  }
+  function combineDateAndTime(date, time) {
+    const { hh, mm } = parseClock(time);
+    return setTime(new Date(`${date}T12:00:00`), hh, mm);
   }
   function isoDay(d) {
     // sv-vecka: må=0 ... sö=6
@@ -105,6 +126,7 @@
     messages: [],
     thread_reads: [],
     shift_requests: [],
+    booking_availability_series: [],
     booking_availability_slots: [],
     booking_requests: [],
   };
@@ -661,6 +683,91 @@
     reservedBookingCountForSlot(slotId) {
       const active = new Set(['new', 'linked_to_shift', 'approved']);
       return state.booking_requests.filter(r => r.availability_slot_id === slotId && active.has(r.status)).length;
+    },
+
+    async createBookingAvailabilitySeries({
+      startsOn,
+      startTime,
+      endTime,
+      capacity = 1,
+      serviceType = 'standard_cleaning',
+      note = '',
+      actorUserId,
+      horizonWeeks = 12,
+    }) {
+      const actor = db.userById(actorUserId);
+      if (!actor || actor.role !== 'admin') return { error: 'FORBIDDEN' };
+      const numericCapacity = Number(capacity);
+      const numericHorizon = Number(horizonWeeks);
+      const baseStart = combineDateAndTime(startsOn, startTime);
+      const baseEnd = combineDateAndTime(startsOn, endTime);
+      if (!startsOn || Number.isNaN(baseStart.getTime()) || Number.isNaN(baseEnd.getTime()) || baseEnd <= baseStart) return { error: 'INVALID_TIME' };
+      if (!Number.isInteger(numericCapacity) || numericCapacity < 1 || numericCapacity > 20) return { error: 'INVALID_CAPACITY' };
+      if (!Number.isInteger(numericHorizon) || numericHorizon < 4 || numericHorizon > 52) return { error: 'INVALID_HORIZON' };
+
+      const series = {
+        id: newId(),
+        org_id: actor.org_id || state.organizations[0]?.id,
+        service_type: (serviceType || '').trim() || 'standard_cleaning',
+        weekday: isoDay(baseStart),
+        starts_on: startsOn,
+        ends_on: null,
+        start_time: startTime,
+        end_time: endTime,
+        capacity: numericCapacity,
+        active: true,
+        note: (note || '').trim(),
+        horizon_weeks: numericHorizon,
+        materialized_until: dateInput(addWeeks(baseStart, numericHorizon - 1)),
+        created_by_user_id: actorUserId,
+        created_at: new Date(),
+        updated_at: new Date(),
+      };
+
+      const createdSlots = [];
+      for (let i = 0; i < numericHorizon; i += 1) {
+        const starts_at = addWeeks(baseStart, i);
+        const ends_at = addWeeks(baseEnd, i);
+        if (starts_at <= new Date()) continue;
+        createdSlots.push({
+          id: newId(),
+          org_id: series.org_id,
+          series_id: series.id,
+          starts_at,
+          ends_at,
+          capacity: numericCapacity,
+          service_type: series.service_type,
+          active: true,
+          note: series.note,
+          created_by_user_id: actorUserId,
+          created_at: new Date(),
+          updated_at: new Date(),
+        });
+      }
+
+      state.booking_availability_series.push(series);
+      state.booking_availability_slots.push(...createdSlots);
+      bump();
+
+      const persist = window.dbPersist && window.dbPersist.createBookingAvailabilitySeries;
+      if (persist && window.SUPABASE_ENABLED) {
+        const r = await persist({ series });
+        if (!r.ok) {
+          state.booking_availability_series = state.booking_availability_series.filter(s => s.id !== series.id);
+          state.booking_availability_slots = state.booking_availability_slots.filter(s => s.series_id !== series.id);
+          bump();
+          return { error: 'PERSIST_FAILED', message: r.message };
+        }
+        if (r.seriesId) {
+          const oldId = series.id;
+          series.id = r.seriesId;
+          state.booking_availability_slots.forEach(slot => {
+            if (slot.series_id === oldId) slot.series_id = r.seriesId;
+          });
+        }
+      }
+
+      return { ok: true, series, slots: createdSlots };
     },
 
     async createBookingAvailabilitySlot({ startsAt, endsAt, capacity = 1, serviceType = 'standard_cleaning', note = '', actorUserId }) {

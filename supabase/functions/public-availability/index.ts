@@ -116,6 +116,16 @@ Deno.serve(async (req) => {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
+  const { error: ensureError } = await sb.rpc("ensure_booking_availability_series_horizon", {
+    p_org_id: orgId,
+    p_until: to.toISOString().slice(0, 10),
+  });
+
+  if (ensureError) {
+    console.error("[public-availability] ensure horizon:", ensureError.message);
+    return json(req, { error: "Could not load availability" }, 500);
+  }
+
   let query = sb
     .from("booking_availability_slots")
     .select("id, starts_at, ends_at, capacity, service_type")

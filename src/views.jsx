@@ -4323,6 +4323,7 @@
                   </Badge>
                   <Badge variant="slate">Kapacitet {slot.capacity}</Badge>
                   <Badge variant="slate">Reserverat {reserved}</Badge>
+                  {slot.series_id && <Badge variant="brand">Tillsvidare</Badge>}
                 </div>
               ) : (
                 <p className="mt-2 text-xs font-semibold text-emerald-700">
@@ -4718,6 +4719,7 @@
     const [repeatWeeks, setRepeatWeeks] = useState(8);
     const [repeatIndefinitely, setRepeatIndefinitely] = useState(false);
     const [saving, setSaving] = useState(false);
+    const rollingHorizonWeeks = 12;
 
     useEffect(() => {
       if (!open) return;
@@ -4760,6 +4762,26 @@
           FORBIDDEN: 'Du saknar behörighet.',
         };
 
+        if (repeatIndefinitely) {
+          const r = await db.createBookingAvailabilitySeries({
+            startsOn: date,
+            startTime,
+            endTime,
+            capacity: Number(capacity),
+            serviceType,
+            note,
+            actorUserId: session.userId,
+            horizonWeeks: rollingHorizonWeeks,
+          });
+          if (r?.error) {
+            toast.error(r.message || messages[r.error] || 'Kunde inte skapa tillsvidare-tillgänglighet.');
+            return;
+          }
+          toast.success(`Tillsvidare är skapad. ${rollingHorizonWeeks} veckor visas nu och fylls på rullande.`);
+          onClose();
+          return;
+        }
+
         for (let i = 0; i < occurrenceCount; i += 1) {
           const r = await db.createBookingAvailabilitySlot({
             startsAt: addWeeks(baseStart, i),
@@ -4775,11 +4797,9 @@
           }
         }
         toast.success(
-          repeatIndefinitely
-            ? 'Tillsvidare är satt som rullande 52 veckor.'
-            : occurrenceCount === 1
-              ? 'Tidsluckan är skapad.'
-              : `${occurrenceCount} tidsluckor är skapade.`,
+          occurrenceCount === 1
+            ? 'Tidsluckan är skapad.'
+            : `${occurrenceCount} tidsluckor är skapade.`,
         );
         onClose();
       } finally {
@@ -4845,14 +4865,14 @@
               onClick={() => {
                 setRepeatWeekly(true);
                 setRepeatIndefinitely(true);
-                setRepeatWeeks(52);
+                setRepeatWeeks(rollingHorizonWeeks);
               }}
             >
               Tillsvidare
             </Button>
-            {repeatIndefinitely && <Badge variant="brand">Rullande 52 veckor</Badge>}
+            {repeatIndefinitely && <Badge variant="brand">Rullande {rollingHorizonWeeks} veckor</Badge>}
             <p className="text-xs text-slate-500">
-              Tillsvidare skapar ett års veckotider nu och kan förlängas igen vid behov.
+              Tillsvidare sparas som en regel. Kalendern visar en rimlig horisont framåt och fylls på automatiskt.
             </p>
           </div>
           {repeatWeekly && (
@@ -4873,7 +4893,7 @@
                 <p className="font-semibold text-slate-900">Skapas i kalendern</p>
                 <p className="mt-1">
                   {repeatIndefinitely
-                    ? '52 tidsluckor, en per vecka. Tanken är att schemat fortsätter rullande.'
+                    ? `${rollingHorizonWeeks} veckor visas nu. Regeln fortsätter rullande utan att skapa onödigt många rader.`
                     : `${validRepeat ? occurrenceCount : 0} tidsluckor, en per vecka.`}
                 </p>
               </div>

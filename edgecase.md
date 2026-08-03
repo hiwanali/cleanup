@@ -141,7 +141,7 @@ Berörda ytor:
 
 ## Fas 4 - Tillgänglighet tillsvidare utan dataväxtproblem
 
-Status: Ej startad
+Status: Klar
 
 Edge case: "Tillsvidare" är praktiskt, men kan skapa väldigt många framtida slots eller gamla oanvända slots.
 
@@ -149,18 +149,32 @@ Slutmål: Admin kan sätta återkommande tillgänglighet tillsvidare, men system
 
 Steg:
 
-1. Kartlägg hur nuvarande tillsvidare skapas och lagras.
-2. Bestäm materialiseringshorisont, exempelvis 8-12 veckor framåt.
-3. Säkerställ att paus/radering påverkar kommande obokade tider utan att röra historik eller bokade pass felaktigt.
-4. Lägg till/planera städning av gamla obokade availability slots.
-5. Testa duplicerade tider för samma service och dag.
+1. Klart: kartlagt att tidigare tillsvidare skapade 52 enskilda tidsluckor direkt från adminmodallen.
+2. Klart: tillsvidare lagras nu som en kompakt veckoserie med 12 veckors materialiserad horisont.
+3. Klart: public availability fyller på horisonten rullande via service-role RPC innan tider hämtas.
+4. Klart: paus av serie påverkar kommande obokade tider men lämnar reserverade/bokade tider aktiva.
+5. Klart: unikt index på `series_id + starts_at` hindrar dubbla rader för samma serie och starttid.
+
+Implementerat:
+
+- Ny tabell: `booking_availability_series` för rullande veckoregler.
+- Ny kolumn: `booking_availability_slots.series_id` för koppling mellan materialiserade tider och serie.
+- Ny RPC: `admin_create_booking_availability_series(...)` för adminskapad tillsvidare-tillgänglighet.
+- Ny RPC: `ensure_booking_availability_series_horizon(...)` för Edge Function/service role att fylla på horisonten.
+- Ny RPC: `admin_set_booking_availability_series_active(...)` för säker paus/öppning av en hel serie.
+- `public-availability` deployad och anropar horisont-RPC innan den returnerar lediga tider till iframen.
+- Adminmodallen använder nu serie-RPC när `Tillsvidare` väljs, och skapar inte längre 52 separata insert-anrop.
+- Admin-kalendern visar badge `Tillsvidare` på tider som kommer från en serie.
 
 Verifiering:
 
-- Admin kan skapa tillsvidare.
-- Kalendern visar framtida tider utan orimligt många rader.
-- Paus/radering tar bort rätt kommande tillgänglighet.
-- Bokade pass ligger kvar och påverkas inte felaktigt.
+- Migrationerna är körda mot länkad Supabase med `supabase db query --linked --file`.
+- Rollback-test verifierar att 12 veckors tillsvidare skapar exakt 12 tidsluckor.
+- Rollback-test verifierar att paus av serie inte stänger en reserverad tidslucka.
+- Rollback-test verifierar att öppning av serie återaktiverar framtida tidsluckor.
+- Rollback-test verifierar att horisontfunktionen kan förlänga en serie till längre framtida intervall.
+- `public-availability` är deployad till Supabase och live-GET mot Edge Function returnerar `200` med slots.
+- `npm run build` går igenom.
 
 Berörda ytor:
 
