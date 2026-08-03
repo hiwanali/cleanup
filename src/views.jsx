@@ -3258,22 +3258,24 @@
 
     // ≤ 24 h kvar → infobox med admins kontaktuppgifter
     const support = db.orgSupportContact();
+    const cancellationPhone = '0700 930 860';
+    const cancellationPhoneHref = cancellationPhone.replace(/\s+/g, '');
     const hoursLeft = Math.max(0, Math.floor(hoursToStart));
     return (
       <Card padding="md" className="border-amber-200 bg-amber-50/40">
         <div className="flex items-start gap-2 mb-2">
           <Icon name="alert-circle" className="w-4 h-4 text-amber-700 mt-0.5" />
           <div>
-            <h3 className="font-bold text-amber-900">Inom 24 timmar</h3>
+            <h3 className="font-bold text-amber-900">Avbokning inom 24 timmar</h3>
             <p className="text-xs text-amber-800/90 mt-0.5">
-              {hoursLeft <= 0 ? 'Passet börjar inom kort.' : `Cirka ${hoursLeft} timmar kvar.`} Kontakta oss för att avboka.
+              {hoursLeft <= 0 ? 'Passet börjar inom kort.' : `Cirka ${hoursLeft} timmar kvar.`} Självavbokning är stängd. Ring oss på {cancellationPhone} så hjälper vi dig.
             </p>
           </div>
         </div>
         <div className="mt-3 space-y-1.5 text-sm">
           <div className="flex items-center gap-2 text-slate-900">
             <Icon name="phone" className="w-4 h-4 text-amber-700" />
-            <a href={`tel:${support.phone}`} className="font-medium hover:underline">{support.phone || '—'}</a>
+            <a href={`tel:${cancellationPhoneHref}`} className="font-medium hover:underline">{cancellationPhone}</a>
           </div>
           <div className="flex items-center gap-2 text-slate-900">
             <Icon name="mail" className="w-4 h-4 text-amber-700" />
@@ -3300,7 +3302,7 @@
       try {
         const result = await db.cancelByCustomer(shift.id, session.userId, reason);
         if (result?.error === 'INSIDE_24H' || result?.error === 'INSIDE_48H') {
-          toast.error('Passet ligger inom 24 timmar – kontakta admin för att avboka.');
+          toast.error('Passet ligger inom 24 timmar. Ring oss på 0700 930 860 så hjälper vi dig.');
           return;
         }
         if (result?.error === 'FORBIDDEN') {

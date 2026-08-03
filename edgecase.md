@@ -313,6 +313,7 @@ Berörda ytor:
 Implementerat 2026-08-03:
 
 - `src/views.jsx` raknar aven avbokningsmodalens timtext fran `db.shiftPlannedStart(shift)`, sa adminjusterade pass inte visar fel marginal.
+- Kundportalen visar tydligt telefonnummer `0700 930 860` nar sjalvavbokning ar stangd inom 24h.
 - `src/mock.jsx` synkar lokal app-state med Supabase-RPC genom att satta kopplad `booking_requests.status = cancelled` nar kund avbokar.
 - Lokal state rullas tillbaka om Supabase-RPC nekar avbokning eller misslyckas.
 
