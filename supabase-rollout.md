@@ -12,6 +12,7 @@ Malet ar att `cleanup.nu` visar lediga tider fran `logincleanup.app`, och att va
 ## 0. Viktigt lage just nu
 
 - Status 2026-07-28: rollout mot Supabase-projektet ar genomford via CLI fallback.
+- Status 2026-08-03: migrationshistoriken for publik booking/kundportal/edgecase-kedjan fran `20260727203034` till `20260803055058` ar reparerad i Supabase metadata med `supabase migration repair --linked --status applied` efter schema-verifiering.
 - Lokal kod ar klar for databas, Edge Functions, admin-tillganglighet och iframe-route.
 - Target project enligt lokal CLI: `bkmnlcdsbvpucpqmaycx`
 - Project name enligt lokal CLI: `CleanUp`
@@ -22,6 +23,52 @@ Malet ar att `cleanup.nu` visar lediga tider fran `logincleanup.app`, och att va
 - MCP returnerar `INVALID_ARGUMENT` for `bkmnlcdsbvpucpqmaycx`; anvand CLI eller koppla MCP till CleanUp-kontot/org.
 
 Vi ska inte applicera detta mot ett annat projekt av misstag.
+
+## 0.1 Migrationsdisciplin och historikdrift
+
+Senast kontrollerat: 2026-08-03 med Supabase CLI `2.109.0`.
+
+Kommandon som anvandes:
+
+```powershell
+supabase migration list --linked
+supabase migration repair --linked --status applied 20260727203034 20260727203433 20260729091322 20260729094416 20260729100538 20260729123707 20260729124223 20260729130115 20260729133131 20260731121500 20260731210956 20260801205448 20260802214436 20260803044341 20260803051921 20260803054308 20260803055058
+```
+
+Nulage efter repair:
+
+- 17 migrationer matchar lokalt och remote. Detta ar den moderna kedjan for publik booking, kundportal, hardning och edgecase-arbetet.
+- 31 aldre lokala migrationer fran maj/juni saknar fortfarande remote metadata.
+- 38 aldre remote migrationer fran maj/juni saknar lokal fil.
+- Denna gamla drift ar legacy-historik fran tidigare direktapplicerade eller pullade SQL-andringar. Den ska inte repareras blint.
+
+Verifierade objekt innan modern repair:
+
+- `booking_availability_slots`
+- `booking_requests`
+- `booking_availability_series`
+- `booking_availability_slots.series_id`
+- `property_access_info`
+- `admin_create_booking_availability_series`
+- `ensure_booking_availability_series_horizon`
+- `create_public_booking_request`
+- `admin_prepare_customer_portal_for_booking_request`
+- `customer_cancel_shift`
+- `public_booking_service_checklist_items`
+
+Driftsregel framover:
+
+1. Anvand inte `supabase db push` mot linked produktion sa lange maj/juni legacy-driften finns kvar.
+2. Nya schemaandringar ska alltid skapas med `supabase migration new <namn>`.
+3. Iterera i produktion med `supabase db query --linked --file <migration.sql>` bara nar SQL:en ar granskad och idempotent.
+4. Verifiera schema/rollback-test direkt efter applicering.
+5. Kor `supabase migration repair --linked --status applied <version>` for den nya migrationen forst efter verifiering.
+6. Kor `supabase migration list --linked` och kontrollera att den nya migrationen matchar local/remote.
+7. Edge Functions deployas separat med `supabase functions deploy <function> --use-api`.
+
+Framtida stada-uppgift:
+
+- Om vi vill fa helt ren historik senare bor vi gora en separat baslinje: dumpa remote schema, jamfor mot lokal migration-kedja, skapa en markerad baseline-strategi och forst darefter reparera eller arkivera maj/juni-driften. Detta ska inte blandas med featurearbete.
 
 ## Rollout-resultat 2026-07-28
 

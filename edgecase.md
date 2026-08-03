@@ -314,7 +314,7 @@ Berörda ytor:
 
 ## Fas 8 - Reparera migrationshistorik och driftsdisciplin
 
-Status: Ej startad
+Status: Klar
 
 Edge case: Vissa SQL-ändringar har körts direkt eftersom lokal och remote migrationshistorik inte matchar helt. Det är inte akut i runtime, men det är teknisk skuld.
 
@@ -339,6 +339,22 @@ Berörda ytor:
 - `supabase/migrations`
 - `supabase-rollout.md`
 - Supabase CLI state.
+
+Implementerat 2026-08-03:
+
+- `supabase migration list --linked` kordes och drift mellan lokal/remote sammanstalldes.
+- Modern, verifierad kedja for publik booking, kundportal, hardning och edgecase-arbete reparerades i Supabase metadata:
+  `20260727203034`, `20260727203433`, `20260729091322`, `20260729094416`, `20260729100538`, `20260729123707`, `20260729124223`, `20260729130115`, `20260729133131`, `20260731121500`, `20260731210956`, `20260801205448`, `20260802214436`, `20260803044341`, `20260803051921`, `20260803054308`, `20260803055058`.
+- Aldre maj/juni-drift lamnades medvetet orord: den innehaller bade local-only och remote-only historik och ska inte repareras blint.
+- `supabase-rollout.md` fick en ny driftsrutin: migration new, granskad/idempotent applicering, verifiering, repair metadata och ny migration list.
+- `supabase db push` ar fortsatt stoppat mot linked produktion tills en separat baseline/stadning av maj/juni-historiken goras.
+
+Verifiering 2026-08-03:
+
+- `supabase migration list --linked` visar 17 matchade moderna migrationer efter repair.
+- Kvarvarande legacy-drift ar avgransad: 31 aldre local-only och 38 aldre remote-only migrationer fran maj/juni.
+- `supabase_migrations.schema_migrations` innehaller `20260727203034 public_booking_availability` och `20260803055058 rolling_availability_horizon_fix`.
+- Viktiga runtime-objekt verifierades innan repair: `booking_availability_series`, `booking_availability_slots.series_id`, `admin_create_booking_availability_series`, `ensure_booking_availability_series_horizon`, `create_public_booking_request`, `admin_prepare_customer_portal_for_booking_request`, `customer_cancel_shift` och `public_booking_service_checklist_items`.
 
 ---
 
