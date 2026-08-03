@@ -3293,7 +3293,7 @@
     useEffect(() => { if (open) setReason(''); }, [open]);
     if (!shift) return null;
     const prop = db.propertyById(shift.property_id);
-    const hoursToStart = (new Date(shift.start_at).getTime() - Date.now()) / 36e5;
+    const hoursToStart = (new Date(db.shiftPlannedStart(shift)).getTime() - Date.now()) / 36e5;
 
     async function confirmCancel() {
       setCancelling(true);

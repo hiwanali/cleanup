@@ -1570,6 +1570,7 @@
         status: s.status,
         cancel_reason: s.cancel_reason,
         last_modified_by: s.last_modified_by,
+        bookingRequestStatus: db.bookingRequestForShift(shiftId)?.status,
         shift_eventsLen: state.shift_events.length,
         notificationsLen: state.notifications.length,
       };
@@ -1577,6 +1578,8 @@
       s.status = 'Avbokat';
       s.cancel_reason = reason.trim() || null;
       s.last_modified_by = actorUserId;
+      const bookingRequest = db.bookingRequestForShift(shiftId);
+      if (bookingRequest) bookingRequest.status = 'cancelled';
       state.shift_events.push({ id: id('se'), shift_id: shiftId, actor_user_id: actorUserId, event_type: 'customer_cancelled', payload: { hours_to_start: hours, reason: s.cancel_reason }, created_at: new Date() });
       state.users.filter(u => u.role === 'admin').forEach(a => pushNotification(a.id, 'customer_cancelled', { shift_id: s.id, property_id: s.property_id, start_at: s.start_at }));
       if (s.cleaner_user_id) pushNotification(s.cleaner_user_id, 'customer_cancelled', { shift_id: s.id, property_id: s.property_id, start_at: s.start_at });
@@ -1589,6 +1592,8 @@
           s.status = snapshot.status;
           s.cancel_reason = snapshot.cancel_reason;
           s.last_modified_by = snapshot.last_modified_by;
+          const request = db.bookingRequestForShift(shiftId);
+          if (request) request.status = snapshot.bookingRequestStatus;
           state.shift_events.length = snapshot.shift_eventsLen;
           state.notifications.length = snapshot.notificationsLen;
           bump();

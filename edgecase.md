@@ -283,7 +283,7 @@ Berörda ytor:
 
 ## Fas 7 - 24h-avbokning med tidszon och tydliga fel
 
-Status: Delvis klar
+Status: Klar
 
 Edge case: Kund får avboka senast 24h innan start. Det måste fungera korrekt med svensk tid, sommar-/vintertid och ändrade starttider.
 
@@ -309,6 +309,19 @@ Berörda ytor:
 - `supabase/migrations/20260729133131_customer_cancel_24h_rpc.sql`
 - Kundportal i `src/views.jsx`
 - Notiser i `src/app.jsx`.
+
+Implementerat 2026-08-03:
+
+- `src/views.jsx` raknar aven avbokningsmodalens timtext fran `db.shiftPlannedStart(shift)`, sa adminjusterade pass inte visar fel marginal.
+- `src/mock.jsx` synkar lokal app-state med Supabase-RPC genom att satta kopplad `booking_requests.status = cancelled` nar kund avbokar.
+- Lokal state rullas tillbaka om Supabase-RPC nekar avbokning eller misslyckas.
+
+Verifierat 2026-08-03:
+
+- `npm run build` gar igenom.
+- Supabase rollback-test verifierar att 25h fore satter pass till `Avbokat`, sparar `cancel_reason`, skapar `customer_cancelled`-event/notiser och satter booking request till `cancelled`.
+- Supabase rollback-test verifierar att 24h eller mindre blockeras med SQLSTATE `22023` och hint `INSIDE_24H`.
+- RPC:n anvander `coalesce(original_start_at, start_at)`, vilket gor att 24h-regeln foljer planerad start aven nar admin har justerat faktisk tid.
 
 ---
 
