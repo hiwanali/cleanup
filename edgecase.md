@@ -99,7 +99,7 @@ Berörda ytor:
 
 ## Fas 3 - Kundmatchning via e-post utan dubbletter
 
-Status: Ej startad
+Status: Klar
 
 Edge case: Befintlig kund med samma e-post ska få tillgång till sin vanliga profil. Ny profil ska inte skapas i onödan.
 
@@ -107,17 +107,29 @@ Slutmål: Samma normaliserade e-postadress leder till samma kund-/portalprofil, 
 
 Steg:
 
-1. Kontrollera hur `admin_prepare_customer_portal_for_booking_request` matchar e-post.
-2. Säkerställ normalisering: trim + lowercase.
-3. Definiera policy för samma e-post men nytt namn/telefon/adress.
-4. Undvik att skriva över befintlig viktig kunddata utan avsikt.
-5. Lägg till adminnotis om en bokning kopplas till befintlig kund.
+1. Klart: kontrollerat hur `admin_prepare_customer_portal_for_booking_request` matchar e-post.
+2. Klart: e-post normaliseras med trim + lowercase innan matchning/skapa.
+3. Klart: samma e-post återanvänder befintlig kund eller kundanställd inom samma org.
+4. Klart: befintligt namn/telefon skrivs inte över om kunden redan har data.
+5. Klart: bokningsförfrågan och `shift_events` får `portal_match` som adminsignal/audit.
+
+Implementerat:
+
+- Ny migration: `supabase/migrations/20260803051921_harden_customer_portal_email_matching.sql`.
+- `public.admin_prepare_customer_portal_for_booking_request(uuid)` behåller samma interface för frontend/adminflödet.
+- Befintlig `public.users`-rad med samma org + normaliserad e-post och rollen `customer` eller `customer_employee` återanvänds.
+- Om samma e-post tillhör admin/städare blockeras provisioning med `23505`, så en intern användare inte råkar göras till kundportalprofil.
+- Befintlig profil fyller bara saknat namn/telefon; den skriver inte över befintligt namn/telefon från tidigare kundprofil.
+- `booking_requests.addons.portal_match` sparar matchningskälla, normaliserad e-post och flaggor för avvikande namn/telefon.
+- `shift_events.payload.portal_match` sparar samma information som spårbar adminhändelse.
 
 Verifiering:
 
-- Ny bokning med befintlig e-post skapar inte ny auth-/kundprofil.
-- Kunden ser både tidigare och ny godkänd bokning i portalen.
-- Ny bokning med annan e-post skapar separat kundspår.
+- Migrationen är körd mot länkad Supabase med `supabase db query --linked --file`.
+- Rollback-test mot Supabase verifierar att ny bokning med befintlig e-post återanvänder samma portal user och customer.
+- Rollback-test verifierar att befintligt namn/telefon inte skrivs över när förfrågan anger annat namn/telefon.
+- Rollback-test verifierar att ny bokning med annan e-post skapar separat portal user och customer.
+- Rollback-test verifierar att intern e-post, exempelvis adminmejl, blockeras.
 
 Berörda ytor:
 
