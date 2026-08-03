@@ -29,6 +29,7 @@
 
   window.sb = sb;
   window.SUPABASE_ENABLED = enabled;
+  const hydratedRolesByUserId = new Map();
 
   /* ---------- datumkonvertering ---------- */
   // timestamptz-kolumner som mocken lagrar som Date-objekt
@@ -95,7 +96,11 @@
     // Hämta först egen profil för att avgöra roll (styr properties-källa)
     const users = await fetchTable('users');
     const me = users.find(u => u.id === authUserId);
-    const role = me ? me.role : 'customer';
+    const role = me ? me.role : null;
+    if (authUserId) {
+      if (role) hydratedRolesByUserId.set(authUserId, role);
+      else hydratedRolesByUserId.delete(authUserId);
+    }
     const isCustomerRole = role === 'customer' || role === 'customer_employee';
     const canReadBookingRequests = role === 'admin' || isCustomerRole;
 
@@ -740,7 +745,10 @@
       realtimeChannel = null;
     }
 
-    realtimeChannel = sb
+    const role = hydratedRolesByUserId.get(userId) || null;
+    const canReadBookingRequests = role === 'admin' || role === 'customer' || role === 'customer_employee';
+
+    let channel = sb
       .channel(`cleanup-sync-${userId}`)
       .on(
         'postgres_changes',
@@ -801,17 +809,21 @@
         'postgres_changes',
         { event: '*', schema: 'public', table: 'booking_availability_slots' },
         () => scheduleHydrateFromRealtime(userId),
-      )
-      .on(
+      );
+
+    if (canReadBookingRequests) {
+      channel = channel.on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'booking_requests' },
         () => scheduleHydrateFromRealtime(userId),
-      )
-      .subscribe((status) => {
-        if (status === 'CHANNEL_ERROR') {
-          console.error('[realtime] channel error');
-        }
-      });
+      );
+    }
+
+    realtimeChannel = channel.subscribe((status) => {
+      if (status === 'CHANNEL_ERROR') {
+        console.error('[realtime] channel error');
+      }
+    });
 
     return () => {
       clearTimeout(hydrateDebounceTimer);

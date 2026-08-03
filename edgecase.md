@@ -17,7 +17,7 @@ Kunden ska tryggt kunna skicka en offert-/bokningsförfrågan, admin ska kunna g
 
 ## Fas 1 - Städare ska aldrig se pris
 
-Status: Delvis klar
+Status: Klar
 
 Edge case: Städare ska kunna se sina pass, adress, checklista, önskemål och in-/utcheckning, men inte pris/offert/justerat pris.
 
@@ -29,7 +29,7 @@ Steg:
 2. Klart: kontrollera särskilt `booking_requests`, `shifts`, `properties`, `properties_customer` och eventuell prisdata i `notes`/metadata.
 3. Klart: säkerställ att städarvyer inte renderar `estimated_price_sek` eller liknande.
 4. Klart: klienthydreringen hoppar nu helt över `booking_requests` för städarrollen, så pris/offerttabellen hämtas inte i städarens browser.
-5. Återstår: testa med städarkonto i webbläsare och verifiera Network/Console.
+5. Klart: verifierat med städarroll mot länkad Supabase att `booking_requests` och prisrader inte kan läsas.
 
 Implementerat:
 
@@ -37,6 +37,8 @@ Implementerat:
 - Befintlig RLS/migration ger `booking_requests` adminstyrd SELECT, vilket innebär att städare inte ska få prisrader via Supabase Data API.
 - Städarens synliga önskemål kommer via `shift_requests`, inte via direktläsning av `booking_requests`.
 - Verifierat mot länkad Supabase: `booking_requests` har bara `booking_requests_admin_select` och `booking_requests_admin_update` för rollen `authenticated`, båda med `is_admin()` + `current_org_id()`.
+- `src/supabase.jsx` fail-closed om egen profil/roll inte kan läsas; appen antar inte längre kundroll som fallback.
+- Realtime för `booking_requests` startas bara för admin och kundroller, inte för städare eller okänd roll.
 - Verifierat lokalt: `npm run build` går igenom efter ändringen.
 
 Verifiering:
@@ -44,6 +46,8 @@ Verifiering:
 - Städare ser inte pris i schema, passdetalj, checklista eller kundinformation.
 - Admin ser pris i bokningsförfrågan och kan justera det.
 - Inga prisfält finns i städarens relevanta API-responser.
+- Supabase RLS-test med städare `b0000000-0000-4000-8000-000000000011` visar 143 synliga pass, 0 synliga `booking_requests` och 0 synliga prisrader.
+- Supabase kontrolltest med admin `b0000000-0000-4000-8000-000000000010` visar fortsatt synliga `booking_requests` och prisrader.
 
 Berörda ytor:
 
