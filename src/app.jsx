@@ -111,22 +111,14 @@
       { path: '/stadare/installningar', label: 'Inställningar', icon: 'settings' },
     ],
     customer: [
-      { path: '/kund/oversikt', label: 'Översikt', icon: 'home' },
-      { path: '/kund/schema', label: 'Schema', icon: 'calendar' },
-      { path: '/kund/objekt', label: 'Objekt', icon: 'building' },
+      { path: '/kund/oversikt', label: 'Min bokning', icon: 'home' },
       { path: '/kund/meddelanden', label: 'Meddelanden', icon: 'message-square' },
-      { path: '/kund/ledighet', label: 'Ledighet', icon: 'pause' },
-      { path: '/kund/avvikelser', label: 'Avvikelser', icon: 'alert-triangle' },
-      { path: '/kund/rapporter', label: 'Rapporter', icon: 'file-text' },
-      { path: '/kund/installningar', label: 'Inställningar', icon: 'settings' },
+      { path: '/kund/avvikelser', label: 'Hjälp', icon: 'alert-triangle' },
     ],
     customer_employee: [
-      { path: '/kund/oversikt', label: 'Översikt', icon: 'home' },
-      { path: '/kund/schema', label: 'Schema', icon: 'calendar' },
-      { path: '/kund/objekt', label: 'Objekt', icon: 'building' },
+      { path: '/kund/oversikt', label: 'Min bokning', icon: 'home' },
       { path: '/kund/meddelanden', label: 'Meddelanden', icon: 'message-square' },
-      { path: '/kund/avvikelser', label: 'Avvikelser', icon: 'alert-triangle' },
-      { path: '/kund/installningar', label: 'Inställningar', icon: 'settings' },
+      { path: '/kund/avvikelser', label: 'Hjälp', icon: 'alert-triangle' },
     ],
   };
 

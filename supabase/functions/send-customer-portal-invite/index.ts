@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { formatDateTimeSE, renderCleanUpEmail, serviceLabel } from "../_shared/email-template.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -23,40 +24,6 @@ function asUuid(value: unknown): string {
     : "";
 }
 
-function formatDateTime(iso: string | null | undefined): string {
-  if (!iso) return "";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return String(iso);
-  return d.toLocaleString("sv-SE", {
-    dateStyle: "medium",
-    timeStyle: "short",
-    timeZone: "Europe/Stockholm",
-  });
-}
-
-function serviceLabel(serviceType: string | null | undefined): string {
-  switch (serviceType) {
-    case "standard_cleaning":
-      return "Hemstädning";
-    case "deep_cleaning":
-      return "Storstädning";
-    case "moving_cleaning":
-      return "Flyttstädning";
-    case "window_cleaning":
-      return "Fönsterputs";
-    case "office_cleaning":
-      return "Kontorsstädning";
-    case "stair_cleaning":
-      return "Trappstädning";
-    case "construction_cleaning":
-      return "Byggstädning";
-    case "construction_services":
-      return "Byggtjänster";
-    default:
-      return "Städning";
-  }
-}
-
 function buildEmail({
   customerName,
   serviceType,
@@ -74,47 +41,29 @@ function buildEmail({
 }) {
   const title = "Din bokning är bekräftad";
   const service = serviceLabel(serviceType);
-  const when = `${formatDateTime(startsAt)}-${formatDateTime(endsAt).split(" ").pop() || ""}`;
-  const lines = [
-    `Hej ${customerName || "kund"},`,
-    "",
-    `Din ${service.toLowerCase()} är bekräftad.`,
-    address ? `Adress: ${address}` : "",
-    when.trim() ? `Tid: ${when}` : "",
-    "",
-    "Öppna din kundportal via länken nedan för att se bokningen och kommande uppdateringar.",
-    link,
-    "",
-    "Länken är personlig och ska inte delas vidare.",
-    "",
-    "Vänliga hälsningar",
-    "CleanUp",
-  ].filter(Boolean);
+  const starts = formatDateTimeSE(startsAt);
+  const ends = formatDateTimeSE(endsAt).split(" ").pop() || "";
+  const when = starts && ends ? `${starts}-${ends}` : starts;
 
-  const html = `
-    <div style="font-family:Inter,Arial,sans-serif;color:#0f172a;line-height:1.55;">
-      <h2 style="margin:0 0 12px;">${title}</h2>
-      <p>Hej ${customerName || "kund"},</p>
-      <p>Din ${service.toLowerCase()} är bekräftad.</p>
-      <p>
-        ${address ? `<strong>Adress:</strong> ${address}<br>` : ""}
-        ${when.trim() ? `<strong>Tid:</strong> ${when}` : ""}
-      </p>
-      <p>
-        <a href="${link}" style="display:inline-block;background:#1d4ed8;color:white;text-decoration:none;font-weight:700;padding:12px 18px;border-radius:10px;">
-          Öppna kundportalen
-        </a>
-      </p>
-      <p style="color:#64748b;font-size:12px;">Länken är personlig och ska inte delas vidare.</p>
-      <p>Vänliga hälsningar<br>CleanUp</p>
-    </div>
-  `;
-
-  return {
+  return renderCleanUpEmail({
     subject: `CleanUp: ${title}`,
-    text: lines.join("\n"),
-    html,
-  };
+    preheader: `Din ${service.toLowerCase()} är bekräftad${when ? `, ${when}` : ""}.`,
+    eyebrow: "Bokningsbekräftelse",
+    title,
+    greeting: `Hej ${customerName || "kund"},`,
+    intro: `Din ${service.toLowerCase()} är bekräftad. Här finns de viktigaste detaljerna för bokningen.`,
+    body: [
+      "I kundportalen kan du se bokningen, följa uppdateringar och hantera kommande information från CleanUp.",
+    ],
+    details: [
+      { label: "Tjänst", value: service },
+      { label: "Tid", value: when },
+      { label: "Adress", value: address },
+    ],
+    ctaLabel: "Öppna kundportalen",
+    ctaUrl: link,
+    note: "Länken är personlig och ska inte delas vidare.",
+  });
 }
 
 Deno.serve(async (req) => {

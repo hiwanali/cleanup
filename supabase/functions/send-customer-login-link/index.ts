@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { renderCleanUpEmail } from "../_shared/email-template.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -23,15 +24,6 @@ function asUuid(value: unknown): string {
     : "";
 }
 
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
 function buildEmail({
   customerName,
   contactName,
@@ -43,45 +35,24 @@ function buildEmail({
 }) {
   const title = "Din kundportal är klar";
   const greetingName = contactName || customerName || "kund";
-  const lines = [
-    `Hej ${greetingName},`,
-    "",
-    `Du har nu tillgång till CleanUp kundportal för ${customerName || "din kundprofil"}.`,
-    "Där kan du se bokningar, objekt, meddelanden och kommande uppdateringar.",
-    "",
-    "Öppna kundportalen via länken nedan:",
-    link,
-    "",
-    "Länken är personlig och ska inte delas vidare.",
-    "",
-    "Vänliga hälsningar",
-    "CleanUp",
-  ];
 
-  const safeTitle = escapeHtml(title);
-  const safeGreeting = escapeHtml(greetingName);
-  const safeCustomer = escapeHtml(customerName || "din kundprofil");
-  const safeLink = escapeHtml(link);
-
-  return {
+  return renderCleanUpEmail({
     subject: `CleanUp: ${title}`,
-    text: lines.join("\n"),
-    html: `
-      <div style="font-family:Inter,Arial,sans-serif;color:#0f172a;line-height:1.55;">
-        <h2 style="margin:0 0 12px;">${safeTitle}</h2>
-        <p>Hej ${safeGreeting},</p>
-        <p>Du har nu tillgång till CleanUp kundportal för ${safeCustomer}.</p>
-        <p>Där kan du se bokningar, objekt, meddelanden och kommande uppdateringar.</p>
-        <p>
-          <a href="${safeLink}" style="display:inline-block;background:#1d4ed8;color:white;text-decoration:none;font-weight:700;padding:12px 18px;border-radius:10px;">
-            Öppna kundportalen
-          </a>
-        </p>
-        <p style="color:#64748b;font-size:12px;">Länken är personlig och ska inte delas vidare.</p>
-        <p>Vänliga hälsningar<br>CleanUp</p>
-      </div>
-    `,
-  };
+    preheader: "Logga in i CleanUp kundportal med din personliga länk.",
+    eyebrow: "Kundportal",
+    title,
+    greeting: `Hej ${greetingName},`,
+    intro: `Du har nu tillgång till CleanUp kundportal för ${customerName || "din kundprofil"}.`,
+    body: [
+      "Där kan du se bokningar, objekt, meddelanden och kommande uppdateringar från CleanUp.",
+    ],
+    details: [
+      { label: "Kundprofil", value: customerName || "CleanUp kundportal" },
+    ],
+    ctaLabel: "Öppna kundportalen",
+    ctaUrl: link,
+    note: "Länken är personlig och ska inte delas vidare.",
+  });
 }
 
 Deno.serve(async (req) => {

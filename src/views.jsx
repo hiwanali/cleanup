@@ -373,24 +373,77 @@
                 <p className="text-xs text-slate-500">Bokningsförfrågan</p>
               </div>
             </div>
-            <Card padding="lg" className="border-emerald-200 bg-emerald-50/40">
-              <div className="flex items-start gap-4">
-                <span className="w-11 h-11 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center flex-shrink-0">
-                  <Icon name="check" className="w-5 h-5" />
-                </span>
-                <div>
-                  <h1 className="text-2xl font-extrabold text-slate-900">Tack! Din förfrågan är skickad.</h1>
-                  <p className="mt-2 text-sm text-slate-700">
-                    Vi återkommer för att gå igenom upplägg och bekräfta tiden. Din förfrågan är mottagen och tiden är reserverad medan vi behandlar den.
-                  </p>
+            <Card padding="lg" className="overflow-hidden border-emerald-200 bg-gradient-to-br from-emerald-50 via-white to-brand-50/60">
+              <div className="relative">
+                <div className="absolute -right-8 -top-10 h-28 w-28 rounded-full bg-emerald-100/70 blur-2xl" aria-hidden="true" />
+                <div className="relative flex flex-col gap-5">
+                  <div className="flex items-start gap-4">
+                    <span className="relative flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-700 shadow-sm ring-1 ring-emerald-200">
+                      <span className="absolute inset-0 rounded-2xl bg-emerald-300/30 animate-ping" aria-hidden="true" />
+                      <Icon name="check" className="relative h-6 w-6" />
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold uppercase tracking-wide text-emerald-700">Förfrågan mottagen</p>
+                      <h1 className="mt-1 text-2xl font-extrabold leading-tight text-slate-950">Tack! Din förfrågan är skickad.</h1>
+                      <p className="mt-2 text-sm leading-relaxed text-slate-700">
+                        Vi går igenom upplägg, pris och tid innan bokningen bekräftas. Tiden är reserverad medan vi behandlar din förfrågan.
+                      </p>
+                    </div>
+                  </div>
+
                   {confirmation.slot && (
-                    <p className="mt-4 text-sm font-semibold text-slate-900">
-                      {formatDateLong(confirmation.slot.starts_at)} kl. {formatTime(confirmation.slot.starts_at)}-{formatTime(confirmation.slot.ends_at)}
-                    </p>
+                    <div className="rounded-2xl border border-slate-200 bg-white/85 p-4 shadow-sm">
+                      <div className="flex items-start gap-3">
+                        <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-700">
+                          <Icon name="calendar" className="h-5 w-5" />
+                        </span>
+                        <div>
+                          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Önskad tid</p>
+                          <p className="mt-1 text-sm font-extrabold text-slate-950">
+                            {formatDateLong(confirmation.slot.starts_at)} kl. {formatTime(confirmation.slot.starts_at)}-{formatTime(confirmation.slot.ends_at)}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
                   )}
-                  <p className="mt-4 rounded-xl border border-emerald-200 bg-white/70 p-3 text-xs leading-relaxed text-emerald-900">
-                    Vi har sparat ditt godkännande av bokningsvillkor och GDPR-information tillsammans med förfrågan. När CleanUp bekräftar upplägg och tid får du tillgång till bokningen i kundportalen.
-                  </p>
+
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    {[
+                      { icon: 'check-square', title: 'Vi granskar', body: 'Vi kontrollerar uppgifter, omfattning och önskad tid.' },
+                      { icon: 'message-square', title: 'Vi återkommer', body: 'Vid behov kontaktar vi dig för att stämma av upplägget.' },
+                      { icon: 'key', title: 'Du får bekräftelse', body: 'När allt är klart får du tillgång till bokningen i kundportalen.' },
+                    ].map(item => (
+                      <div key={item.title} className="rounded-2xl border border-slate-200 bg-white/80 p-4 shadow-sm">
+                        <span className="mb-3 flex h-9 w-9 items-center justify-center rounded-xl bg-slate-100 text-slate-700">
+                          <Icon name={item.icon} className="h-4 w-4" />
+                        </span>
+                        <p className="text-sm font-extrabold text-slate-950">{item.title}</p>
+                        <p className="mt-1 text-xs leading-relaxed text-slate-600">{item.body}</p>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="rounded-2xl border border-emerald-200 bg-white/80 p-4">
+                    <p className="text-xs leading-relaxed text-emerald-900">
+                      Vi har sparat ditt godkännande av bokningsvillkor och GDPR-information tillsammans med förfrågan.
+                    </p>
+                  </div>
+
+                  <a
+                    href="tel:0700930860"
+                    className="flex items-center justify-between gap-3 rounded-2xl border border-brand-100 bg-brand-50/70 p-4 text-brand-900 transition hover:bg-brand-50 focus:outline-none focus:ring-2 focus:ring-brand-300"
+                  >
+                    <span className="flex items-center gap-3">
+                      <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-white text-brand-700 shadow-sm">
+                        <Icon name="phone" className="h-5 w-5" />
+                      </span>
+                      <span>
+                        <span className="block text-sm font-extrabold">Har du frågor?</span>
+                        <span className="block text-xs text-brand-800">Ring oss på 0700 930 860</span>
+                      </span>
+                    </span>
+                    <Icon name="arrow-right" className="h-4 w-4 flex-shrink-0" />
+                  </a>
                 </div>
               </div>
             </Card>
@@ -947,7 +1000,6 @@
     const baseByService = {
       standard_cleaning: 590,
       deep_cleaning: 990,
-      moving_cleaning: 1490,
       window_cleaning: 690,
     };
     const areaRate = form.serviceType === 'moving_cleaning' ? getMovingCleaningAreaRate(area) : form.serviceType === 'deep_cleaning' ? 14 : 9;
@@ -1404,7 +1456,7 @@
           ? `${formatDateLong(shift.checked_in_at)} · ${formatTime(shift.checked_in_at)}`
           : shift.status === 'Pågående'
             ? 'Städningen pågår.'
-            : 'Städaren checkar in när passet startar.',
+            : 'Din städare checkar in när passet startar.',
         done: !!shift.checked_in_at || shift.status === 'Pågående' || shift.status === 'Utfört',
       });
       steps.push({
@@ -2341,7 +2393,7 @@
                 <div className="flex items-start gap-2">
                   <Icon name="user" className="w-4 h-4 text-slate-400 mt-0.5" />
                   <div className="flex-1">
-                    <dt className="text-xs text-slate-500">Städare</dt>
+                    <dt className="text-xs text-slate-500">{isCustomerView ? 'Din städare' : 'Städare'}</dt>
                     <dd className="font-medium text-slate-900 flex items-center gap-2">
                       <Avatar size="xs" name={cleanerLabel} anonymous={isCustomerView} />
                       {cleanerLabel}
@@ -4133,7 +4185,7 @@
 
     return (
       <div>
-        <PageHeader title="Avvikelser & reklamationer" subtitle="Allt som rapporterats kring era objekt" />
+        <PageHeader title="Hjälp och ärenden" subtitle="Följ ärenden eller rapportera om något behöver åtgärdas." />
 
         <Card padding="md" className="mb-4">
           <Field label="Status">
@@ -4148,7 +4200,7 @@
 
         {list.length === 0 ? (
           <Card padding="lg">
-            <EmptyState icon="check-circle" title="Inga ärenden" description="Inga avvikelser eller reklamationer just nu." />
+            <EmptyState icon="check-circle" title="Inga ärenden" description="Du har inga öppna ärenden just nu." />
           </Card>
         ) : (
           <Card padding="sm">
@@ -5478,8 +5530,8 @@
         const u = db.userById(m.sender_user_id);
         return u ? u.name : 'Kund';
       }
-      // Kundvy: alla admins visas som supportteamet
-      return m.sender_role === 'admin' ? 'CleanUp' : (db.userById(m.sender_user_id)?.name || 'Kollega');
+      // Kundvy: admin visas som CleanUp och utförare som kundens städare.
+      return m.sender_role === 'admin' ? 'CleanUp' : 'Din städare';
     }
 
     async function send() {
@@ -5538,7 +5590,7 @@
       }
       return (
         <div>
-          <PageHeader title="Meddelanden" subtitle="Direktdialog med CleanUp-teamet." />
+          <PageHeader title="Meddelanden" subtitle="Skriv till CleanUp och din städare inför bokningen." />
           <Card padding="md">
             <ConversationPanel customerId={customer.id} session={session} />
           </Card>
@@ -8723,15 +8775,198 @@
   /* ============================================================
    * CUSTOMER · Översikt
    * ============================================================ */
+  function customerBookingStatusCopy(shift) {
+    if (!shift) {
+      return {
+        label: 'Ingen bokning',
+        title: 'Ingen kommande bokning',
+        body: 'När CleanUp bekräftar en bokning visas den här.',
+        tone: 'slate',
+      };
+    }
+    if (shift.status === 'Pågående') {
+      return {
+        label: 'Pågående',
+        title: shift.checked_in_at ? `Din städare är på plats sedan ${formatTime(shift.checked_in_at)}` : 'Städningen pågår',
+        body: 'Du kan följa status här och skriva till oss vid behov.',
+        tone: 'emerald',
+      };
+    }
+    if (shift.status === 'Utfört') {
+      return {
+        label: 'Utförd',
+        title: 'Städningen är utförd',
+        body: shift.checked_out_at ? `Din städare checkade ut ${formatTime(shift.checked_out_at)}.` : 'Bokningen är markerad som utförd.',
+        tone: 'emerald',
+      };
+    }
+    if (shift.status === 'Planerat') {
+      return {
+        label: 'Väntar',
+        title: 'Bokningen väntar på bekräftelse',
+        body: 'CleanUp granskar upplägg, tid och bemanning innan allt är klart.',
+        tone: 'amber',
+      };
+    }
+    if (shift.status === 'Sjukanmäld') {
+      return {
+        label: 'Uppdatering',
+        title: 'CleanUp hanterar bemanningen',
+        body: 'Vi återkommer om tiden eller upplägget behöver ändras.',
+        tone: 'amber',
+      };
+    }
+    return {
+      label: 'Bekräftad',
+      title: 'Bokningen är bekräftad',
+      body: 'Din städare checkar in när passet startar, om inget annat är avtalat.',
+      tone: 'brand',
+    };
+  }
+
+  function CustomerOverviewBookingPanel({ shift, onNavigate }) {
+    useDb();
+    if (!shift) {
+      return (
+        <Card padding="lg" className="border-dashed">
+          <EmptyState
+            icon="calendar"
+            title="Ingen kommande bokning"
+            description="När CleanUp bekräftar en bokning visas tid, adress och status här."
+            action={<Button icon="message-square" onClick={() => onNavigate('/kund/meddelanden')}>Kontakta CleanUp</Button>}
+          />
+        </Card>
+      );
+    }
+
+    const prop = db.propertyById(shift.property_id);
+    const bookingRequest = db.bookingRequestForShift(shift.id);
+    const bookingAddons = bookingRequest?.addons && typeof bookingRequest.addons === 'object' ? bookingRequest.addons : {};
+    const checklistTitles = bookingRequest ? db.serviceChecklistForBooking(bookingRequest.service_type, bookingAddons) : [];
+    const status = customerBookingStatusCopy(shift);
+    const toneClass = {
+      brand: 'bg-brand-50 text-brand-700 ring-brand-100',
+      emerald: 'bg-emerald-50 text-emerald-700 ring-emerald-100',
+      amber: 'bg-amber-50 text-amber-700 ring-amber-100',
+      slate: 'bg-slate-50 text-slate-600 ring-slate-100',
+    }[status.tone] || 'bg-slate-50 text-slate-600 ring-slate-100';
+
+    const detailRows = [
+      { icon: 'clock', label: 'Tid', value: `${formatDateLong(shift.start_at)} · ${formatRange(shift.start_at, shift.end_at)}` },
+      { icon: 'map-pin', label: 'Adress', value: prop?.address || 'Adress saknas' },
+      { icon: 'sparkles', label: 'Tjänst', value: bookingRequest?.service_type ? serviceLabel(bookingRequest.service_type) : 'Städning' },
+      { icon: 'user', label: 'Din städare', value: db.displayCleaner(shift.cleaner_user_id, 'customer') },
+    ];
+
+    return (
+      <Card padding="lg" className="border-brand-100">
+        <div className="flex flex-col gap-6">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0">
+              <div className="mb-3 flex flex-wrap items-center gap-2">
+                <span className={cx('inline-flex items-center rounded-full px-2.5 py-1 text-xs font-bold ring-1', toneClass)}>
+                  {status.label}
+                </span>
+                <StatusBadge status={shift.status} />
+              </div>
+              <h2 className="text-2xl font-extrabold tracking-tight text-slate-950">{status.title}</h2>
+              <p className="mt-2 max-w-2xl text-sm leading-relaxed text-slate-600">{status.body}</p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button icon="calendar" onClick={() => onNavigate(`/kund/pass/${shift.id}`)}>Öppna bokningen</Button>
+              <Button variant="outline" icon="message-square" onClick={() => onNavigate('/kund/meddelanden')}>Meddelanden</Button>
+            </div>
+          </div>
+
+          <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {detailRows.map(row => (
+              <div key={row.label} className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
+                <dt className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-slate-500">
+                  <Icon name={row.icon} className="h-4 w-4 text-slate-400" />
+                  {row.label}
+                </dt>
+                <dd className="mt-2 text-sm font-semibold text-slate-900">{row.value}</dd>
+              </div>
+            ))}
+          </dl>
+
+          <div className="rounded-xl border border-emerald-100 bg-emerald-50/70 p-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <h3 className="text-sm font-extrabold text-emerald-950">Vill du ändra eller lägga till något?</h3>
+                <p className="mt-1 text-sm leading-relaxed text-emerald-900/90">
+                  Skriv till oss i Meddelanden eller ring CleanUp. Admin bekräftar eventuella tillägg, tid och pris innan något ändras.
+                </p>
+                {checklistTitles.length > 0 && (
+                  <p className="mt-2 text-xs text-emerald-800">
+                    Det som ingår visas i bokningen: {checklistTitles.length} punkter från städmallen.
+                  </p>
+                )}
+              </div>
+              <Button variant="secondary" icon="arrow-right" onClick={() => onNavigate(`/kund/pass/${shift.id}`)}>
+                Se vad som ingår
+              </Button>
+            </div>
+          </div>
+        </div>
+      </Card>
+    );
+  }
+
+  function CustomerOverviewActionGrid({ upcomingCount, addressCount, openCaseCount, onNavigate }) {
+    const actions = [
+      {
+        title: 'Alla bokningar',
+        body: upcomingCount > 1 ? `${upcomingCount} kommande bokningar` : 'Se kommande och tidigare städningar',
+        icon: 'calendar',
+        path: '/kund/schema',
+      },
+      {
+        title: 'Adresser',
+        body: addressCount === 1 ? '1 adress kopplad' : `${addressCount} adresser kopplade`,
+        icon: 'map-pin',
+        path: '/kund/objekt',
+      },
+      {
+        title: 'Hjälp',
+        body: openCaseCount > 0 ? `${openCaseCount} öppna ärenden` : 'Rapportera eller följ ett ärende',
+        icon: 'alert-triangle',
+        path: '/kund/avvikelser',
+      },
+    ];
+
+    return (
+      <div className="grid gap-3 md:grid-cols-3">
+        {actions.map(action => (
+          <button
+            key={action.title}
+            type="button"
+            onClick={() => onNavigate(action.path)}
+            className="flex min-h-[96px] items-start gap-3 rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-brand-200 hover:bg-brand-50/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-2"
+          >
+            <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-700">
+              <Icon name={action.icon} className="h-5 w-5" />
+            </span>
+            <span className="min-w-0">
+              <span className="block text-sm font-extrabold text-slate-950">{action.title}</span>
+              <span className="mt-1 block text-xs leading-relaxed text-slate-500">{action.body}</span>
+            </span>
+          </button>
+        ))}
+      </div>
+    );
+  }
+
   function CustomerOverviewView({ session, onNavigate }) {
     useDb();
     const [showPortalWelcome, setShowPortalWelcome] = useState(false);
     const customer = db.customerForUser(session.userId);
     const props = db.propertiesForUser(session.userId);
-    const upcoming = db.shiftsForCustomerUser(session.userId, { from: new Date(), statuses: ['Godkänt', 'Planerat', 'Sjukanmäld', 'Pausat (kundledighet)'] }).slice(0, 8);
+    const upcoming = db.shiftsForCustomerUser(session.userId, { from: new Date(), statuses: ['Godkänt', 'Planerat', 'Pågående', 'Utfört', 'Sjukanmäld', 'Pausat (kundledighet)'] }).slice(0, 8);
+    const nextShift = upcoming[0] || null;
+    const otherUpcoming = upcoming.slice(1, 4);
     const openIncidents = db.incidents({ viewerUserId: session.userId, status: 'open' });
     const isEmployee = session.user.role === 'customer_employee';
-    const roleLabel = isEmployee ? 'Kundanställd' : 'Huvudkontakt';
     useEffect(() => {
       try {
         if (sessionStorage.getItem('cleanup_portal_landing_overview') === '1') {
@@ -8744,11 +8979,10 @@
     return (
       <div>
         <PageHeader
-          title={customer ? customer.name : 'Översikt'}
-          subtitle={`${props.length} objekt · ${session.user.name}`}
-          actions={
-            <Button variant="outline" icon="calendar" onClick={() => onNavigate('/kund/ledighet')}>Ny ledighet</Button>
-          }
+          title="Min bokning"
+          subtitle={customer
+            ? `Hej ${session.user.name}. Här ser du status, tid, adress och kontaktvägar.`
+            : 'Här ser du status, tid, adress och kontaktvägar.'}
         />
 
         {showPortalWelcome && (
@@ -8761,57 +8995,67 @@
                 <div>
                   <h3 className="font-bold text-emerald-950">Du är inloggad i kundportalen</h3>
                   <p className="mt-1 text-sm text-emerald-900/90">
-                    Här ser du dina bokningar, objekt och kontaktvägar till CleanUp.
+                    Här ser du status, tid, adress och kontaktvägar till CleanUp.
                   </p>
                 </div>
               </div>
               <Button variant="outline" icon="calendar" onClick={() => onNavigate('/kund/schema')}>
-                Visa schema
+                Visa bokningar
               </Button>
             </div>
           </Card>
         )}
 
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-8">
-          <Stat label="Objekt" value={props.length} icon="building" tone="brand" />
-          <Stat label="Kommande pass" value={upcoming.length} icon="calendar" tone="accent" />
-          <Stat label="Öppna ärenden" value={openIncidents.length} icon="alert-triangle" tone="amber" />
-          <Stat label="Roll" value={roleLabel} icon="shield" tone="emerald" />
+        <div className="space-y-6">
+          <CustomerOverviewBookingPanel shift={nextShift} onNavigate={onNavigate} />
+
+          <CustomerOverviewActionGrid
+            upcomingCount={upcoming.length}
+            addressCount={props.length}
+            openCaseCount={openIncidents.length}
+            onNavigate={onNavigate}
+          />
+
+          {otherUpcoming.length > 0 && (
+            <section>
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <h2 className="text-lg font-bold text-slate-900">Fler kommande bokningar</h2>
+                <Button variant="ghost" size="sm" onClick={() => onNavigate('/kund/schema')}>Visa alla</Button>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                {otherUpcoming.map(s => (
+                  <ShiftCard
+                    key={s.id}
+                    shift={s}
+                    viewerRole={session.user.role}
+                    viewerUserId={session.userId}
+                    onClick={() => onNavigate(`/kund/pass/${s.id}`)}
+                  />
+                ))}
+              </div>
+            </section>
+          )}
+
+          {props.length === 0 && (
+            <Card padding="md" className="border-amber-200 bg-amber-50/70">
+              <div className="flex items-start gap-3">
+                <Icon name="map-pin" className="mt-0.5 h-5 w-5 flex-shrink-0 text-amber-700" />
+                <div>
+                  <h2 className="text-sm font-extrabold text-amber-950">Ingen adress kopplad ännu</h2>
+                  <p className="mt-1 text-sm text-amber-900/90">
+                    Kontakta CleanUp om du saknar adress eller om nästa bokning gäller en ny adress.
+                  </p>
+                </div>
+              </div>
+            </Card>
+          )}
+
+          {isEmployee && (
+            <p className="text-xs text-slate-500">
+              Du är inloggad som kundkontakt och ser bokningar och adresser du har åtkomst till.
+            </p>
+          )}
         </div>
-
-        <section className="mb-8">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-lg font-bold text-slate-900">Dina objekt</h2>
-            {props.length > 0 && (
-              <Button variant="ghost" size="sm" onClick={() => onNavigate('/kund/objekt')}>Visa alla</Button>
-            )}
-          </div>
-          {props.length === 0 ? (
-            <Card padding="lg"><EmptyState icon="building" title="Inga objekt kopplade" description="Kontakta admin om du saknar åtkomst." /></Card>
-          ) : (
-            <div className="grid md:grid-cols-2 gap-3">
-              {props.map(p => (
-                <CustomerPropertyCard key={p.id} property={p} session={session} onNavigate={onNavigate} />
-              ))}
-            </div>
-          )}
-        </section>
-
-        <section>
-          <div className="flex items-center justify-between gap-3 mb-3">
-            <h2 className="text-lg font-bold text-slate-900">Kommande pass</h2>
-            {upcoming.length > 0 && (
-              <Button variant="ghost" size="sm" onClick={() => onNavigate('/kund/schema')}>Visa alla bokningar</Button>
-            )}
-          </div>
-          {upcoming.length === 0 ? (
-            <Card padding="md"><EmptyState icon="inbox" title="Inga kommande pass" /></Card>
-          ) : (
-            <div className="grid md:grid-cols-2 gap-3">
-              {upcoming.map(s => <ShiftCard key={s.id} shift={s} viewerRole={session.user.role} viewerUserId={session.userId} onClick={() => onNavigate(`/kund/pass/${s.id}`)} />)}
-            </div>
-          )}
-        </section>
       </div>
     );
   }
@@ -9565,7 +9809,7 @@
       <Modal
         open={open}
         onClose={onClose}
-        title={isEdit ? 'Redigera objekt' : 'Lägg till objekt'}
+        title={isEdit ? 'Redigera adress' : 'Lägg till adress'}
         size="md"
         footer={
           <>
@@ -9661,12 +9905,12 @@
     return (
       <div>
         <PageHeader
-          title="Objekt"
+          title="Adresser"
           subtitle={isEmployee
-            ? 'Objekt du har läsåtkomst till.'
-            : 'Lägg till och hantera era lokaler med adress, önskemål och anteckningar.'}
+            ? 'Adresser du har läsåtkomst till.'
+            : 'Adresser där CleanUp utför eller planerar städning.'}
           actions={canEdit ? (
-            <Button icon="plus" onClick={openCreate}>Lägg till objekt</Button>
+            <Button icon="plus" onClick={openCreate}>Lägg till adress</Button>
           ) : null}
         />
 
@@ -9674,11 +9918,11 @@
           <Card padding="lg">
             <EmptyState
               icon="building"
-              title="Inga objekt än"
+              title="Inga adresser än"
               description={canEdit
-                ? 'Lägg till ert första objekt med adress och eventuella önskemål.'
-                : 'Huvudkontakten kan lägga till objekt här.'}
-              action={canEdit ? <Button icon="plus" onClick={openCreate}>Lägg till objekt</Button> : null}
+                ? 'Lägg till första adressen med eventuella önskemål.'
+                : 'Huvudkontakten kan lägga till adresser här.'}
+              action={canEdit ? <Button icon="plus" onClick={openCreate}>Lägg till adress</Button> : null}
             />
           </Card>
         ) : (
@@ -9718,7 +9962,7 @@
       return (
         <div>
           <PageHeader title="Åtkomst nekas" />
-          <Card padding="lg"><EmptyState icon="shield" title="Det här objektet tillhör inte dig" action={<Button onClick={() => onNavigate('/kund/objekt')}>Till objekt</Button>} /></Card>
+          <Card padding="lg"><EmptyState icon="shield" title="Den här adressen tillhör inte dig" action={<Button onClick={() => onNavigate('/kund/objekt')}>Till adresser</Button>} /></Card>
         </div>
       );
     }
@@ -9726,7 +9970,7 @@
     return (
       <div>
         <PageHeader
-          breadcrumbs={[{ label: 'Objekt', href: '#/kund/objekt' }, { label: prop.name }]}
+          breadcrumbs={[{ label: 'Adresser', href: '#/kund/objekt' }, { label: prop.name }]}
           title={prop.name}
           subtitle={prop.address || 'Ingen adress angiven'}
           actions={canEdit ? (
@@ -9831,8 +10075,8 @@
                 </div>
                 <div className="flex items-center justify-between gap-3 sm:justify-end">
                   <div className="flex items-center gap-2 text-xs text-slate-600">
-                    <Avatar size="xs" name="Städare" anonymous />
-                    <span>Städare</span>
+                    <Avatar size="xs" name="Din städare" anonymous />
+                    <span>Din städare</span>
                   </div>
                   <Icon name="chevron-right" className="h-5 w-5 text-slate-300" />
                 </div>
@@ -9874,8 +10118,8 @@
     return (
       <div>
         <PageHeader
-          title="Schema & bokningar"
-          subtitle="Se kommande, väntande och historiska bokningar för dina objekt."
+          title="Bokningar"
+          subtitle="Se kommande, väntande och tidigare städningar."
           actions={
             <div className="flex flex-wrap gap-2">
               <CalendarListToggle view={viewMode} onChange={setViewMode} />

@@ -571,7 +571,7 @@
 
     // Visningsnamn på städare baserat på vem som tittar
     displayCleaner(cleanerUserId, viewerRole) {
-      if (viewerRole === 'customer' || viewerRole === 'customer_employee') return 'Städare';
+      if (viewerRole === 'customer' || viewerRole === 'customer_employee') return 'Din städare';
       const u = db.userById(cleanerUserId);
       return u ? u.name : 'Städare';
     },

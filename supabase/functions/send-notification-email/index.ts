@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.1';
+import { formatDateTimeSE, renderCleanUpEmail } from '../_shared/email-template.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -15,24 +16,183 @@ interface NotificationRecord {
   email_sent_at?: string | null;
 }
 
-function formatDateTime(iso: string | undefined | null): string {
-  if (!iso) return '';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return String(iso);
-  return d.toLocaleString('sv-SE', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-    timeZone: 'Europe/Stockholm',
-  });
+function roleArea(role: UserRole): 'admin' | 'stadare' | 'kund' {
+  if (role === 'cleaner') return 'stadare';
+  if (role === 'customer' || role === 'customer_employee') return 'kund';
+  return 'admin';
 }
 
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
+function portalUrl(appBaseUrl: string, role: UserRole, shiftId: string): string {
+  const base = appBaseUrl.replace(/\/$/, '');
+  const area = roleArea(role);
+
+  if ((role === 'customer' || role === 'customer_employee') && shiftId) {
+    return `${base}#/kund/pass/${encodeURIComponent(shiftId)}`;
+  }
+
+  return `${base}#/${area}/schema`;
+}
+
+function notificationCopy(kind: string, role: UserRole, detail: string): { title: string; intro: string; body?: string[]; eyebrow?: string } {
+  const isCustomer = role === 'customer' || role === 'customer_employee';
+
+  switch (kind) {
+    case 'sick_reported':
+      return isCustomer
+        ? {
+          title: 'Vi hanterar ditt bokade pass',
+          intro: detail ? `${detail} är påverkat av sjukfrånvaro.` : 'Ett bokat pass är påverkat av sjukfrånvaro.',
+          body: ['CleanUp hanterar bemanningen och återkommer om något behöver ändras.'],
+          eyebrow: 'Uppdatering',
+        }
+        : {
+          title: 'Pass sjukanmält',
+          intro: detail ? `${detail} har sjukanmälts.` : 'Ett pass har sjukanmälts.',
+          body: ['Öppna portalen för att se passet och planera nästa steg.'],
+          eyebrow: 'Åtgärd behövs',
+        };
+    case 'assigned_shift':
+      return isCustomer
+        ? {
+          title: 'Din bokning är bekräftad',
+          intro: detail ? `${detail} är bekräftat av CleanUp.` : 'Din bokning är bekräftad av CleanUp.',
+          body: ['Du kan se detaljerna i kundportalen.'],
+          eyebrow: 'Bokning',
+        }
+        : {
+          title: 'Du har tilldelats ett pass',
+          intro: detail ? `${detail} har lagts på ditt schema.` : 'Ett nytt pass har lagts på ditt schema.',
+          body: ['Öppna portalen för att se adress, tid och checklista.'],
+          eyebrow: 'Schema',
+        };
+    case 'shift_approved':
+      return {
+        title: 'Pass godkänt',
+        intro: detail ? `${detail} är godkänt.` : 'Ett pass är godkänt.',
+        body: ['Statusen är uppdaterad i CleanUp-portalen.'],
+        eyebrow: 'Bekräftelse',
+      };
+    case 'unassigned_shift':
+      return {
+        title: 'Du togs bort från ett pass',
+        intro: detail ? `${detail} finns inte längre på ditt schema.` : 'Ett pass finns inte längre på ditt schema.',
+        eyebrow: 'Schema',
+      };
+    case 'cleaner_swapped':
+      return isCustomer
+        ? {
+          title: 'Din städning är uppdaterad',
+          intro: detail ? `${detail} har fått uppdaterad bemanning.` : 'CleanUp har uppdaterat bemanningen för ett pass.',
+          body: ['Tiden och bokningsdetaljerna är oförändrade om inget annat anges.'],
+          eyebrow: 'Uppdatering',
+        }
+        : {
+          title: 'Du har tilldelats ett pass',
+          intro: detail ? `${detail} har lagts på ditt schema.` : 'Du har tilldelats ett pass.',
+          eyebrow: 'Schema',
+        };
+    case 'time_adjusted':
+      return {
+        title: 'Tid justerad',
+        intro: detail ? `${detail} har uppdaterad tid.` : 'Tiden för ett pass har ändrats.',
+        body: ['Öppna portalen för att se den aktuella tiden.'],
+        eyebrow: 'Tidsändring',
+      };
+    case 'customer_cancelled':
+      return {
+        title: 'Pass avbokat av kund',
+        intro: detail ? `${detail} har avbokats av kunden.` : 'Ett pass har avbokats av kunden.',
+        body: ['Statusen är uppdaterad i CleanUp.'],
+        eyebrow: 'Avbokning',
+      };
+    case 'admin_deleted':
+      return isCustomer
+        ? {
+          title: 'Pass borttaget',
+          intro: detail ? `${detail} har tagits bort av CleanUp.` : 'CleanUp har tagit bort ett pass.',
+          body: ['Kontakta CleanUp om något verkar fel.'],
+          eyebrow: 'Uppdatering',
+        }
+        : {
+          title: 'Pass borttaget',
+          intro: detail ? `${detail} har tagits bort.` : 'Ett pass har tagits bort.',
+          eyebrow: 'Schema',
+        };
+    case 'paused_by_holiday':
+      return {
+        title: 'Pass pausat',
+        intro: detail ? `${detail} har pausats på grund av kundledighet.` : 'Ett pass har pausats på grund av kundledighet.',
+        eyebrow: 'Kundledighet',
+      };
+    case 'holiday_created':
+      return {
+        title: 'Ny kundledighet registrerad',
+        intro: 'Kundledighet har registrerats och berörda pass har pausats.',
+        body: ['Berörda pass har pausats i schemat.'],
+        eyebrow: 'Kundledighet',
+      };
+    case 'holiday_removed':
+      return {
+        title: 'Kundledighet borttagen',
+        intro: detail ? `${detail} är uppdaterat.` : 'Kundledigheten är borttagen och berörda pass är uppdaterade.',
+        eyebrow: 'Kundledighet',
+      };
+    case 'incident_created':
+      return {
+        title: 'Nytt avvikelseärende',
+        intro: detail ? `Ett nytt ärende har registrerats för ${detail}.` : 'Ett nytt avvikelseärende har registrerats.',
+        body: ['Öppna portalen för att läsa detaljerna och följa hanteringen.'],
+        eyebrow: 'Avvikelse',
+      };
+    case 'incident_resolved':
+      return {
+        title: 'Ditt ärende är åtgärdat',
+        intro: 'Ärendet har markerats som åtgärdat i CleanUp.',
+        body: ['Tack för att du hjälper oss hålla kvaliteten tydlig.'],
+        eyebrow: 'Ärende',
+      };
+    case 'incident_in_progress':
+      return {
+        title: 'Ditt ärende behandlas',
+        intro: 'CleanUp har börjat hantera ärendet.',
+        body: ['Du kan följa statusen i portalen.'],
+        eyebrow: 'Ärende',
+      };
+    case 'shift_will_be_missed':
+      return {
+        title: 'Pass kommer inte att utföras',
+        intro: detail ? `${detail} kommer inte att utföras som planerat.` : 'Ett pass kommer inte att utföras som planerat.',
+        body: ['CleanUp hanterar uppföljningen i portalen.'],
+        eyebrow: 'Viktig uppdatering',
+      };
+    case 'shift_request_created':
+      return {
+        title: 'Nytt önskemål från kund',
+        intro: detail ? `Ett nytt önskemål har kommit in för ${detail}.` : 'En kund har lämnat ett nytt önskemål.',
+        body: ['Öppna portalen för att läsa och hantera önskemålet.'],
+        eyebrow: 'Kundönskemål',
+      };
+    case 'customer_booking_request':
+      return {
+        title: 'Ny bokningsförfrågan',
+        intro: detail ? `En ny publik bokningsförfrågan har kommit in för ${detail}.` : 'En ny publik bokningsförfrågan har kommit in.',
+        body: ['Granska förfrågan i adminportalen och bekräfta nästa steg.'],
+        eyebrow: 'Ny förfrågan',
+      };
+    case 'new_message':
+      return {
+        title: 'Nytt meddelande',
+        intro: 'Du har fått ett nytt meddelande i CleanUp-portalen.',
+        body: ['Öppna portalen för att läsa och svara.'],
+        eyebrow: 'Meddelande',
+      };
+    default:
+      return {
+        title: 'Ny notis i CleanUp',
+        intro: detail || 'Du har en ny notis i CleanUp-portalen.',
+        eyebrow: 'Notis',
+      };
+  }
 }
 
 function buildEmailContent(
@@ -41,83 +201,39 @@ function buildEmailContent(
   propertyName: string,
   payload: Record<string, unknown>,
   appBaseUrl: string,
-): { subject: string; text: string; html: string } | null {
-  const when = formatDateTime(payload.start_at as string);
+): { subject: string; text: string; html: string } {
+  const when = formatDateTimeSE(payload.start_at as string);
   const propLine = propertyName ? `${propertyName}` : '';
-  const timeLine = when ? ` · ${when}` : '';
-  const detail = propLine + timeLine;
+  const detail = [propLine, when].filter(Boolean).join(' · ');
   const shiftId = typeof payload.shift_id === 'string' ? payload.shift_id : '';
-  const shiftUrl = shiftId
-    ? `${appBaseUrl.replace(/\/$/, '')}#/kund/pass/${encodeURIComponent(shiftId)}`
-    : `${appBaseUrl.replace(/\/$/, '')}#/kund/schema`;
-  const staffUrl = `${appBaseUrl.replace(/\/$/, '')}#/${role === 'cleaner' ? 'stadare/schema' : 'admin/schema'}`;
+  const copy = notificationCopy(kind, role, detail);
+  const isCustomer = role === 'customer' || role === 'customer_employee';
 
-  const actionLine = role === 'customer' || role === 'customer_employee'
-    ? `\n\nDu kan se detaljerna i kundportalen: ${shiftUrl}`
-    : `\n\nLogga in i CleanUp-portalen för att hantera detta: ${staffUrl}`;
-  const actionHtml = role === 'customer' || role === 'customer_employee'
-    ? `<p><a href="${shiftUrl}" style="display:inline-block;background:#2557c7;color:#ffffff;text-decoration:none;border-radius:10px;padding:10px 14px;font-weight:700;">Öppna i kundportalen</a></p>`
-    : `<p><a href="${staffUrl}" style="display:inline-block;background:#2557c7;color:#ffffff;text-decoration:none;border-radius:10px;padding:10px 14px;font-weight:700;">Öppna CleanUp-portalen</a></p>`;
-
-  const wrap = (title: string, body: string) => ({
-    subject: `CleanUp: ${title}`,
-    text: `${title}\n\n${body}${actionLine}\n\n— CleanUp`,
-    html: `<p><strong>${escapeHtml(title)}</strong></p><p>${escapeHtml(body).replace(/\n/g, '<br>')}</p>${actionHtml}<p style="color:#64748b;font-size:12px;">— CleanUp</p>`,
-  });
-
-  switch (kind) {
-    case 'sick_reported':
-      if (role === 'customer' || role === 'customer_employee') {
-        return wrap('Vi hanterar ditt bokade pass', detail ? `${detail}\n\nStädaren har sjukanmält passet. CleanUp hanterar detta och återkommer vid behov.` : 'Städaren har sjukanmält ett pass. CleanUp hanterar detta och återkommer vid behov.');
-      }
-      return wrap('Pass sjukanmält', detail || 'Ett pass har sjukanmälts.');
-    case 'assigned_shift':
-      if (role === 'customer' || role === 'customer_employee') {
-        return wrap('Din bokning är bekräftad', detail || 'Din bokning är bekräftad av CleanUp.');
-      }
-      return wrap('Du har tilldelats ett pass', detail || 'Ett nytt pass har tilldelats.');
-    case 'unassigned_shift':
-      return wrap('Du togs bort från ett pass', detail || 'Du togs bort från ett pass.');
-    case 'cleaner_swapped':
-      if (role === 'customer' || role === 'customer_employee') {
-        return wrap('Din städning är uppdaterad', detail ? `${detail}\n\nCleanUp har uppdaterat bemanningen för passet.` : 'CleanUp har uppdaterat bemanningen för ett pass.');
-      }
-      return wrap('Du har tilldelats ett pass', detail || 'Du har tilldelats ett pass.');
-    case 'time_adjusted':
-      return wrap('Tid justerad', detail || 'Tiden för ett pass har ändrats.');
-    case 'customer_cancelled':
-      return wrap('Pass avbokat av kund', detail || 'Ett pass har avbokats av kunden.');
-    case 'admin_deleted':
-      if (role === 'customer' || role === 'customer_employee') {
-        return wrap('Pass borttaget', detail ? `${detail}\n\nCleanUp har tagit bort passet. Kontakta oss om något verkar fel.` : 'CleanUp har tagit bort ett pass. Kontakta oss om något verkar fel.');
-      }
-      return wrap('Pass borttaget', detail || 'Ett pass har tagits bort.');
-    case 'paused_by_holiday':
-      return wrap('Pass pausat (kundledighet)', detail || 'Ett pass har pausats på grund av kundledighet.');
-    case 'holiday_created': {
-      const count = payload.count ?? '?';
-      return wrap('Ny kundledighet registrerad', `${count} pass har pausats.`);
-    }
-    case 'holiday_removed':
-      if (payload.shift_id) {
-        return wrap('Pausat pass återaktiverat', detail || 'Ett pausat pass är återaktiverat.');
-      }
-      return wrap('Kundledighet borttagen', `${payload.restored ?? '?'} pass återaktiverade.`);
-    case 'incident_created':
-      return wrap('Nytt avvikelse-ärende', propLine || 'Ett nytt ärende har registrerats.');
-    case 'incident_resolved':
-      return wrap('Ditt ärende är åtgärdat', 'Ditt ärende har markerats som åtgärdat.');
-    case 'incident_in_progress':
-      return wrap('Ditt ärende behandlas', 'Ditt ärende behandlas av admin.');
-    case 'shift_will_be_missed':
-      return wrap('Pass kommer inte att utföras', detail || 'Ett pass kommer inte att utföras som planerat.');
-    case 'shift_request_created':
-      return wrap('Nytt önskemål från kund', propLine || 'En kund har lämnat ett nytt önskemål.');
-    case 'customer_booking_request':
-      return wrap('Ny bokningsförfrågan', detail || 'En ny publik bokningsförfrågan har kommit in.');
-    default:
-      return wrap(kind, detail || 'Du har en ny notis i CleanUp.');
+  let intro = copy.intro;
+  if (kind === 'holiday_created') {
+    intro = `${payload.count ?? '?'} pass har pausats.`;
   }
+  if (kind === 'holiday_removed' && !payload.shift_id) {
+    intro = `${payload.restored ?? '?'} pass har återaktiverats.`;
+  }
+
+  return renderCleanUpEmail({
+    subject: `CleanUp: ${copy.title}`,
+    preheader: copy.intro,
+    eyebrow: copy.eyebrow,
+    title: copy.title,
+    intro,
+    body: copy.body,
+    details: [
+      { label: 'Objekt', value: propertyName },
+      { label: 'Tid', value: when },
+    ],
+    ctaLabel: isCustomer ? 'Öppna kundportalen' : 'Öppna CleanUp-portalen',
+    ctaUrl: portalUrl(appBaseUrl, role, shiftId),
+    note: isCustomer
+      ? 'Det här är ett automatiskt meddelande från CleanUp. Svara via portalen om du behöver återkoppla.'
+      : 'Det här är ett automatiskt arbetsmeddelande från CleanUp.',
+  });
 }
 
 function isValidEmail(email: string): boolean {
@@ -200,12 +316,6 @@ Deno.serve(async (req) => {
     }
 
     const content = buildEmailContent(notif.kind, user.role as UserRole, propertyName, payload, appBaseUrl);
-    if (!content) {
-      return new Response(JSON.stringify({ ok: true, skipped: 'no_template' }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
-
     const resendRes = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: {
