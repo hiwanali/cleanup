@@ -46,6 +46,7 @@
     shifts: ['start_at', 'end_at', 'original_start_at', 'original_end_at', 'checked_in_at', 'checked_out_at', 'sick_finalized_at', 'created_at', 'updated_at'],
     customer_holidays: ['start_date', 'end_date', 'created_at'],
     shift_events: ['created_at'],
+    booking_attendance_attempts: ['client_observed_updated_at', 'server_shift_updated_at', 'created_at'],
     cleaning_checklists: ['created_at'],
     shift_checklist_items: ['done_at', 'created_at'],
     customer_holiday_properties: [],
@@ -115,6 +116,7 @@
       recurring_schedules,
       shifts,
       shift_events,
+      booking_attendance_attempts,
       cleaning_checklists,
       shift_checklist_items,
       customer_holidays,
@@ -140,6 +142,7 @@
       fetchTable('recurring_schedules'),
       fetchTable('shifts'),
       fetchTable('shift_events'),
+      fetchTable('booking_attendance_attempts'),
       fetchTable('cleaning_checklists'),
       fetchTable('shift_checklist_items'),
       fetchTable('customer_holidays'),
@@ -172,6 +175,7 @@
       recurring_schedules,
       shifts,
       shift_events,
+      booking_attendance_attempts,
       cleaning_checklists,
       shift_checklist_items,
       customer_holidays,
@@ -213,6 +217,42 @@
     if (d == null) return null;
     if (d instanceof Date) return d.toISOString();
     return d;
+  }
+
+  function newClientAttemptId(action, shiftId) {
+    const random = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    return `${action}:${shiftId}:${random}`;
+  }
+
+  async function ensureAttendanceSession(expectedUserId) {
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      return {
+        ok: false,
+        code: 'OFFLINE',
+        message: 'Du verkar vara offline. In- eller utcheckningen är inte sparad.',
+      };
+    }
+
+    const { data, error } = await sb.auth.getSession();
+    if (error || !data?.session?.user?.id) {
+      return {
+        ok: false,
+        code: 'SESSION_REQUIRED',
+        message: 'Sessionen behöver uppdateras. Logga in igen innan du checkar in eller ut.',
+      };
+    }
+
+    if (expectedUserId && data.session.user.id !== expectedUserId) {
+      return {
+        ok: false,
+        code: 'SESSION_MISMATCH',
+        message: 'Fel användare är inloggad i den här fliken. Ladda om sidan eller logga in igen.',
+      };
+    }
+
+    return { ok: true, session: data.session };
   }
 
   function serializeNotificationPayload(payload) {
@@ -1076,77 +1116,94 @@
     return { ok: true, data };
   }
 
-  async function persistCheckIn({ shiftId, cleanerUserId, checkedInAt, shift, lateSameDay }) {
+  async function persistCheckIn({ shiftId, cleanerUserId, shift, clientObserved }) {
     if (!enabled || !sb || !isUuid(shiftId)) {
       return { ok: true, skipped: true };
     }
 
-    const update = {
-      status: 'Pågående',
-      checked_in_at: toIso(checkedInAt),
-      last_modified_by: cleanerUserId,
-    };
-    if (lateSameDay && shift) {
-      update.start_at = toIso(shift.start_at);
-      update.end_at = toIso(shift.end_at);
-      update.original_start_at = shift.original_start_at ? toIso(shift.original_start_at) : null;
-      update.original_end_at = shift.original_end_at ? toIso(shift.original_end_at) : null;
-    }
+    const sessionCheck = await ensureAttendanceSession(cleanerUserId);
+    if (!sessionCheck.ok) return sessionCheck;
 
-    const { error: shiftErr } = await sb.from('shifts').update(update).eq('id', shiftId);
-
-    if (shiftErr) {
-      console.error('[persist] checkIn:', shiftErr.message);
-      return { ok: false, message: shiftErr.message };
-    }
-
-    const { error: evErr } = await sb.from('shift_events').insert({
-      shift_id: shiftId,
-      actor_user_id: cleanerUserId,
-      event_type: 'check_in',
-      payload: { late_same_day: !!lateSameDay },
+    const clientAttemptId = newClientAttemptId('check_in', shiftId);
+    const observed = clientObserved || shift || {};
+    const { data, error } = await sb.rpc('check_in_booking', {
+      p_shift_id: shiftId,
+      p_client_attempt_id: clientAttemptId,
+      p_client_observed_status: observed.status || null,
+      p_client_observed_updated_at: toIso(observed.updated_at || null),
     });
 
-    if (evErr) return { ok: false, message: evErr.message };
-    return { ok: true };
+    if (error) {
+      console.error('[persist] checkIn:', error.message);
+      return {
+        ok: false,
+        code: error.code || 'RPC_FAILED',
+        message: 'Kunde inte spara incheckningen. Försök igen.',
+        detail: error.message,
+      };
+    }
+
+    if (data?.ok === false) {
+      return {
+        ok: false,
+        code: data.reason || 'REJECTED',
+        reason: data.reason || null,
+        message: data.message || 'Passet kunde inte checkas in.',
+        data,
+        shift: data.shift ? convertRow('shifts', data.shift) : null,
+      };
+    }
+
+    return {
+      ok: true,
+      data,
+      shift: data?.shift ? convertRow('shifts', data.shift) : null,
+    };
   }
 
-  async function persistCheckOut({ shiftId, cleanerUserId, shift, checkedOutAt }) {
+  async function persistCheckOut({ shiftId, cleanerUserId, shift, clientObserved }) {
     if (!enabled || !sb || !isUuid(shiftId)) {
       return { ok: true, skipped: true };
     }
 
-    const { error: shiftErr } = await sb.from('shifts').update({
-      status: 'Utfört',
-      checked_in_at: toIso(shift.checked_in_at),
-      checked_out_at: toIso(checkedOutAt),
-      start_at: toIso(shift.start_at),
-      end_at: toIso(shift.end_at),
-      original_start_at: toIso(shift.original_start_at),
-      original_end_at: toIso(shift.original_end_at),
-      last_modified_by: cleanerUserId,
-    }).eq('id', shiftId);
+    const sessionCheck = await ensureAttendanceSession(cleanerUserId);
+    if (!sessionCheck.ok) return sessionCheck;
 
-    if (shiftErr) {
-      console.error('[persist] checkOut:', shiftErr.message);
-      return { ok: false, message: shiftErr.message };
-    }
-
-    const { error: evErr } = await sb.from('shift_events').insert({
-      shift_id: shiftId,
-      actor_user_id: cleanerUserId,
-      event_type: 'check_out',
-      payload: {
-        planned: {
-          start_at: toIso(shift.original_start_at),
-          end_at: toIso(shift.original_end_at),
-        },
-        actual: { start_at: toIso(shift.start_at), end_at: toIso(shift.end_at) },
-      },
+    const clientAttemptId = newClientAttemptId('check_out', shiftId);
+    const observed = clientObserved || shift || {};
+    const { data, error } = await sb.rpc('check_out_booking', {
+      p_shift_id: shiftId,
+      p_client_attempt_id: clientAttemptId,
+      p_client_observed_status: observed.status || null,
+      p_client_observed_updated_at: toIso(observed.updated_at || null),
     });
 
-    if (evErr) return { ok: false, message: evErr.message };
-    return { ok: true };
+    if (error) {
+      console.error('[persist] checkOut:', error.message);
+      return {
+        ok: false,
+        code: error.code || 'RPC_FAILED',
+        message: 'Kunde inte spara utcheckningen. Försök igen.',
+        detail: error.message,
+      };
+    }
+
+    if (data?.ok === false) {
+      return {
+        ok: false,
+        code: data.reason || 'REJECTED',
+        reason: data.reason || null,
+        message: data.message || 'Passet kunde inte checkas ut.',
+        data,
+        shift: data.shift ? convertRow('shifts', data.shift) : null,
+      };
+    }
+
+    return {
+      ok: true,
+      data,
+      shift: data?.shift ? convertRow('shifts', data.shift) : null,
+    };
   }
 
   async function persistAdminCompleteShift({ shiftId, actorUserId, shift }) {

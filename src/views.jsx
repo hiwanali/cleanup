@@ -1964,6 +1964,7 @@
       || (role === 'admin' && !['Borttaget', 'Avbokat'].includes(shift.status));
     const canAdminEditChecklist = role === 'admin' && !['Borttaget', 'Avbokat'].includes(shift.status);
     const [sickOpen, setSickOpen] = useState(false);
+    const [attendanceSaving, setAttendanceSaving] = useState(false);
     const [bookingPdfExporting, setBookingPdfExporting] = useState(false);
     const [portalInviteSending, setPortalInviteSending] = useState(false);
     const [newChecklistTitle, setNewChecklistTitle] = useState('');
@@ -2069,20 +2070,34 @@
                     </p>
                   </div>
                   {canCheckIn && (
-                    <Button variant="primary" icon="play" onClick={async () => {
-                      const r = await db.checkIn(shift.id, session.userId);
-                      if (r?.ok) toast.success(isLateCheckIn ? 'Incheckad. Din faktiska tid gäller i rapporten.' : 'Incheckad. Lycka till med passet!');
-                      else if (r?.error === 'NOT_ELIGIBLE') toast.error('Passet kan inte checkas in.');
-                      else if (r?.error === 'PERSIST_FAILED') toast.error('Kunde inte spara – försök igen.');
-                    }}>Checka in</Button>
+                    <Button variant="primary" icon="play" loading={attendanceSaving} disabled={attendanceSaving} onClick={async () => {
+                      if (attendanceSaving) return;
+                      setAttendanceSaving(true);
+                      try {
+                        const r = await db.checkIn(shift.id, session.userId);
+                        if (r?.ok) toast.success(isLateCheckIn ? 'Incheckad. Din faktiska tid gäller i rapporten.' : 'Incheckad. Lycka till med passet!');
+                        else if (r?.message) toast.error(r.message);
+                        else if (r?.error === 'NOT_ELIGIBLE') toast.error('Passet kan inte checkas in.');
+                        else if (r?.error === 'PERSIST_FAILED') toast.error('Kunde inte spara – försök igen.');
+                      } finally {
+                        setAttendanceSaving(false);
+                      }
+                    }}>{attendanceSaving ? 'Sparar...' : 'Checka in'}</Button>
                   )}
                   {canCheckOut && (
-                    <Button variant="success" icon="check" onClick={async () => {
-                      const r = await db.checkOut(shift.id, session.userId);
-                      if (r?.ok) toast.success('Utcheckad. Tack för idag!');
-                      else if (r?.error === 'NOT_ELIGIBLE') toast.error('Passet kan inte checkas ut.');
-                      else if (r?.error === 'PERSIST_FAILED') toast.error('Kunde inte spara – försök igen.');
-                    }}>Checka ut</Button>
+                    <Button variant="success" icon="check" loading={attendanceSaving} disabled={attendanceSaving} onClick={async () => {
+                      if (attendanceSaving) return;
+                      setAttendanceSaving(true);
+                      try {
+                        const r = await db.checkOut(shift.id, session.userId);
+                        if (r?.ok) toast.success('Utcheckad. Tack för idag!');
+                        else if (r?.message) toast.error(r.message);
+                        else if (r?.error === 'NOT_ELIGIBLE') toast.error('Passet kan inte checkas ut.');
+                        else if (r?.error === 'PERSIST_FAILED') toast.error('Kunde inte spara – försök igen.');
+                      } finally {
+                        setAttendanceSaving(false);
+                      }
+                    }}>{attendanceSaving ? 'Sparar...' : 'Checka ut'}</Button>
                   )}
                 </div>
               </Card>

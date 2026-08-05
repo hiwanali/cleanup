@@ -129,6 +129,7 @@
     booking_availability_series: [],
     booking_availability_slots: [],
     booking_requests: [],
+    booking_attendance_attempts: [],
   };
 
   /* ============================================================
@@ -546,6 +547,25 @@
         done_at: null,
         done_by_cleaner_user_id: null,
       });
+    });
+  }
+
+  function applyCanonicalShift(target, canonical) {
+    if (!target || !canonical) return;
+    [
+      'status',
+      'start_at',
+      'end_at',
+      'original_start_at',
+      'original_end_at',
+      'last_modified_by',
+      'checked_in_at',
+      'checked_out_at',
+      'updated_at',
+    ].forEach(key => {
+      if (Object.prototype.hasOwnProperty.call(canonical, key)) {
+        target[key] = canonical[key];
+      }
     });
   }
 
@@ -2582,6 +2602,30 @@
     async checkIn(shiftId, cleanerUserId) {
       const s = db.shiftById(shiftId);
       if (!s) return { error: 'NOT_FOUND' };
+
+      const persist = window.dbPersist && window.dbPersist.checkIn;
+      if (persist && window.SUPABASE_ENABLED) {
+        const r = await persist({
+          shiftId,
+          cleanerUserId,
+          shift: s,
+          clientObserved: { status: s.status, updated_at: s.updated_at },
+        });
+        if (r?.shift) {
+          applyCanonicalShift(s, r.shift);
+          bump();
+        }
+        if (!r.ok) {
+          return {
+            error: r.code || 'PERSIST_FAILED',
+            reason: r.reason || null,
+            message: r.message,
+          };
+        }
+        if (!r.shift) bump();
+        return { ok: true, result: r.data?.result || 'confirmed', reason: r.data?.reason || null };
+      }
+
       if (!db.canCleanerCheckIn(s)) return { error: 'NOT_ELIGIBLE' };
 
       const snapshot = {
@@ -2620,7 +2664,6 @@
       });
       bump();
 
-      const persist = window.dbPersist && window.dbPersist.checkIn;
       if (persist) {
         const r = await persist({
           shiftId,
@@ -2647,6 +2690,30 @@
     async checkOut(shiftId, cleanerUserId) {
       const s = db.shiftById(shiftId);
       if (!s) return { error: 'NOT_FOUND' };
+
+      const persist = window.dbPersist && window.dbPersist.checkOut;
+      if (persist && window.SUPABASE_ENABLED) {
+        const r = await persist({
+          shiftId,
+          cleanerUserId,
+          shift: s,
+          clientObserved: { status: s.status, updated_at: s.updated_at },
+        });
+        if (r?.shift) {
+          applyCanonicalShift(s, r.shift);
+          bump();
+        }
+        if (!r.ok) {
+          return {
+            error: r.code || 'PERSIST_FAILED',
+            reason: r.reason || null,
+            message: r.message,
+          };
+        }
+        if (!r.shift) bump();
+        return { ok: true, result: r.data?.result || 'confirmed', reason: r.data?.reason || null };
+      }
+
       if (!db.canCleanerCheckOut(s)) return { error: 'NOT_ELIGIBLE' };
 
       const snapshot = {
@@ -2685,7 +2752,6 @@
       });
       bump();
 
-      const persist = window.dbPersist && window.dbPersist.checkOut;
       if (persist) {
         const r = await persist({
           shiftId,
