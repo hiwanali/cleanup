@@ -1944,6 +1944,7 @@
     const bookingAddons = bookingRequest?.addons && typeof bookingRequest.addons === 'object' ? bookingRequest.addons : {};
     const customerBookingRequest = isCustomerView ? db.bookingRequestForShift(shift.id) : null;
     const customerBookingAddons = customerBookingRequest?.addons && typeof customerBookingRequest.addons === 'object' ? customerBookingRequest.addons : {};
+    const propertyNote = formatCustomerPropertyNote(prop?.notes);
     const bookingWorkflowStatus = bookingRequest
       ? (shift.status === 'Godkänt' ? 'approved' : shift.status === 'Avbokat' ? 'declined' : bookingRequest.status)
       : null;
@@ -2446,12 +2447,12 @@
                     </dd>
                   </div>
                 </div>
-                {prop?.notes && (
+                {propertyNote && (
                   <div className="flex items-start gap-2 pt-2 border-t border-slate-100">
                     <Icon name="info" className="w-4 h-4 text-slate-400 mt-0.5" />
                     <div className="flex-1">
                       <dt className="text-xs text-slate-500">Att tänka på</dt>
-                      <dd className="text-slate-700">{prop.notes}</dd>
+                      <dd className="text-slate-700 whitespace-pre-line">{propertyNote}</dd>
                     </div>
                   </div>
                 )}
@@ -3355,9 +3356,9 @@
     }
 
     // ≤ 24 h kvar → infobox med admins kontaktuppgifter
-    const support = db.orgSupportContact();
     const cancellationPhone = '0700 930 860';
     const cancellationPhoneHref = cancellationPhone.replace(/\s+/g, '');
+    const cancellationEmail = 'info@cleanup.nu';
     const hoursLeft = Math.max(0, Math.floor(hoursToStart));
     return (
       <Card padding="md" className="border-amber-200 bg-amber-50/40">
@@ -3377,7 +3378,7 @@
           </div>
           <div className="flex items-center gap-2 text-slate-900">
             <Icon name="mail" className="w-4 h-4 text-amber-700" />
-            <a href={`mailto:${support.email}`} className="font-medium hover:underline">{support.email}</a>
+            <a href={`mailto:${cancellationEmail}`} className="font-medium hover:underline">{cancellationEmail}</a>
           </div>
         </div>
       </Card>
@@ -4697,6 +4698,26 @@
       construction_services: 'Byggtjänster',
     };
     return labels[serviceType] || serviceType || 'Tjänst';
+  }
+
+  function formatCustomerPropertyNote(note) {
+    const raw = String(note || '').trim();
+    if (!raw) return '';
+    if (!raw.toLowerCase().startsWith('public booking request')) return raw;
+
+    const lines = raw.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+    const parts = {};
+    lines.forEach((line) => {
+      const m = line.match(/^([^:]+):\s*(.*)$/);
+      if (m) parts[m[1].trim().toLowerCase()] = m[2].trim();
+    });
+
+    const out = ['Bokad via publika bokningsformuläret.'];
+    if (parts.service) out.push(`Tjänst: ${serviceLabel(parts.service)}`);
+    if (parts['postal code']) out.push(`Postnummer: ${parts['postal code']}`);
+    if (parts.city) out.push(`Ort: ${parts.city}`);
+    if (parts.message) out.push(`Meddelande: ${parts.message}`);
+    return out.join('\n');
   }
 
   function AdminAvailabilityView({ session }) {
