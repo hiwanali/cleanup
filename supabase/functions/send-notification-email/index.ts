@@ -22,8 +22,25 @@ function roleArea(role: UserRole): 'admin' | 'stadare' | 'kund' {
   return 'admin';
 }
 
+function normalizeAppBaseUrl(raw?: string | null): string {
+  const fallback = 'https://www.logincleanup.app/CleanUp.html';
+  const value = (raw || fallback).trim() || fallback;
+
+  try {
+    const url = new URL(value);
+    url.hash = '';
+    if (!/\/CleanUp\.html$/i.test(url.pathname)) {
+      const prefix = url.pathname.replace(/\/+$/, '');
+      url.pathname = `${prefix}/CleanUp.html`;
+    }
+    return url.toString();
+  } catch (_) {
+    return fallback;
+  }
+}
+
 function portalUrl(appBaseUrl: string, role: UserRole, shiftId: string, targetPath?: string): string {
-  const base = appBaseUrl.replace(/\/$/, '');
+  const base = normalizeAppBaseUrl(appBaseUrl).replace(/\/$/, '');
   const area = roleArea(role);
   const target = String(targetPath || '').trim();
 
@@ -264,7 +281,7 @@ Deno.serve(async (req) => {
     const resendFrom = Deno.env.get('RESEND_FROM');
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
     const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
-    const appBaseUrl = Deno.env.get('CUSTOMER_PORTAL_SITE_URL') ?? 'https://www.logincleanup.app/CleanUp.html';
+    const appBaseUrl = normalizeAppBaseUrl(Deno.env.get('CUSTOMER_PORTAL_SITE_URL'));
 
     if (!resendKey || !resendFrom) {
       return new Response(JSON.stringify({ error: 'RESEND not configured' }), {

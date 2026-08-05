@@ -3,7 +3,8 @@
   "outputDirectory": "dist",
   "rewrites": [
     { "source": "/embed/booking", "destination": "/CleanUp.html" },
-    { "source": "/", "destination": "/CleanUp.html" }
+    { "source": "/", "destination": "/CleanUp.html" },
+    { "source": "/(.*)", "destination": "/CleanUp.html" }
   ],
   "headers": [
     {
