@@ -22,9 +22,22 @@ function roleArea(role: UserRole): 'admin' | 'stadare' | 'kund' {
   return 'admin';
 }
 
-function portalUrl(appBaseUrl: string, role: UserRole, shiftId: string): string {
+function portalUrl(appBaseUrl: string, role: UserRole, shiftId: string, targetPath?: string): string {
   const base = appBaseUrl.replace(/\/$/, '');
   const area = roleArea(role);
+  const target = String(targetPath || '').trim();
+
+  if (/^https?:\/\//i.test(target)) {
+    return target;
+  }
+
+  if (target.startsWith('#/')) {
+    return `${base}${target}`;
+  }
+
+  if (target.startsWith('/')) {
+    return `${base}#${target}`;
+  }
 
   if ((role === 'customer' || role === 'customer_employee') && shiftId) {
     return `${base}#/kund/pass/${encodeURIComponent(shiftId)}`;
@@ -206,6 +219,7 @@ function buildEmailContent(
   const propLine = propertyName ? `${propertyName}` : '';
   const detail = [propLine, when].filter(Boolean).join(' · ');
   const shiftId = typeof payload.shift_id === 'string' ? payload.shift_id : '';
+  const targetPath = typeof payload.target_path === 'string' ? payload.target_path : '';
   const copy = notificationCopy(kind, role, detail);
   const isCustomer = role === 'customer' || role === 'customer_employee';
 
@@ -228,8 +242,8 @@ function buildEmailContent(
       { label: 'Objekt', value: propertyName },
       { label: 'Tid', value: when },
     ],
-    ctaLabel: isCustomer ? 'Öppna kundportalen' : 'Öppna CleanUp-portalen',
-    ctaUrl: portalUrl(appBaseUrl, role, shiftId),
+    ctaLabel: kind === 'new_message' ? 'Öppna meddelanden' : isCustomer ? 'Öppna kundportalen' : 'Öppna CleanUp-portalen',
+    ctaUrl: portalUrl(appBaseUrl, role, shiftId, targetPath),
     note: isCustomer
       ? 'Det här är ett automatiskt meddelande från CleanUp. Svara via portalen om du behöver återkoppla.'
       : 'Det här är ett automatiskt arbetsmeddelande från CleanUp.',

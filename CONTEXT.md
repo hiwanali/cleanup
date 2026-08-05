@@ -20,6 +20,10 @@ _Avoid_: object, property
 A conversation between the customer and CleanUp about bookings, changes, additions, or questions.
 _Avoid_: ticket, internal chat
 
+**Notification**:
+A user-facing signal that something needs attention or has changed.
+_Avoid_: system event, log entry
+
 **Help Case**:
 A customer-facing issue or complaint connected to a booking or service quality.
 _Avoid_: deviation, incident, avvikelse

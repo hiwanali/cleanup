@@ -200,7 +200,7 @@
   /* ============================================================
    * Top bar
    * ============================================================ */
-  function TopBar({ session, onOpenMenu }) {
+  function TopBar({ session, onOpenMenu, onNavigate }) {
     useDb();
     const unread = db.unreadCountForUser(session.userId);
     const [bellOpen, setBellOpen] = useState(false);
@@ -234,12 +234,12 @@
           </div>
         </div>
 
-        {bellOpen && <NotificationsDropdown session={session} onClose={() => setBellOpen(false)} />}
+        {bellOpen && <NotificationsDropdown session={session} onClose={() => setBellOpen(false)} onNavigate={onNavigate} />}
       </header>
     );
   }
 
-  function NotificationsDropdown({ session, onClose }) {
+  function NotificationsDropdown({ session, onClose, onNavigate }) {
     const list = db.notificationsForUser(session.userId).slice(0, 12);
     useEffect(() => {
       const onClick = e => {
@@ -282,7 +282,7 @@
         case 'shift_will_be_missed':
           return { title: 'Pass kommer inte att utföras', body: prop ? `${prop.name} · ${formatDateTime(n.payload.start_at)}` : '', icon: 'alert-circle', tone: 'amber' };
         case 'new_message':
-          return { title: 'Nytt meddelande', body: '', icon: 'message-square', tone: 'brand' };
+          return { title: 'Nytt meddelande', body: n.payload?.preview || '', icon: 'message-square', tone: 'brand' };
         case 'shift_request_created':
           return { title: 'Nytt önskemål från kund', body: prop ? prop.name : '', icon: 'message-square', tone: 'sky' };
         case 'customer_booking_request':
@@ -321,8 +321,20 @@
           ) : (
             list.map(n => {
               const d = describe(n);
+              const targetPath = typeof n.payload?.target_path === 'string' ? n.payload.target_path : '';
+              const clickable = targetPath && typeof onNavigate === 'function';
+              const Wrapper = clickable ? 'button' : 'div';
               return (
-                <div key={n.id} className={cx('flex items-start gap-3 px-4 py-3 border-b border-slate-50 last:border-0', !n.read_at && 'bg-brand-50/30')}>
+                <Wrapper
+                  key={n.id}
+                  type={clickable ? 'button' : undefined}
+                  onClick={clickable ? () => { onNavigate(targetPath); onClose(); } : undefined}
+                  className={cx(
+                    'w-full flex items-start gap-3 px-4 py-3 border-b border-slate-50 last:border-0 text-left',
+                    clickable && 'hover:bg-slate-50 focus:outline-none focus:bg-brand-50/40',
+                    !n.read_at && 'bg-brand-50/30',
+                  )}
+                >
                   <span className={cx('w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0', tones[d.tone])}>
                     <Icon name={d.icon} className="w-4.5 h-4.5" />
                   </span>
@@ -331,7 +343,7 @@
                     {d.body && <p className="text-xs text-slate-500 mt-0.5">{d.body}</p>}
                     <p className="text-[11px] text-slate-400 mt-1">{relativeDay(n.created_at)} · {formatTime(n.created_at)}</p>
                   </div>
-                </div>
+                </Wrapper>
               );
             })
           )}
@@ -419,7 +431,7 @@
         )}
 
         <div className="lg:pl-64 min-h-screen flex flex-col">
-          <TopBar session={session} onOpenMenu={() => setMenuOpen(true)} />
+          <TopBar session={session} onOpenMenu={() => setMenuOpen(true)} onNavigate={navigate} />
           <main className="flex-1 px-4 sm:px-6 py-6 sm:py-8 max-w-7xl w-full mx-auto">
             {renderRoute(path, session, navigate)}
           </main>

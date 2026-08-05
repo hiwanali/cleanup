@@ -1416,61 +1416,33 @@
     return { ok: true };
   }
 
-  /** Skapar tråd vid behov + infogar meddelande och bumpar last_message_at. */
+  /** Skapar tråd, infogar meddelande och skapar message-notiser server-side. */
   async function persistSendMessage({ threadId, customerId, orgId, senderUserId, senderRole, body }) {
     if (!enabled || !sb || !isUuid(senderUserId) || !isUuid(customerId)) {
       return { ok: true, skipped: true };
     }
 
-    let resolvedThreadId = isUuid(threadId) ? threadId : null;
+    const { data, error } = await sb.rpc('send_message_with_notifications', {
+      p_customer_id: customerId,
+      p_body: body,
+    });
 
-    if (!resolvedThreadId) {
-      // Hämta befintlig tråd för kunden eller skapa en ny (en tråd per kund).
-      const { data: existing } = await sb
-        .from('message_threads')
-        .select('id')
-        .eq('customer_id', customerId)
-        .maybeSingle();
-
-      if (existing) {
-        resolvedThreadId = existing.id;
-      } else {
-        if (!isUuid(orgId)) return { ok: true, skipped: true };
-        const { data: created, error: threadErr } = await sb
-          .from('message_threads')
-          .insert({ org_id: orgId, customer_id: customerId })
-          .select('id')
-          .single();
-        if (threadErr) {
-          console.error('[persist] sendMessage thread:', threadErr.message);
-          return { ok: false, message: threadErr.message };
-        }
-        resolvedThreadId = created.id;
-      }
+    if (error) {
+      console.error('[persist] sendMessage:', error.message);
+      return { ok: false, message: error.message };
     }
 
-    const { data: msg, error: msgErr } = await sb
-      .from('messages')
-      .insert({
-        thread_id: resolvedThreadId,
-        sender_user_id: senderUserId,
-        sender_role: senderRole,
-        body,
-      })
-      .select('id, created_at')
-      .single();
+    const notificationIds = Array.isArray(data?.notification_ids) ? data.notification_ids : [];
+    notificationIds.forEach((nid) => {
+      invokeNotificationEmail(nid);
+    });
 
-    if (msgErr) {
-      console.error('[persist] sendMessage message:', msgErr.message);
-      return { ok: false, message: msgErr.message };
-    }
-
-    await sb
-      .from('message_threads')
-      .update({ last_message_at: toIso(msg.created_at) })
-      .eq('id', resolvedThreadId);
-
-    return { ok: true, threadId: resolvedThreadId, messageId: msg.id };
+    return {
+      ok: true,
+      threadId: data?.thread_id,
+      messageId: data?.message_id,
+      notificationIds,
+    };
   }
 
   /** Sätter/uppdaterar användarens läsmarkör för en tråd. */

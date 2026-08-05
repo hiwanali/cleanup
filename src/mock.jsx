@@ -1112,16 +1112,32 @@
       // Avsändaren räknas som läst fram till nu
       db._setThreadReadLocal(thread.id, senderUserId, msg.created_at);
 
-      // Notiser till motpart(er)
-      if (sender.role === 'admin') {
-        if (cust.primary_contact_user_id) pushNotification(cust.primary_contact_user_id, 'new_message', { thread_id: thread.id, customer_id: customerId });
-        state.customer_employees.filter(ce => ce.customer_id === customerId).forEach(ce => pushNotification(ce.user_id, 'new_message', { thread_id: thread.id, customer_id: customerId }));
-      } else {
-        state.users.filter(u => u.role === 'admin').forEach(a => pushNotification(a.id, 'new_message', { thread_id: thread.id, customer_id: customerId }));
+      const persist = window.dbPersist && window.dbPersist.sendMessage;
+      const notificationPayloadFor = recipient => ({
+        thread_id: thread.id,
+        customer_id: customerId,
+        message_id: msg.id,
+        sender_user_id: senderUserId,
+        sender_role: sender.role,
+        target_path: recipient.role === 'admin' ? '/admin/meddelanden' : '/kund/meddelanden',
+        preview: text.slice(0, 160),
+      });
+
+      // Lokal demo notifierar direkt. I Supabase-läge skapar RPC:n notiserna.
+      if (!persist) {
+        if (sender.role === 'admin') {
+          const primary = cust.primary_contact_user_id ? db.userById(cust.primary_contact_user_id) : null;
+          if (primary) pushNotification(primary.id, 'new_message', notificationPayloadFor(primary));
+          state.customer_employees.filter(ce => ce.customer_id === customerId).forEach(ce => {
+            const employee = db.userById(ce.user_id);
+            if (employee) pushNotification(employee.id, 'new_message', notificationPayloadFor(employee));
+          });
+        } else {
+          state.users.filter(u => u.role === 'admin').forEach(a => pushNotification(a.id, 'new_message', notificationPayloadFor(a)));
+        }
       }
       bump();
 
-      const persist = window.dbPersist && window.dbPersist.sendMessage;
       if (persist) {
         const r = await persist({
           threadId: thread.id,
@@ -1142,6 +1158,15 @@
           bump();
           return { error: 'PERSIST_FAILED', message: r.message };
         }
+        if (r.threadId && r.threadId !== thread.id) {
+          const oldThreadId = thread.id;
+          thread.id = r.threadId;
+          msg.thread_id = r.threadId;
+          state.thread_reads.forEach(read => {
+            if (read.thread_id === oldThreadId) read.thread_id = r.threadId;
+          });
+        }
+        if (r.messageId) msg.id = r.messageId;
       }
 
       return { ok: true, message: msg };
