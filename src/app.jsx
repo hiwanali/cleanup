@@ -109,6 +109,7 @@
       { path: '/stadare/pass', label: 'Mina pass', icon: 'calendar' },
       { path: '/stadare/meddelanden', label: 'Meddelanden', icon: 'message-square' },
       { path: '/stadare/avvikelser', label: 'Avvikelser', icon: 'alert-triangle' },
+      { path: '/stadare/rapporter', label: 'Rapporter', icon: 'file-text' },
       { path: '/stadare/installningar', label: 'Inställningar', icon: 'settings' },
     ],
     customer: [
@@ -381,6 +382,7 @@
     if (matchPath(path, '/stadare/meddelanden')) return <MessagesView session={session} onNavigate={navigate} />;
     if ((m = matchPath(path, '/stadare/avvikelser/:id'))) return <IncidentDetailView session={session} onNavigate={navigate} incidentId={m.id} />;
     if (matchPath(path, '/stadare/avvikelser')) return <CleanerIncidentsView session={session} onNavigate={navigate} />;
+    if (matchPath(path, '/stadare/rapporter')) return <CleanerReportsView session={session} onNavigate={navigate} />;
     if (matchPath(path, '/stadare/installningar')) return <CleanerSettingsView session={session} />;
 
     // —— CUSTOMER + customer_employee ——

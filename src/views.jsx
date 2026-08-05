@@ -5497,6 +5497,170 @@
   }
 
   /* ============================================================
+   * CLEANER · Rapporter
+   * ============================================================ */
+  function formatCleanerReportHours(value) {
+    return `${(Number(value) || 0).toFixed(2)} h`;
+  }
+
+  function formatCleanerReportSignedHours(value) {
+    const rounded = Math.round((Number(value) || 0) * 100) / 100;
+    if (rounded === 0) return '0.00 h';
+    return `${rounded > 0 ? '+' : ''}${rounded.toFixed(2)} h`;
+  }
+
+  function CleanerReportHourValue({ children }) {
+    return <span className="whitespace-nowrap text-[1.55rem] sm:text-3xl">{children}</span>;
+  }
+
+  function CleanerReportsView({ session }) {
+    const dbVersion = useDb();
+    const [preset, setPreset] = useState('this_month');
+    const [from, setFrom] = useState(toDateInput(new Date()));
+    const [to, setTo] = useState(toDateInput(new Date()));
+    const [dataSyncedAt, setDataSyncedAt] = useState(null);
+    const [refreshing, setRefreshing] = useState(false);
+
+    const filters = useMemo(() => ({
+      preset,
+      from: preset === 'custom' ? from : null,
+      to: preset === 'custom' ? to : null,
+    }), [preset, from, to]);
+    const report = useMemo(
+      () => db.buildCleanerReport ? db.buildCleanerReport(session.userId, filters) : null,
+      [dbVersion, session.userId, filters],
+    );
+    const s = report?.summary || {
+      assignedCount: 0,
+      completedCount: 0,
+      ongoingCount: 0,
+      sickCount: 0,
+      cancelledCount: 0,
+      plannedHours: 0,
+      checkedInHours: 0,
+      workedHours: 0,
+      deltaHours: 0,
+      utilizationPct: 0,
+    };
+    const utilizationWidth = Math.max(0, Math.min(100, s.utilizationPct || 0));
+    const deltaTone = s.deltaHours > 0 ? 'emerald' : s.deltaHours < 0 ? 'amber' : 'slate';
+
+    async function refresh() {
+      setRefreshing(true);
+      try {
+        const syncedAt = await hydrateReportData(session.userId);
+        if (syncedAt) setDataSyncedAt(syncedAt);
+      } catch (e) {
+        toast.error('Kunde inte hämta senaste data.');
+      } finally {
+        setRefreshing(false);
+      }
+    }
+
+    const shiftRows = (report?.shiftDetails || []).map(row => ({
+      ...row,
+      status: <StatusBadge status={row.status} />,
+    }));
+    const propertyRows = (report?.byProperty || []).map(row => ({
+      ...row,
+      assignedCount: row.assignedCount,
+      plannedHours: row.plannedHours.toFixed(2),
+      checkedInHours: row.checkedInHours.toFixed(2),
+      workedHours: row.workedHours.toFixed(2),
+      deltaHours: formatCleanerReportSignedHours(row.checkedInHours - row.plannedHours),
+    }));
+
+    return (
+      <div>
+        <PageHeader
+          title="Rapporter"
+          subtitle="Summering av dina planerade pass, incheckad tid och utförda timmar."
+          actions={
+            <Button variant="outline" icon="refresh" disabled={refreshing} onClick={refresh}>
+              {refreshing ? 'Uppdaterar…' : 'Uppdatera'}
+            </Button>
+          }
+        />
+
+        <ReportPeriodFilters
+          preset={preset}
+          onPresetChange={setPreset}
+          from={from}
+          to={to}
+          onFromChange={setFrom}
+          onToChange={setTo}
+        />
+
+        {report && (
+          <p className="text-sm text-slate-600 mb-4">
+            Period: <span className="font-semibold text-slate-900">{report.meta.label}</span>
+            {dataSyncedAt && <span className="block text-xs text-slate-500 mt-1">Senast synkad {formatTime(dataSyncedAt)}</span>}
+          </p>
+        )}
+
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
+          <Stat label="Planerade timmar" value={<CleanerReportHourValue>{formatCleanerReportHours(s.plannedHours)}</CleanerReportHourValue>} hint={`${s.assignedCount} tilldelade pass`} icon="calendar" tone="brand" />
+          <Stat label="Incheckad tid" value={<CleanerReportHourValue>{formatCleanerReportHours(s.checkedInHours)}</CleanerReportHourValue>} hint={s.ongoingCount ? `${s.ongoingCount} pågående pass` : 'Från in- till utcheckning'} icon="clock" tone="accent" />
+          <Stat label="Utförda timmar" value={<CleanerReportHourValue>{formatCleanerReportHours(s.workedHours)}</CleanerReportHourValue>} hint={`${s.completedCount} utförda pass`} icon="check" tone="emerald" />
+          <Stat label="Differens" value={<CleanerReportHourValue>{formatCleanerReportSignedHours(s.deltaHours)}</CleanerReportHourValue>} hint="Incheckad tid mot planerad tid" icon="refresh" tone={deltaTone} />
+        </div>
+
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+          <Stat label="Utförda pass" value={s.completedCount} icon="check-circle" tone="emerald" />
+          <Stat label="Pågående pass" value={s.ongoingCount} icon="play" tone="accent" />
+          <Stat label="Sjukanmälda pass" value={s.sickCount} icon="alert-circle" tone="amber" />
+          <Stat label="Avbokade/pausade" value={s.cancelledCount} icon="pause" tone="slate" />
+        </div>
+
+        <Card padding="md" className="mb-6">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h3 className="font-bold text-slate-900">Närvaro mot planering</h3>
+              <p className="text-sm text-slate-500 mt-0.5">{(s.utilizationPct || 0).toFixed(1)}% av planerad tid är incheckad i vald period.</p>
+            </div>
+            <Badge variant={deltaTone}>{formatCleanerReportSignedHours(s.deltaHours)}</Badge>
+          </div>
+          <div className="mt-4 h-3 rounded-full bg-slate-100 overflow-hidden">
+            <div className="h-full rounded-full bg-brand-600" style={{ width: `${utilizationWidth}%` }} />
+          </div>
+        </Card>
+
+        <ReportTable
+          title="Pass i perioden"
+          headers={[
+            { key: 'date', label: 'Datum' },
+            { key: 'propertyName', label: 'Objekt' },
+            { key: 'status', label: 'Status' },
+            { key: 'plannedTime', label: 'Planerad tid' },
+            { key: 'checkedInTime', label: 'Incheckning' },
+            { key: 'plannedHours', label: 'Plan. tim' },
+            { key: 'checkedInHours', label: 'Incheckad tim' },
+            { key: 'workedHours', label: 'Utförd tim' },
+            { key: 'deltaHours', label: 'Diff.' },
+          ]}
+          rows={shiftRows}
+          emptyText="Inga pass för vald period."
+        />
+
+        <ReportTable
+          title="Summering per objekt"
+          headers={[
+            { key: 'name', label: 'Objekt' },
+            { key: 'customerName', label: 'Kund' },
+            { key: 'assignedCount', label: 'Pass' },
+            { key: 'plannedHours', label: 'Plan. tim' },
+            { key: 'checkedInHours', label: 'Incheckad tim' },
+            { key: 'workedHours', label: 'Utförd tim' },
+            { key: 'deltaHours', label: 'Diff.' },
+          ]}
+          rows={propertyRows}
+          emptyText="Ingen objektsummering för vald period."
+        />
+      </div>
+    );
+  }
+
+  /* ============================================================
    * CUSTOMER · Pass-detalj (read-only, anonymiserad)
    * ============================================================ */
   function CustomerShiftDetailView({ session, onNavigate, shiftId }) {
@@ -9227,6 +9391,7 @@
   window.CleanerTodayView = CleanerTodayView;
   window.CleanerShiftsListView = CleanerShiftsListView;
   window.CleanerShiftDetailView = CleanerShiftDetailView;
+  window.CleanerReportsView = CleanerReportsView;
   window.CustomerOverviewView = CustomerOverviewView;
   window.CustomerShiftDetailView = CustomerShiftDetailView;
   window.AdminCleanersListView = AdminCleanersListView;

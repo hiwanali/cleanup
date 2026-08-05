@@ -4274,6 +4274,12 @@
         needsReviewFn: s => db.shiftNeedsAdminReview(s),
       });
     },
+    buildCleanerReport(userId, filters) {
+      if (!window.Reporting) return null;
+      return window.Reporting.buildCleanerReport(state, userId, filters, {
+        shiftTimesFn: s => db.shiftTimes(s),
+      });
+    },
     buildCustomerReport(userId, filters) {
       if (!window.Reporting) return null;
       const customer = db.customerForUser(userId);

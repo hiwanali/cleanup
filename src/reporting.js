@@ -545,6 +545,132 @@
     };
   }
 
+  function checkedInHours(shift, now = new Date()) {
+    if (!shift?.checked_in_at) return 0;
+    const checkOut = shift.checked_out_at || (shift.status === 'Pågående' ? now : null);
+    return checkOut ? hoursBetween(shift.checked_in_at, checkOut) : 0;
+  }
+
+  function checkedInRangeLabel(shift) {
+    if (!shift?.checked_in_at) return '—';
+    const start = formatTimeShort(shift.checked_in_at);
+    if (shift.checked_out_at) return `${start}–${formatTimeShort(shift.checked_out_at)}`;
+    if (shift.status === 'Pågående') return `${start}–pågår`;
+    return `${start}–ej utcheckad`;
+  }
+
+  function formatSignedHours(value) {
+    const rounded = Math.round((Number(value) || 0) * 100) / 100;
+    if (rounded === 0) return '0.00';
+    return `${rounded > 0 ? '+' : ''}${rounded.toFixed(2)}`;
+  }
+
+  function buildCleanerReport(state, cleanerId, filters, opts = {}) {
+    const shiftTimesFn = opts.shiftTimesFn || shiftTimes;
+    const now = opts.now || new Date();
+    const period = parsePeriod(filters);
+    const { start, end } = period;
+    const propertyById = new Map(state.properties.map(p => [p.id, p]));
+    const customerById = new Map(state.customers.map(c => [c.id, c]));
+    const excludedPlanned = new Set(['Borttaget', 'Avbokat', 'Pausat (kundledighet)']);
+    const shiftDetails = [];
+    const byProperty = new Map();
+    let assignedCount = 0;
+    let completedCount = 0;
+    let ongoingCount = 0;
+    let sickCount = 0;
+    let cancelledCount = 0;
+    let plannedHours = 0;
+    let workedHours = 0;
+    let totalCheckedInHours = 0;
+
+    state.shifts.forEach(shift => {
+      if (shift.cleaner_user_id !== cleanerId) return;
+      const times = shiftTimesFn(shift);
+      const plannedStart = times.planned.start || shift.start_at;
+      if (!plannedStart || !inRange(plannedStart, start, end)) return;
+
+      const prop = propertyById.get(shift.property_id);
+      const customer = prop ? customerById.get(prop.customer_id) : null;
+      const planned = hoursBetween(times.planned.start, times.planned.end);
+      const checked = checkedInHours(shift, now);
+      const worked = shift.status === 'Utfört' ? hoursBetween(times.effective.start, times.effective.end) : 0;
+      const countsAsPlanned = !excludedPlanned.has(shift.status);
+
+      if (countsAsPlanned) {
+        assignedCount += 1;
+        plannedHours += planned;
+        if (!byProperty.has(shift.property_id)) {
+          byProperty.set(shift.property_id, {
+            id: shift.property_id,
+            name: prop?.name || 'Objekt',
+            customerName: customer?.name || 'Kund',
+            assignedCount: 0,
+            plannedHours: 0,
+            checkedInHours: 0,
+            workedHours: 0,
+          });
+        }
+        const propRow = byProperty.get(shift.property_id);
+        propRow.assignedCount += 1;
+        propRow.plannedHours = Math.round((propRow.plannedHours + planned) * 100) / 100;
+        propRow.checkedInHours = Math.round((propRow.checkedInHours + checked) * 100) / 100;
+        propRow.workedHours = Math.round((propRow.workedHours + worked) * 100) / 100;
+      }
+
+      if (shift.status === 'Utfört') completedCount += 1;
+      if (shift.status === 'Pågående') ongoingCount += 1;
+      if (shift.status === 'Sjukanmäld') sickCount += 1;
+      if (['Avbokat', 'Borttaget', 'Pausat (kundledighet)'].includes(shift.status)) cancelledCount += 1;
+
+      workedHours += worked;
+      totalCheckedInHours += checked;
+
+      shiftDetails.push({
+        id: shift.id,
+        date: formatDateIso(plannedStart),
+        propertyName: prop?.name || 'Objekt',
+        customerName: customer?.name || 'Kund',
+        status: shift.status,
+        plannedTime: `${formatTimeShort(times.planned.start)}–${formatTimeShort(times.planned.end)}`,
+        checkedInTime: checkedInRangeLabel(shift),
+        plannedHours: countsAsPlanned ? planned.toFixed(2) : '—',
+        checkedInHours: checked > 0 ? checked.toFixed(2) : '—',
+        workedHours: worked > 0 ? worked.toFixed(2) : '—',
+        deltaHours: countsAsPlanned && checked > 0 ? formatSignedHours(checked - planned) : '—',
+      });
+    });
+
+    plannedHours = Math.round(plannedHours * 100) / 100;
+    workedHours = Math.round(workedHours * 100) / 100;
+    totalCheckedInHours = Math.round(totalCheckedInHours * 100) / 100;
+    const deltaHours = Math.round((totalCheckedInHours - plannedHours) * 100) / 100;
+    const utilizationPct = plannedHours > 0 ? Math.round((totalCheckedInHours / plannedHours) * 1000) / 10 : 0;
+    const sortByDate = (a, b) => (a.date || '').localeCompare(b.date || '') || (a.plannedTime || '').localeCompare(b.plannedTime || '');
+
+    return {
+      meta: {
+        ...period,
+        cleanerId,
+        generatedAt: now,
+      },
+      summary: {
+        assignedCount,
+        completedCount,
+        ongoingCount,
+        sickCount,
+        cancelledCount,
+        plannedHours,
+        checkedInHours: totalCheckedInHours,
+        workedHours,
+        deltaHours,
+        utilizationPct,
+      },
+      shiftDetails: shiftDetails.sort(sortByDate),
+      byProperty: [...byProperty.values()].sort((a, b) => b.checkedInHours - a.checkedInHours || a.name.localeCompare(b.name, 'sv')),
+    };
+  }
+
   function buildCustomerReport(state, customerId, filters, opts = {}) {
     const shiftTimesFn = opts.shiftTimesFn || shiftTimes;
     const period = parsePeriod(filters);
@@ -615,6 +741,7 @@
     shiftTimes,
     resolveCompletionNote,
     buildAdminReport,
+    buildCleanerReport,
     buildCustomerReport,
     formatDateShort,
   };
