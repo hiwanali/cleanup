@@ -594,6 +594,32 @@
       const propIds = new Set(state.shifts.filter(s => s.cleaner_user_id === cleanerId).map(s => s.property_id));
       return state.properties.filter(p => propIds.has(p.id));
     },
+    customerHasMessageCleaner(customerId, cleanerId) {
+      const propIds = state.properties.filter(p => p.customer_id === customerId).map(p => p.id);
+      if (!propIds.length) return false;
+      return state.property_cleaners.some(pc => pc.cleaner_user_id === cleanerId && propIds.includes(pc.property_id))
+        || state.shifts.some(s => s.cleaner_user_id === cleanerId && propIds.includes(s.property_id) && new Date(s.end_at) >= addDays(new Date(), -30));
+    },
+    messageParticipantsForCustomer(customerId) {
+      const customer = db.customerById(customerId);
+      if (!customer) return [];
+      const propIds = state.properties.filter(p => p.customer_id === customerId).map(p => p.id);
+      const cleanerIds = new Set([
+        ...state.property_cleaners.filter(pc => propIds.includes(pc.property_id)).map(pc => pc.cleaner_user_id),
+        ...state.shifts
+          .filter(s => s.cleaner_user_id && propIds.includes(s.property_id) && new Date(s.end_at) >= addDays(new Date(), -30))
+          .map(s => s.cleaner_user_id),
+      ]);
+      const ids = new Set([
+        ...state.users.filter(u => u.role === 'admin' && u.org_id === customer.org_id && u.active).map(u => u.id),
+        customer.primary_contact_user_id,
+        ...state.customer_employees.filter(ce => ce.customer_id === customerId).map(ce => ce.user_id),
+        ...cleanerIds,
+      ].filter(Boolean));
+      return [...ids]
+        .map(uid => db.userById(uid))
+        .filter(u => u && u.active && u.org_id === customer.org_id);
+    },
 
     // Pass för en kund (huvudkontakt = alla objekt)
     shiftsForCustomerUser(userId, opts = {}) {
@@ -1019,7 +1045,7 @@
     },
 
     /* ============================================================
-     * Meddelanden (kund <-> admin) — en tråd per kund
+     * Meddelanden (kund <-> CleanUp + deltagande städare) — en tråd per kund
      * ============================================================ */
     threadForCustomer(customerId) {
       return state.message_threads.find(t => t.customer_id === customerId) || null;
@@ -1059,6 +1085,28 @@
           return new Date(b.lastAt) - new Date(a.lastAt);
         });
     },
+    threadsForCleaner(cleanerUserId) {
+      return state.customers
+        .filter(c => db.customerHasMessageCleaner(c.id, cleanerUserId))
+        .map(c => {
+          const thread = db.threadForCustomer(c.id);
+          const msgs = thread ? db.messagesForThread(thread.id) : [];
+          const last = msgs[msgs.length - 1] || null;
+          return {
+            customer: c,
+            thread,
+            lastMessage: last,
+            lastAt: thread ? thread.last_message_at : null,
+            unread: thread ? db.unreadInThread(thread.id, cleanerUserId) : 0,
+          };
+        })
+        .sort((a, b) => {
+          if (!a.lastAt && !b.lastAt) return a.customer.name.localeCompare(b.customer.name, 'sv');
+          if (!a.lastAt) return 1;
+          if (!b.lastAt) return -1;
+          return new Date(b.lastAt) - new Date(a.lastAt);
+        });
+    },
     // Antal olästa meddelanden i en tråd för en användare (exkl. egna)
     unreadInThread(threadId, userId) {
       const read = state.thread_reads.find(r => r.thread_id === threadId && r.user_id === userId);
@@ -1076,6 +1124,9 @@
       if (user.role === 'admin') {
         return state.message_threads.reduce((sum, t) => sum + db.unreadInThread(t.id, userId), 0);
       }
+      if (user.role === 'cleaner') {
+        return db.threadsForCleaner(userId).reduce((sum, t) => sum + (t.thread ? db.unreadInThread(t.thread.id, userId) : 0), 0);
+      }
       const thread = db.threadForUser(userId);
       return thread ? db.unreadInThread(thread.id, userId) : 0;
     },
@@ -1088,6 +1139,7 @@
       if (!sender) return { error: 'NO_SENDER' };
       const cust = db.customerById(customerId);
       if (!cust) return { error: 'NO_CUSTOMER' };
+      if (sender.role === 'cleaner' && !db.customerHasMessageCleaner(customerId, senderUserId)) return { error: 'FORBIDDEN' };
 
       let thread = db.threadForCustomer(customerId);
       let createdThread = null;
@@ -1119,22 +1171,19 @@
         message_id: msg.id,
         sender_user_id: senderUserId,
         sender_role: sender.role,
-        target_path: recipient.role === 'admin' ? '/admin/meddelanden' : '/kund/meddelanden',
+        target_path: recipient.role === 'admin'
+          ? '/admin/meddelanden'
+          : recipient.role === 'cleaner'
+            ? '/stadare/meddelanden'
+            : '/kund/meddelanden',
         preview: text.slice(0, 160),
       });
 
       // Lokal demo notifierar direkt. I Supabase-läge skapar RPC:n notiserna.
       if (!persist) {
-        if (sender.role === 'admin') {
-          const primary = cust.primary_contact_user_id ? db.userById(cust.primary_contact_user_id) : null;
-          if (primary) pushNotification(primary.id, 'new_message', notificationPayloadFor(primary));
-          state.customer_employees.filter(ce => ce.customer_id === customerId).forEach(ce => {
-            const employee = db.userById(ce.user_id);
-            if (employee) pushNotification(employee.id, 'new_message', notificationPayloadFor(employee));
-          });
-        } else {
-          state.users.filter(u => u.role === 'admin').forEach(a => pushNotification(a.id, 'new_message', notificationPayloadFor(a)));
-        }
+        db.messageParticipantsForCustomer(customerId)
+          .filter(recipient => recipient.id !== senderUserId)
+          .forEach(recipient => pushNotification(recipient.id, 'new_message', notificationPayloadFor(recipient)));
       }
       bump();
 

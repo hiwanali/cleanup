@@ -5530,6 +5530,11 @@
         const u = db.userById(m.sender_user_id);
         return u ? u.name : 'Kund';
       }
+      if (role === 'cleaner') {
+        if (m.sender_role === 'admin') return 'CleanUp';
+        if (m.sender_role === 'customer' || m.sender_role === 'customer_employee') return 'Kund';
+        return db.userById(m.sender_user_id)?.name || 'Städare';
+      }
       // Kundvy: admin visas som CleanUp och utförare som kundens städare.
       return m.sender_role === 'admin' ? 'CleanUp' : 'Din städare';
     }
@@ -5542,6 +5547,7 @@
       setSending(false);
       if (r?.ok) setDraft('');
       else if (r?.error === 'PERSIST_FAILED') toast.error('Kunde inte skicka – försök igen.');
+      else if (r?.error === 'FORBIDDEN') toast.error('Du har inte åtkomst till den här dialogen.');
     }
 
     return (
@@ -5594,6 +5600,71 @@
           <Card padding="md">
             <ConversationPanel customerId={customer.id} session={session} />
           </Card>
+        </div>
+      );
+    }
+
+    if (role === 'cleaner') {
+      const threads = db.threadsForCleaner(session.userId);
+      const [selectedId, setSelectedId] = useState(threads[0]?.customer.id || null);
+      const selected = threads.find(t => t.customer.id === selectedId) || threads[0] || null;
+
+      return (
+        <div>
+          <PageHeader title="Meddelanden" subtitle="Dialog med CleanUp och kunder inför dina bokningar." />
+          <div className="grid lg:grid-cols-3 gap-4">
+            <Card padding="sm" className="lg:col-span-1">
+              <div className="max-h-[64vh] overflow-y-auto -mx-1">
+                {threads.length === 0 ? (
+                  <EmptyState icon="message-square" title="Inga dialoger" description="När du är kopplad till en kunds adress visas dialogen här." className="py-8" />
+                ) : (
+                  <ul className="divide-y divide-slate-100">
+                    {threads.map(t => (
+                      <li key={t.customer.id}>
+                        <button
+                          onClick={() => setSelectedId(t.customer.id)}
+                          className={cx(
+                            'w-full text-left px-3 py-3 flex items-start gap-3 rounded-lg transition-colors',
+                            selected?.customer.id === t.customer.id ? 'bg-brand-50' : 'hover:bg-slate-50',
+                          )}
+                        >
+                          <Avatar name={t.customer.name} size="sm" />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="font-semibold text-sm text-slate-900 truncate">{t.customer.name}</p>
+                              {t.unread > 0 && (
+                                <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-brand-600 text-white text-[10px] font-bold flex items-center justify-center flex-shrink-0">{t.unread}</span>
+                              )}
+                            </div>
+                            <p className="text-xs text-slate-500 truncate mt-0.5">
+                              {t.lastMessage ? t.lastMessage.body : 'Ingen konversation än'}
+                            </p>
+                          </div>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </Card>
+
+            <Card padding="md" className="lg:col-span-2">
+              {selected ? (
+                <>
+                  <div className="flex items-center gap-2 pb-3 mb-1 border-b border-slate-100">
+                    <Avatar name={selected.customer.name} size="sm" />
+                    <div>
+                      <p className="font-bold text-slate-900 leading-tight">{selected.customer.name}</p>
+                      <p className="text-xs text-slate-500">Kunddialog</p>
+                    </div>
+                  </div>
+                  <ConversationPanel customerId={selected.customer.id} session={session} heightClass="h-[52vh]" />
+                </>
+              ) : (
+                <EmptyState icon="message-square" title="Välj en kund" description="Välj en kund i listan för att se dialogen." className="py-12" />
+              )}
+            </Card>
+          </div>
         </div>
       );
     }

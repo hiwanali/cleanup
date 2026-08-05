@@ -20,6 +20,10 @@ _Avoid_: object, property
 A conversation between the customer and CleanUp about bookings, changes, additions, or questions.
 _Avoid_: ticket, internal chat
 
+**Message Participant**:
+A person who can read, write, and receive attention signals for a Message.
+_Avoid_: member, channel user
+
 **Notification**:
 A user-facing signal that something needs attention or has changed.
 _Avoid_: system event, log entry
