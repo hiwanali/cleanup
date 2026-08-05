@@ -25,6 +25,7 @@ Notiser sparas i `notifications` (in-app). E-post skickas via Edge Function `sen
 ```powershell
 supabase db push
 supabase functions deploy send-notification-email --project-ref bkmnlcdsbvpucpqmaycx
+supabase functions deploy request-customer-login-link --project-ref bkmnlcdsbvpucpqmaycx
 ```
 
 ### 2. Secrets (Dashboard → Edge Functions)
@@ -35,6 +36,15 @@ supabase functions deploy send-notification-email --project-ref bkmnlcdsbvpucpqm
 | `RESEND_FROM` | `CleanUp <notis@cleanup.nu>` (verifierad domän) |
 
 `SUPABASE_URL` och `SUPABASE_SERVICE_ROLE_KEY` sätts automatiskt vid deploy.
+
+Ytterligare secrets för kundens självservice-login:
+
+| Secret | Exempel |
+|--------|---------|
+| `CUSTOMER_LOGIN_HASH_SECRET` | Slumpad hemlighet för hashad audit/rate limit (rekommenderas) |
+| `CUSTOMER_LOGIN_ALLOWED_ORIGINS` | Kommaseparerad allowlist vid behov, t.ex. `https://www.logincleanup.app,https://cleanup.nu` |
+
+Auth signup ska vara avstängd i Supabase Dashboard. Kundens självservice-login ska gå via `request-customer-login-link`, som alltid svarar neutralt och bara skickar magic link till befintliga kundkonton.
 
 ### 3. Flöde
 
@@ -62,14 +72,16 @@ supabase functions deploy send-notification-email --project-ref bkmnlcdsbvpucpqm
 
 Mejl lagras i lowercase i Auth; inloggning fungerar oavsett versaler.
 
-## Demokonton (lösenord: `demo1234`)
+## Demokonton
 
-| Mejl | Roll |
-|------|------|
-| sara@cleanup.se | admin |
-| anna@cleanup.se | cleaner |
-| erik@acme.se | customer (Acme) |
-| lisa@acme.se | customer_employee |
+Admin/städare i demodata använder `demo1234`. Kundroller ska logga in via magic link eller få ett lösenord satt av admin; migrationen för självservice-login roterar bort kunders gamla `demo1234`.
+
+| Mejl | Roll | Inloggning |
+|------|------|------------|
+| sara@cleanup.se | admin | `demo1234` |
+| anna@cleanup.se | cleaner | `demo1234` |
+| erik@acme.se | customer (Acme) | magic link / admin reset |
+| lisa@acme.se | customer_employee | magic link / admin reset |
 
 ## CLI
 

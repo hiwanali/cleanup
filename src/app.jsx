@@ -475,6 +475,17 @@
     return null;
   }
 
+  async function handleCustomerLoginLink(email) {
+    if (!window.SUPABASE_ENABLED || !window.dbAuth?.requestCustomerLoginLink) {
+      return 'Kunde inte skicka inloggningslänk just nu. Kontakta CleanUp om problemet kvarstår.';
+    }
+    const r = await window.dbAuth.requestCustomerLoginLink({ email });
+    if (!r?.ok) {
+      return 'Kunde inte skicka inloggningslänk just nu. Kontakta CleanUp om problemet kvarstår.';
+    }
+    return null;
+  }
+
   function consumePortalRedirect(user) {
     const params = new URLSearchParams(window.location.search || '');
     let target = params.get('portalRedirect');
@@ -574,7 +585,7 @@
     if (!session) {
       return (
         <>
-          <LoginView onPasswordLogin={handlePasswordLogin} />
+          <LoginView onPasswordLogin={handlePasswordLogin} onCustomerLoginLink={handleCustomerLoginLink} />
           <TweaksPanel />
           <ToastContainer />
         </>

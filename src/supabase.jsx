@@ -695,6 +695,28 @@
     return { ok: true };
   }
 
+  /** Kund initierar en engangslank utan att fa veta om mejlen finns. */
+  async function requestCustomerLoginLink({ email }) {
+    if (!enabled || !sb) {
+      return { ok: false, code: 'AUTH_DISABLED' };
+    }
+    const cleaned = typeof email === 'string' ? email.trim().toLowerCase() : '';
+    if (!cleaned) {
+      return { ok: false, code: 'INVALID_EMAIL' };
+    }
+
+    const { data, error } = await sb.functions.invoke('request-customer-login-link', {
+      body: { email: cleaned },
+    });
+
+    if (error) {
+      console.error('[auth] requestCustomerLoginLink:', error.message);
+      return { ok: false, message: error.message };
+    }
+
+    return { ok: true, data };
+  }
+
   async function persistUpdateSelfProfile({ userId, name, phone }) {
     if (!enabled || !sb || !isUuid(userId)) {
       return { ok: true, skipped: true };
@@ -716,6 +738,7 @@
   window.dbAuth = {
     enabled,
     changeOwnPassword,
+    requestCustomerLoginLink,
   };
 
   /* ---------- realtime (live-synk mellan användare) ---------- */

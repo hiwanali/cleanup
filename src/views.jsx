@@ -24,11 +24,11 @@
   /* ============================================================
    * LOGIN (Supabase Auth)
    * ============================================================ */
-  function LoginView({ onPasswordLogin }) {
+  function LoginView({ onPasswordLogin, onCustomerLoginLink }) {
     if (!window.SUPABASE_ENABLED) {
       return <SupabaseConfigMissingView />;
     }
-    return <PasswordLoginView onPasswordLogin={onPasswordLogin} />;
+    return <PasswordLoginView onPasswordLogin={onPasswordLogin} onCustomerLoginLink={onCustomerLoginLink} />;
   }
 
   function SupabaseConfigMissingView() {
@@ -1306,13 +1306,15 @@
     );
   }
 
-  function PasswordLoginView({ onPasswordLogin }) {
+  function PasswordLoginView({ onPasswordLogin, onCustomerLoginLink }) {
     const remembered = useMemo(() => loadRememberedLogin(), []);
     const [email, setEmail] = useState(remembered.email);
     const [password, setPassword] = useState('');
     const [rememberMe, setRememberMe] = useState(remembered.rememberMe);
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
+    const [linkLoading, setLinkLoading] = useState(false);
+    const [linkSent, setLinkSent] = useState(false);
 
     function handleRememberChange(next) {
       setRememberMe(next);
@@ -1322,7 +1324,12 @@
 
     function handleEmailChange(next) {
       setEmail(next);
+      setLinkSent(false);
       if (rememberMe && next.trim()) saveRememberedLogin(next, true);
+    }
+
+    function hasValidEmail() {
+      return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
     }
 
     async function submit(e) {
@@ -1334,6 +1341,23 @@
       if (msg) { setError(msg); setLoading(false); return; }
       saveRememberedLogin(email, rememberMe);
       // vid lyckad inloggning byts vyn ut av App
+    }
+
+    async function requestLoginLink() {
+      if (!hasValidEmail()) {
+        setError('Ange en giltig mejladress.');
+        return;
+      }
+      setLinkLoading(true);
+      setError('');
+      const msg = await onCustomerLoginLink(email);
+      setLinkLoading(false);
+      if (msg) {
+        setError(msg);
+        return;
+      }
+      saveRememberedLogin(email, rememberMe);
+      setLinkSent(true);
     }
 
     return (
@@ -1370,6 +1394,28 @@
                 {loading ? 'Loggar in …' : 'Logga in'}
               </Button>
             </form>
+            <div className="my-5 flex items-center gap-3">
+              <div className="h-px flex-1 bg-slate-200" />
+              <span className="text-xs font-semibold uppercase text-slate-400">eller</span>
+              <div className="h-px flex-1 bg-slate-200" />
+            </div>
+            <div className="space-y-3">
+              <Button
+                variant="outline"
+                icon="mail"
+                className="w-full"
+                disabled={linkLoading || !email.trim()}
+                loading={linkLoading}
+                onClick={requestLoginLink}
+              >
+                {linkLoading ? 'Skickar l\u00e4nk\u2026' : 'Skicka mejll\u00e4nk'}
+              </Button>
+              {linkSent && (
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-sm text-emerald-800">
+                  {'Om mejladressen finns hos CleanUp skickas en personlig l\u00e4nk inom kort.'}
+                </div>
+              )}
+            </div>
           </Card>
         </div>
       </div>
