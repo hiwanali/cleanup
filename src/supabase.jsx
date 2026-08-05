@@ -47,6 +47,7 @@
     customer_holidays: ['start_date', 'end_date', 'created_at'],
     shift_events: ['created_at'],
     booking_attendance_attempts: ['client_observed_updated_at', 'server_shift_updated_at', 'created_at'],
+    message_delivery_attempts: ['created_at'],
     cleaning_checklists: ['created_at'],
     shift_checklist_items: ['done_at', 'created_at'],
     customer_holiday_properties: [],
@@ -117,6 +118,7 @@
       shifts,
       shift_events,
       booking_attendance_attempts,
+      message_delivery_attempts,
       cleaning_checklists,
       shift_checklist_items,
       customer_holidays,
@@ -143,6 +145,7 @@
       fetchTable('shifts'),
       fetchTable('shift_events'),
       fetchTable('booking_attendance_attempts'),
+      fetchTable('message_delivery_attempts'),
       fetchTable('cleaning_checklists'),
       fetchTable('shift_checklist_items'),
       fetchTable('customer_holidays'),
@@ -176,6 +179,7 @@
       shifts,
       shift_events,
       booking_attendance_attempts,
+      message_delivery_attempts,
       cleaning_checklists,
       shift_checklist_items,
       customer_holidays,
@@ -219,19 +223,21 @@
     return d;
   }
 
-  function newClientAttemptId(action, shiftId) {
+  function newClientAttemptId(action, targetId) {
     const random = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
       ? crypto.randomUUID()
       : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    return `${action}:${shiftId}:${random}`;
+    return `${action}:${targetId || 'unknown'}:${random}`;
   }
 
-  async function ensureAttendanceSession(expectedUserId) {
+  async function ensureWriteSession(expectedUserId, labels = {}) {
+    const savedLabel = labels.savedLabel || 'Åtgärden';
+    const retryLabel = labels.retryLabel || 'åtgärden';
     if (typeof navigator !== 'undefined' && navigator.onLine === false) {
       return {
         ok: false,
         code: 'OFFLINE',
-        message: 'Du verkar vara offline. In- eller utcheckningen är inte sparad.',
+        message: `Du verkar vara offline. ${savedLabel} är inte sparad.`,
       };
     }
 
@@ -240,7 +246,7 @@
       return {
         ok: false,
         code: 'SESSION_REQUIRED',
-        message: 'Sessionen behöver uppdateras. Logga in igen innan du checkar in eller ut.',
+        message: `Sessionen behöver uppdateras. Logga in igen innan du ${retryLabel}.`,
       };
     }
 
@@ -253,6 +259,13 @@
     }
 
     return { ok: true, session: data.session };
+  }
+
+  async function ensureAttendanceSession(expectedUserId) {
+    return ensureWriteSession(expectedUserId, {
+      savedLabel: 'In- eller utcheckningen',
+      retryLabel: 'checkar in eller ut',
+    });
   }
 
   function serializeNotificationPayload(payload) {
@@ -841,6 +854,11 @@
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'message_threads' },
+        () => scheduleHydrateFromRealtime(userId),
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'message_delivery_attempts' },
         () => scheduleHydrateFromRealtime(userId),
       )
       .on(
@@ -1502,14 +1520,37 @@
       return { ok: true, skipped: true };
     }
 
+    const sessionCheck = await ensureWriteSession(senderUserId, {
+      savedLabel: 'Meddelandet',
+      retryLabel: 'skickar meddelandet',
+    });
+    if (!sessionCheck.ok) return sessionCheck;
+
+    const clientAttemptId = newClientAttemptId('send_message', customerId);
     const { data, error } = await sb.rpc('send_message_with_notifications', {
       p_customer_id: customerId,
       p_body: body,
+      p_client_attempt_id: clientAttemptId,
     });
 
     if (error) {
       console.error('[persist] sendMessage:', error.message);
-      return { ok: false, message: error.message };
+      return {
+        ok: false,
+        code: error.code || 'RPC_FAILED',
+        message: 'Kunde inte spara meddelandet. Försök igen.',
+        detail: error.message,
+      };
+    }
+
+    if (data?.ok === false) {
+      return {
+        ok: false,
+        code: data.reason || 'REJECTED',
+        reason: data.reason || null,
+        message: data.message || 'Kunde inte skicka meddelandet.',
+        data,
+      };
     }
 
     const notificationIds = Array.isArray(data?.notification_ids) ? data.notification_ids : [];
@@ -1521,7 +1562,9 @@
       ok: true,
       threadId: data?.thread_id,
       messageId: data?.message_id,
+      messageCreatedAt: data?.message_created_at,
       notificationIds,
+      data,
     };
   }
 
@@ -1530,6 +1573,12 @@
     if (!enabled || !sb || !isUuid(threadId) || !isUuid(userId)) {
       return { ok: true, skipped: true };
     }
+
+    const sessionCheck = await ensureWriteSession(userId, {
+      savedLabel: 'Läsmarkeringen',
+      retryLabel: 'markerar tråden som läst',
+    });
+    if (!sessionCheck.ok) return sessionCheck;
 
     const { error } = await sb
       .from('thread_reads')

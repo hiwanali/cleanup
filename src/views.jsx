@@ -5792,6 +5792,7 @@
       const r = await db.sendMessage({ customerId, senderUserId: session.userId, body: text });
       setSending(false);
       if (r?.ok) setDraft('');
+      else if (r?.message) toast.error(r.message);
       else if (r?.error === 'PERSIST_FAILED') toast.error('Kunde inte skicka – försök igen.');
       else if (r?.error === 'FORBIDDEN') toast.error('Du har inte åtkomst till den här dialogen.');
     }
@@ -5817,7 +5818,7 @@
               placeholder="Skriv ett meddelande…"
               className="flex-1"
             />
-            <Button variant="primary" icon="send" disabled={!draft.trim() || sending} onClick={send}>Skicka</Button>
+            <Button variant="primary" icon="send" loading={sending} disabled={!draft.trim() || sending} onClick={send}>{sending ? 'Skickar...' : 'Skicka'}</Button>
           </div>
           <p className="text-[11px] text-slate-400 mt-1.5">Tryck Cmd/Ctrl + Enter för att skicka.</p>
         </div>

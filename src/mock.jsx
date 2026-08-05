@@ -130,6 +130,7 @@
     booking_availability_slots: [],
     booking_requests: [],
     booking_attendance_attempts: [],
+    message_delivery_attempts: [],
   };
 
   /* ============================================================
@@ -1161,6 +1162,57 @@
       if (!cust) return { error: 'NO_CUSTOMER' };
       if (sender.role === 'cleaner' && !db.customerHasMessageCleaner(customerId, senderUserId)) return { error: 'FORBIDDEN' };
 
+      const persist = window.dbPersist && window.dbPersist.sendMessage;
+      if (persist && window.SUPABASE_ENABLED) {
+        const r = await persist({
+          customerId,
+          orgId: cust.org_id,
+          senderUserId,
+          senderRole: sender.role,
+          body: text,
+        });
+        if (!r.ok) {
+          return {
+            error: r.code || 'PERSIST_FAILED',
+            reason: r.reason || null,
+            message: r.message,
+          };
+        }
+
+        const createdAt = r.messageCreatedAt ? new Date(r.messageCreatedAt) : new Date();
+        let thread = db.threadForCustomer(customerId);
+        if (!thread) {
+          thread = {
+            id: r.threadId || id('mt'),
+            org_id: cust.org_id,
+            customer_id: customerId,
+            created_at: createdAt,
+            last_message_at: createdAt,
+          };
+          state.message_threads.push(thread);
+        } else {
+          if (r.threadId && thread.id !== r.threadId) thread.id = r.threadId;
+          thread.last_message_at = createdAt;
+        }
+
+        let msg = state.messages.find(m => m.id === r.messageId);
+        if (!msg) {
+          msg = {
+            id: r.messageId || id('msg'),
+            thread_id: thread.id,
+            sender_user_id: senderUserId,
+            sender_role: sender.role,
+            body: text,
+            created_at: createdAt,
+          };
+          state.messages.push(msg);
+        }
+
+        db._setThreadReadLocal(thread.id, senderUserId, createdAt);
+        bump();
+        return { ok: true, message: msg };
+      }
+
       let thread = db.threadForCustomer(customerId);
       let createdThread = null;
       if (!thread) {
@@ -1184,7 +1236,6 @@
       // Avsändaren räknas som läst fram till nu
       db._setThreadReadLocal(thread.id, senderUserId, msg.created_at);
 
-      const persist = window.dbPersist && window.dbPersist.sendMessage;
       const notificationPayloadFor = recipient => ({
         thread_id: thread.id,
         customer_id: customerId,
