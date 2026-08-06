@@ -775,17 +775,33 @@
       return { ok: true, skipped: true };
     }
 
-    const { error } = await sb.from('users').update({
-      name,
-      phone: phone || null,
-    }).eq('id', userId);
+    const sessionCheck = await ensureWriteSession(userId, {
+      savedLabel: 'Profiländringen',
+      retryLabel: 'uppdaterar profilen',
+    });
+    if (!sessionCheck.ok) {
+      return sessionCheck;
+    }
+
+    const { data, error } = await sb.rpc('update_own_profile', {
+      p_name: name,
+      p_phone: phone || null,
+    });
 
     if (error) {
       console.error('[persist] updateSelfProfile:', error.message);
       return { ok: false, code: error.code || null, message: error.message };
     }
 
-    return { ok: true };
+    if (data && data.ok === false) {
+      return {
+        ok: false,
+        code: data.reason || null,
+        message: data.message || 'Kunde inte uppdatera profilen.',
+      };
+    }
+
+    return { ok: true, user: data?.user || null };
   }
 
   window.dbAuth = {
@@ -1877,17 +1893,32 @@
       return { ok: true, skipped: true };
     }
 
-    const update = done
-      ? { done_at: new Date().toISOString(), done_by_cleaner_user_id: cleanerUserId }
-      : { done_at: null, done_by_cleaner_user_id: null };
+    const sessionCheck = await ensureWriteSession(cleanerUserId, {
+      savedLabel: 'Checkliständringen',
+      retryLabel: 'uppdaterar checklistan',
+    });
+    if (!sessionCheck.ok) {
+      return sessionCheck;
+    }
 
-    const { error } = await sb.from('shift_checklist_items').update(update).eq('id', itemId);
+    const { data, error } = await sb.rpc('toggle_shift_checklist_item', {
+      p_item_id: itemId,
+      p_done: !!done,
+    });
     if (error) {
       console.error('[persist] toggleChecklistItem:', error.message);
       return { ok: false, message: error.message };
     }
 
-    return { ok: true };
+    if (data && data.ok === false) {
+      return {
+        ok: false,
+        code: data.reason || null,
+        message: data.message || 'Kunde inte uppdatera checklistan.',
+      };
+    }
+
+    return { ok: true, item: data?.item || null };
   }
 
   async function persistEnsureBookingChecklistForShift({ shiftId }) {

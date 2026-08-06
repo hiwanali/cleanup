@@ -2287,6 +2287,11 @@
           bump();
           return { error: 'PERSIST_FAILED', message: r.message };
         }
+        if (r.item) {
+          item.done_at = r.item.done_at ? new Date(r.item.done_at) : null;
+          item.done_by_cleaner_user_id = r.item.done_by_cleaner_user_id || null;
+          bump();
+        }
       }
 
       return { ok: true };
@@ -3838,6 +3843,12 @@
           user.phone = snapshot.phone;
           bump();
           return { error: 'PERSIST_FAILED', message: r.message };
+        }
+        if (r.user) {
+          user.name = r.user.name || user.name;
+          user.phone = r.user.phone || '';
+          user.updated_at = r.user.updated_at ? new Date(r.user.updated_at) : user.updated_at;
+          bump();
         }
       }
 
