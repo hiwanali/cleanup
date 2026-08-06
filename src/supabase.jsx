@@ -458,29 +458,16 @@
       return { ok: true, skipped: true };
     }
 
-    const { error: shiftErr } = await sb.from('shifts').update({
-      status: 'Borttaget',
-      last_modified_by: actorUserId,
-    }).eq('id', shiftId);
-
-    if (shiftErr) {
-      console.error('[persist] adminDelete shifts:', shiftErr.message);
-      return { ok: false, message: shiftErr.message };
-    }
-
-    const { error: evErr } = await sb.from('shift_events').insert({
-      shift_id: shiftId,
-      actor_user_id: actorUserId,
-      event_type: 'admin_deleted',
-      payload: { hours_to_start: hoursToStart },
+    const { data, error } = await sb.rpc('admin_delete_shift', {
+      p_shift_id: shiftId,
     });
 
-    if (evErr) {
-      console.error('[persist] adminDelete shift_events:', evErr.message);
-      return { ok: false, message: evErr.message };
+    if (error) {
+      console.error('[persist] adminDelete:', error.message);
+      return { ok: false, message: error.message };
     }
 
-    return { ok: true };
+    return { ok: true, data };
   }
 
   /** §7.7 admin redigerar kund + huvudkontakt. */
@@ -999,52 +986,23 @@
       return { ok: true, skipped: true };
     }
 
-    const { error: shiftErr } = await sb.from('shifts').update({
-      status: 'Godkänt',
-      cleaner_user_id: cleanerUserId || shift?.cleaner_user_id || null,
-      last_modified_by: actorUserId,
-    }).eq('id', shiftId);
-
-    if (shiftErr) {
-      console.error('[persist] approveShift:', shiftErr.message);
-      return { ok: false, message: shiftErr.message };
-    }
-
-    const { error: requestErr } = await sb
-      .from('booking_requests')
-      .update({ status: 'approved' })
-      .eq('shift_id', shiftId);
-
-    if (requestErr) {
-      console.error('[persist] approveShift booking_requests:', requestErr.message);
-      return { ok: false, message: requestErr.message };
-    }
-
-    let portal = null;
-    let portalInvite = null;
-    const { data: portalData, error: portalErr } = await sb.rpc('admin_prepare_customer_portal_for_booking_request', {
+    const { data, error } = await sb.rpc('admin_approve_booking_shift', {
       p_shift_id: shiftId,
+      p_cleaner_user_id: cleanerUserId || shift?.cleaner_user_id || null,
     });
 
-    if (portalErr) {
-      console.warn('[persist] approveShift portal:', portalErr.message);
-    } else {
-      portal = portalData || null;
+    if (error) {
+      console.error('[persist] approveShift:', error.message);
+      return { ok: false, message: error.message };
+    }
+
+    const portal = data?.portal || null;
+    let portalInvite = null;
+    if (portal) {
       portalInvite = await persistSendCustomerPortalInvite({ shiftId });
     }
 
-    const { error: evErr } = await sb.from('shift_events').insert({
-      shift_id: shiftId,
-      actor_user_id: actorUserId,
-      event_type: 'shift_approved',
-      payload: {},
-    });
-
-    if (evErr) {
-      return { ok: false, message: evErr.message };
-    }
-
-    return { ok: true, portal, portalInvite };
+    return { ok: true, portal, portalInvite, data };
   }
 
   async function persistDeclineShift({ shiftId, actorUserId, hoursToStart, shift, primaryContactUserId }) {
@@ -1052,32 +1010,16 @@
       return { ok: true, skipped: true };
     }
 
-    const { error: shiftErr } = await sb.from('shifts').update({
-      status: 'Avbokat',
-      last_modified_by: actorUserId,
-    }).eq('id', shiftId);
-
-    if (shiftErr) {
-      return { ok: false, message: shiftErr.message };
-    }
-
-    const { error: requestErr } = await sb
-      .from('booking_requests')
-      .update({ status: 'declined' })
-      .eq('shift_id', shiftId);
-
-    if (requestErr) {
-      return { ok: false, message: requestErr.message };
-    }
-
-    await sb.from('shift_events').insert({
-      shift_id: shiftId,
-      actor_user_id: actorUserId,
-      event_type: 'shift_declined',
-      payload: { hours_to_start: hoursToStart },
+    const { data, error } = await sb.rpc('admin_decline_booking_shift', {
+      p_shift_id: shiftId,
     });
 
-    return { ok: true };
+    if (error) {
+      console.error('[persist] declineShift:', error.message);
+      return { ok: false, message: error.message };
+    }
+
+    return { ok: true, data };
   }
 
   async function persistCreateCustomerShiftRequest({ shift, actorUserId }) {
@@ -1725,27 +1667,17 @@
       return { ok: true, skipped: true };
     }
 
-    const update = {
-      cleaner_user_id: isUuid(newCleanerId) ? newCleanerId : null,
-      last_modified_by: actorUserId,
-    };
-    if (wasSick) update.status = 'Godkänt';
-
-    const { error: shiftErr } = await sb.from('shifts').update(update).eq('id', shiftId);
-    if (shiftErr) {
-      console.error('[persist] swapCleaner:', shiftErr.message);
-      return { ok: false, message: shiftErr.message };
-    }
-
-    const { error: evErr } = await sb.from('shift_events').insert({
-      shift_id: shiftId,
-      actor_user_id: actorUserId,
-      event_type: 'cleaner_swapped',
-      payload: { to: newCleanerId },
+    const { data, error } = await sb.rpc('admin_swap_shift_cleaner', {
+      p_shift_id: shiftId,
+      p_new_cleaner_user_id: isUuid(newCleanerId) ? newCleanerId : null,
     });
 
-    if (evErr) return { ok: false, message: evErr.message };
-    return { ok: true };
+    if (error) {
+      console.error('[persist] swapCleaner:', error.message);
+      return { ok: false, message: error.message };
+    }
+
+    return { ok: true, data };
   }
 
   async function persistAdjustTime({ shiftId, actorUserId, shift, wasSick, wasPendingReview }) {
@@ -1753,31 +1685,18 @@
       return { ok: true, skipped: true };
     }
 
-    const update = {
-      start_at: toIso(shift.start_at),
-      end_at: toIso(shift.end_at),
-      original_start_at: shift.original_start_at ? toIso(shift.original_start_at) : null,
-      original_end_at: shift.original_end_at ? toIso(shift.original_end_at) : null,
-      last_modified_by: actorUserId,
-    };
-    if (wasSick) update.status = 'Godkänt';
-    if (wasPendingReview) update.status = 'Utfört';
-
-    const { error: shiftErr } = await sb.from('shifts').update(update).eq('id', shiftId);
-    if (shiftErr) {
-      console.error('[persist] adjustTime:', shiftErr.message);
-      return { ok: false, message: shiftErr.message };
-    }
-
-    const { error: evErr } = await sb.from('shift_events').insert({
-      shift_id: shiftId,
-      actor_user_id: actorUserId,
-      event_type: 'time_adjusted',
-      payload: { start_at: update.start_at, end_at: update.end_at },
+    const { data, error } = await sb.rpc('admin_adjust_shift_time', {
+      p_shift_id: shiftId,
+      p_start_at: toIso(shift.start_at),
+      p_end_at: toIso(shift.end_at),
     });
 
-    if (evErr) return { ok: false, message: evErr.message };
-    return { ok: true };
+    if (error) {
+      console.error('[persist] adjustTime:', error.message);
+      return { ok: false, message: error.message };
+    }
+
+    return { ok: true, data };
   }
 
   async function persistAdjustWorkedTime({ shiftId, actorUserId, shift }) {
@@ -1785,37 +1704,18 @@
       return { ok: true, skipped: true };
     }
 
-    const { error: shiftErr } = await sb.from('shifts').update({
-      status: shift.status,
-      checked_in_at: toIso(shift.checked_in_at),
-      checked_out_at: shift.checked_out_at ? toIso(shift.checked_out_at) : null,
-      start_at: toIso(shift.start_at),
-      end_at: toIso(shift.end_at),
-      original_start_at: shift.original_start_at ? toIso(shift.original_start_at) : null,
-      original_end_at: shift.original_end_at ? toIso(shift.original_end_at) : null,
-      last_modified_by: actorUserId,
-    }).eq('id', shiftId);
-
-    if (shiftErr) {
-      console.error('[persist] adjustWorkedTime:', shiftErr.message);
-      return { ok: false, message: shiftErr.message };
-    }
-
-    const { error: evErr } = await sb.from('shift_events').insert({
-      shift_id: shiftId,
-      actor_user_id: actorUserId,
-      event_type: 'time_adjusted',
-      payload: {
-        kind: 'worked_time',
-        checked_in_at: toIso(shift.checked_in_at),
-        checked_out_at: shift.checked_out_at ? toIso(shift.checked_out_at) : null,
-        start_at: toIso(shift.start_at),
-        end_at: toIso(shift.end_at),
-      },
+    const { data, error } = await sb.rpc('admin_adjust_shift_worked_time', {
+      p_shift_id: shiftId,
+      p_checked_in_at: toIso(shift.checked_in_at),
+      p_checked_out_at: shift.checked_out_at ? toIso(shift.checked_out_at) : null,
     });
 
-    if (evErr) return { ok: false, message: evErr.message };
-    return { ok: true };
+    if (error) {
+      console.error('[persist] adjustWorkedTime:', error.message);
+      return { ok: false, message: error.message };
+    }
+
+    return { ok: true, data };
   }
 
   async function persistMarkSickAsFinal({ shiftId, adminUserId }) {

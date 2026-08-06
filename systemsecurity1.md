@@ -101,21 +101,47 @@ Kvar att följa upp:
 
 ## Fas 3 - Adminbokningar som transaktioner
 
-Status: [ ] Ej påbörjad
+Status: [D] Deployad/verifierad i Supabase
 
 Mål:
 - Flytta splittrade adminflöden till server-RPC med transaktion, row lock och audit.
 
 Flöden:
-- [ ] Godkänn publik bokningsförfrågan.
-- [ ] Neka publik bokningsförfrågan.
-- [ ] Ta bort bokning.
-- [ ] Byt städare.
-- [ ] Justera tid.
-- [ ] Justera arbetad tid.
+- [x] Godkänn publik bokningsförfrågan.
+- [x] Neka publik bokningsförfrågan.
+- [x] Ta bort bokning.
+- [x] Byt städare.
+- [x] Justera tid.
+- [x] Justera arbetad tid.
 
 Resultat:
-- Ej påbörjat.
+- Migration skapad: `supabase/migrations/20260806071542_security_phase3_admin_shift_commands.sql`.
+- Nya admin-only RPC:er:
+  - `admin_approve_booking_shift(p_shift_id, p_cleaner_user_id)`
+  - `admin_decline_booking_shift(p_shift_id)`
+  - `admin_delete_shift(p_shift_id)`
+  - `admin_swap_shift_cleaner(p_shift_id, p_new_cleaner_user_id)`
+  - `admin_adjust_shift_time(p_shift_id, p_start_at, p_end_at)`
+  - `admin_adjust_shift_worked_time(p_shift_id, p_checked_in_at, p_checked_out_at)`
+- Frontend ändrad:
+  - `src/supabase.jsx`: admin-persisters använder nu RPC:erna ovan i stället för splittrade `shifts.update` + `booking_requests.update` + `shift_events.insert`.
+  - Kundportal-invite efter godkänd bokning skickas fortfarande efter att RPC:n returnerat portaldata.
+- Live Supabase:
+  - Migrationen dry-run-kördes med `BEGIN`/`ROLLBACK` utan SQL-fel.
+  - Migrationen applicerades på linked Supabase.
+  - Migration history reparerades för version `20260806071542`.
+- Verifierat live:
+  - Alla sex RPC:er finns i `public`, är `SECURITY DEFINER` och har `search_path=public`.
+  - Execute-ACL är `authenticated`, `service_role` och ägaren `postgres`; `anon`/`public` har inte explicit execute.
+  - `supabase migration list --linked` visar `20260806071542` som både lokal och remote.
+- Verifiering:
+  - `npm run build`: OK.
+  - `supabase db lint --linked --schema public --fail-on none`: OK för nya fas 3-RPC:er; kvarvarande äldre lint-varningar finns i andra befintliga funktioner.
+  - `supabase db advisors --linked --type security --level warn --fail-on none`: kvarvarande advisor-varningar finns för authenticated-callable `SECURITY DEFINER`-funktioner, inklusive de nya admin-RPC:erna.
+
+Kvar att följa upp:
+- Breda admin-RLS-policies ligger kvar eftersom andra adminflöden fortfarande använder direkta tabellskrivningar. Fas 3 minskar risk i bokningsåtgärderna, men full stängning av bred admin-write kräver att fler adminområden flyttas till command-RPC:er.
+- Notiser/e-post efter åtgärder går fortsatt via befintligt notisflöde efter lyckad servertransaktion. Nästa hårdare steg är att låta serverkommandona även returnera eller skapa exakt notifieringskommando per flöde.
 
 ## Fas 4 - Serverstyrd passfinalisering
 
