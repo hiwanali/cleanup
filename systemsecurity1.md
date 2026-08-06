@@ -222,14 +222,41 @@ Kvar som manuell Supabase Dashboard-kontroll:
 
 ## Fas 6 - Tester och regressionsskydd
 
-Status: [ ] Ej påbörjad
+Status: [x] Klar lokalt
 
 Mål:
-- Lägg RLS-/RPC-testfall för admin, städare, kund och kundanställd.
-- Lägg Playwright smoke-flöden för login, kundportal, check-in/out, checklistor och meddelanden.
+- [x] Lägg första icke-destruktiva RLS-/RPC-regressionerna.
+- [x] Lägg Playwright smoke för live-login och publik bokningswidget.
+- [x] Förbered rollsmoke för admin, städare och kund när testcredentials finns i env.
+- [x] Dokumentera testkommandon och env-kontrakt.
+- [ ] Lägg fulla muterande Playwright-flöden för check-in/out, checklistor och meddelanden med dedikerade testfixtures.
 
 Resultat:
-- Ej påbörjat.
+- Nya npm-kommandon:
+  - `npm run test:security`
+  - `npm run test:smoke`
+- Nytt Supabase-test:
+  - `supabase/tests/security_regression.sql`
+  - Kontrollerar RLS på centrala tabeller, borttagna legacy-policies, notifications-write-yta, RPC-ACL, `SECURITY DEFINER` + `search_path` och `security_invoker` på kund-/städarvyer.
+- Ny Supabase CLI-wrapper:
+  - `scripts/run-security-regression.js`
+  - Väljer faktisk Supabase CLI 2.79+ eftersom `npm exec supabase` kan peka på fel npm-paket.
+- Ny Playwright-smoke:
+  - `scripts/playwright-smoke.js`
+  - Testar live-login och publik bookingwidget utan credentials.
+  - Testar admin/städare/kund-navigation när `CLEANUP_E2E_*` finns i env.
+- Ny dokumentation:
+  - `docs/regression-tests.md`
+- `vercel.json` justerad så CSP även tillåter Google Fonts (`fonts.googleapis.com`/`fonts.gstatic.com`) som HTML redan använder.
+- Verifiering:
+  - `npm run test:security`: OK mot linked Supabase.
+  - `npm run test:smoke`: OK för publika smoke-flöden; admin/städare/kund hoppades över eftersom `CLEANUP_E2E_*` saknas.
+  - `npm run build`: OK.
+  - JSON-parse av `package.json` och `vercel.json`: OK.
+
+Kvar att följa upp:
+- Skapa dedikerade testkonton/testbokning i Supabase för muterande E2E.
+- Utöka Playwright med check-in/out, checklist-toggle och meddelandeskick mot testbokningen.
 
 ## Kända kontrollpunkter från analys
 

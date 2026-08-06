@@ -5,7 +5,9 @@
   "description": "CleanUp städplattform – statisk frontend med precompilerad JSX och Tailwind.",
   "scripts": {
     "build": "node scripts/build.js",
-    "config": "node scripts/generate-config.js"
+    "config": "node scripts/generate-config.js",
+    "test:security": "node scripts/run-security-regression.js",
+    "test:smoke": "node scripts/playwright-smoke.js"
   },
   "devDependencies": {
     "@babel/core": "^7.26.0",
