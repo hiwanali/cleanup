@@ -9557,7 +9557,7 @@
       await window.hydrateFromSupabase(userId);
       return new Date();
     }
-    if (typeof db.runShiftFinalization === 'function') {
+    if (!window.SUPABASE_ENABLED && typeof db.runShiftFinalization === 'function') {
       await db.runShiftFinalization(userId);
       return new Date();
     }

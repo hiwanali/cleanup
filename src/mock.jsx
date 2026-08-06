@@ -2906,6 +2906,8 @@
      * @returns {{ finalized: number, shiftIds: string[] }}
      */
     finalizeEligibleShifts({ now = new Date(), actorUserId = null } = {}) {
+      if (window.SUPABASE_ENABLED) return { finalized: 0, shiftIds: [], serverOwned: true };
+
       const SF = window.ShiftFinalization;
       if (!SF) return { finalized: 0, shiftIds: [] };
 
@@ -2968,6 +2970,8 @@
     },
 
     async runShiftFinalization(actorUserId) {
+      if (window.SUPABASE_ENABLED) return { finalized: 0, shiftIds: [], serverOwned: true };
+
       const batch = db.finalizeEligibleShifts({ now: new Date(), actorUserId });
       if (!batch.finalized) return batch;
 

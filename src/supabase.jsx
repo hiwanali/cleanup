@@ -202,9 +202,6 @@
     const data = await loadAllFromSupabase(authUserId);
     if (window.db && typeof window.db.replaceAll === 'function') {
       window.db.replaceAll(data);
-      if (typeof window.db.runShiftFinalization === 'function') {
-        await window.db.runShiftFinalization(authUserId);
-      }
       return true;
     }
     return false;

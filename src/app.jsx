@@ -567,7 +567,7 @@
     }, [isEmbedBooking, session?.userId]);
 
     useEffect(() => {
-      if (isEmbedBooking || !session?.userId || typeof db.runShiftFinalization !== 'function') {
+      if (isEmbedBooking || window.SUPABASE_ENABLED || !session?.userId || typeof db.runShiftFinalization !== 'function') {
         return undefined;
       }
       const tick = () => {

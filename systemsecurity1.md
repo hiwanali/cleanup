@@ -145,14 +145,45 @@ Kvar att följa upp:
 
 ## Fas 4 - Serverstyrd passfinalisering
 
-Status: [ ] Ej påbörjad
+Status: [D] Deployad/verifierad i Supabase
 
 Mål:
 - Ta bort statusändrande sidoeffekter från frontend-hydration och klientintervall.
 - Flytta automatisk finalisering till serverjobb, cron eller explicit admin-RPC.
 
 Resultat:
-- Ej påbörjat.
+- Migration skapad: `supabase/migrations/20260806100709_security_phase4_server_finalization.sql`.
+- Server ändrad:
+  - `finalize_eligible_shifts(p_now)` är omskriven med advisory lock så två körningar inte kan jobba parallellt.
+  - Funktionen använder `FOR UPDATE SKIP LOCKED` och begränsad batchstorlek för stabil cron-körning.
+  - Sen incheckning samma dag kontrolleras mot `Europe/Stockholm`.
+  - Ny tabell `shift_finalization_runs` loggar körningar, antal finaliserade pass, skip/error och payload.
+  - Cron-jobbet `finalize-eligible-shifts` är omschemalagt till `* * * * *` via `cron.unschedule`/`cron.schedule`.
+- Frontend ändrad:
+  - `src/supabase.jsx`: hydration kör inte längre `db.runShiftFinalization`.
+  - `src/app.jsx`: minutintervallet kör bara lokal finalisering när Supabase inte är aktivt.
+  - `src/views.jsx`: rapport-refresh kör inte lokal finalisering i Supabase-läge.
+  - `src/mock.jsx`: `finalizeEligibleShifts` och `runShiftFinalization` returnerar no-op i Supabase-läge som extra skydd.
+- Live Supabase:
+  - Migrationen dry-run-kördes med `BEGIN`/`ROLLBACK` utan SQL-fel.
+  - Migrationen applicerades på linked Supabase.
+  - Migration history reparerades för version `20260806100709`.
+- Verifierat live:
+  - Cron-jobbet `finalize-eligible-shifts` är aktivt med schedule `* * * * *`.
+  - Cron-kommandot är `SELECT public.finalize_eligible_shifts();`.
+  - Ofarlig testkörning med `1900-01-01` gav loggrad `completed` med `finalized_count = 0`.
+  - `finalize_eligible_shifts` är `SECURITY DEFINER`, har `search_path=public` och ACL `{postgres, service_role}`; vanliga `authenticated` kan inte köra funktionen.
+  - `shift_finalization_runs` har RLS och admin-only select-policy.
+- Verifiering:
+  - `npm run build`: OK.
+  - `node -e "...ShiftFinalization.__runTests()"`: 24 tester OK.
+  - `supabase db lint --linked --schema public --fail-on none`: OK för nya fas 4-objekt; kvarvarande äldre lint-varningar finns i andra befintliga funktioner.
+  - `supabase db advisors --linked --type security --level warn --fail-on none`: `finalize_eligible_shifts` flaggas inte längre som authenticated-callable `SECURITY DEFINER`.
+  - `supabase db advisors --linked --type performance --level warn --fail-on none`: kvarvarande performance-varningar finns i äldre policies.
+
+Kvar att följa upp:
+- `adminCompleteShift` och `approveShiftCompletion` är fortfarande separata adminflöden i frontend-persistern. De bör flyttas till command-RPC i nästa hårdningspass, men automatisk finalisering ägs nu av server/cron.
+- Admin-UI kan senare visa `shift_finalization_runs` för driftstatus, senaste körning och eventuella error.
 
 ## Fas 5 - URL, CSP och deploy-dokumentation
 
