@@ -1,10 +1,18 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.1';
 import { formatDateTimeSE, renderCleanUpEmail } from '../_shared/email-template.ts';
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
+const DEFAULT_ALLOWED_ORIGINS = [
+  'https://cleanup.nu',
+  'https://www.cleanup.nu',
+  'https://logincleanup.app',
+  'https://www.logincleanup.app',
+  'http://localhost:3000',
+  'http://localhost:5173',
+  'http://localhost:8080',
+  'http://127.0.0.1:3000',
+  'http://127.0.0.1:5173',
+  'http://127.0.0.1:8080',
+];
 
 type UserRole = 'admin' | 'cleaner' | 'customer' | 'customer_employee';
 
@@ -20,6 +28,41 @@ function roleArea(role: UserRole): 'admin' | 'stadare' | 'kund' {
   if (role === 'cleaner') return 'stadare';
   if (role === 'customer' || role === 'customer_employee') return 'kund';
   return 'admin';
+}
+
+function allowedOrigins(): string[] {
+  const raw = Deno.env.get('NOTIFICATION_EMAIL_ALLOWED_ORIGINS');
+  if (!raw) return DEFAULT_ALLOWED_ORIGINS;
+  return raw.split(',').map((x) => x.trim()).filter(Boolean);
+}
+
+function corsHeaders(req: Request): HeadersInit {
+  const origin = req.headers.get('origin');
+  const allowed = allowedOrigins();
+  const allowOrigin = origin && allowed.includes(origin) ? origin : allowed[0] ?? 'https://www.logincleanup.app';
+  return {
+    'Access-Control-Allow-Origin': allowOrigin,
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Vary': 'Origin',
+  };
+}
+
+function json(req: Request, body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
+  });
+}
+
+function rejectBadOrigin(req: Request): Response | null {
+  const origin = req.headers.get('origin');
+  if (!origin) return null;
+  if (allowedOrigins().includes(origin)) return null;
+  return new Response(JSON.stringify({ error: 'Origin not allowed' }), {
+    status: 403,
+    headers: { 'Content-Type': 'application/json', Vary: 'Origin' },
+  });
 }
 
 function normalizeAppBaseUrl(raw?: string | null): string {
@@ -39,28 +82,60 @@ function normalizeAppBaseUrl(raw?: string | null): string {
   }
 }
 
-function portalUrl(appBaseUrl: string, role: UserRole, shiftId: string, targetPath?: string): string {
-  const base = normalizeAppBaseUrl(appBaseUrl).replace(/\/$/, '');
+function defaultPathFor(role: UserRole, kind: string, shiftId: string): string {
   const area = roleArea(role);
+  if (kind === 'new_message') return `/${area}/meddelanden`;
+  if ((role === 'customer' || role === 'customer_employee') && shiftId) {
+    return `/kund/pass/${encodeURIComponent(shiftId)}`;
+  }
+  if (role === 'customer' || role === 'customer_employee') return '/kund/oversikt';
+  return `/${area}/schema`;
+}
+
+function normalizeTargetPath(targetPath?: string): string | null {
   const target = String(targetPath || '').trim();
 
   if (/^https?:\/\//i.test(target)) {
-    return target;
+    return null;
   }
 
   if (target.startsWith('#/')) {
-    return `${base}${target}`;
+    return target.slice(1);
   }
 
   if (target.startsWith('/')) {
-    return `${base}#${target}`;
+    return target;
   }
 
-  if ((role === 'customer' || role === 'customer_employee') && shiftId) {
-    return `${base}#/kund/pass/${encodeURIComponent(shiftId)}`;
+  return null;
+}
+
+function pathAllowedForRole(role: UserRole, path: string): boolean {
+  if (role === 'admin') return path.startsWith('/admin/');
+  if (role === 'cleaner') return path.startsWith('/stadare/');
+  return path.startsWith('/kund/');
+}
+
+function portalUrl(appBaseUrl: string, role: UserRole, kind: string, shiftId: string, targetPath?: string): string {
+  const base = normalizeAppBaseUrl(appBaseUrl).replace(/\/$/, '');
+  const normalized = normalizeTargetPath(targetPath);
+  const path = normalized && pathAllowedForRole(role, normalized)
+    ? normalized
+    : defaultPathFor(role, kind, shiftId);
+
+  return `${base}#${path}`;
+}
+
+function sanitizedPayload(payload: Record<string, unknown>, role: UserRole): Record<string, unknown> {
+  const targetPath = typeof payload.target_path === 'string' ? payload.target_path : '';
+  const normalized = normalizeTargetPath(targetPath);
+  if (!normalized || !pathAllowedForRole(role, normalized)) {
+    const clone = { ...payload };
+    delete clone.target_path;
+    return clone;
   }
 
-  return `${base}#/${area}/schema`;
+  return { ...payload, target_path: normalized };
 }
 
 function notificationCopy(kind: string, role: UserRole, detail: string): { title: string; intro: string; body?: string[]; eyebrow?: string } {
@@ -260,7 +335,7 @@ function buildEmailContent(
       { label: 'Tid', value: when },
     ],
     ctaLabel: kind === 'new_message' ? 'Öppna meddelanden' : isCustomer ? 'Öppna kundportalen' : 'Öppna CleanUp-portalen',
-    ctaUrl: portalUrl(appBaseUrl, role, shiftId, targetPath),
+    ctaUrl: portalUrl(appBaseUrl, role, kind, shiftId, targetPath),
     note: isCustomer
       ? 'Det här är ett automatiskt meddelande från CleanUp. Svara via portalen om du behöver återkoppla.'
       : 'Det här är ett automatiskt arbetsmeddelande från CleanUp.',
@@ -272,8 +347,11 @@ function isValidEmail(email: string): boolean {
 }
 
 Deno.serve(async (req) => {
+  const badOrigin = rejectBadOrigin(req);
+  if (badOrigin) return badOrigin;
+
   if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
+    return new Response(null, { headers: corsHeaders(req) });
   }
 
   try {
@@ -284,10 +362,7 @@ Deno.serve(async (req) => {
     const appBaseUrl = normalizeAppBaseUrl(Deno.env.get('CUSTOMER_PORTAL_SITE_URL'));
 
     if (!resendKey || !resendFrom) {
-      return new Response(JSON.stringify({ error: 'RESEND not configured' }), {
-        status: 503,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
+      return json(req, { error: 'RESEND not configured' }, 503);
     }
 
     const body = await req.json();
@@ -295,10 +370,7 @@ Deno.serve(async (req) => {
     const notificationId = record?.id;
 
     if (!notificationId) {
-      return new Response(JSON.stringify({ error: 'Missing notification id' }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
+      return json(req, { error: 'Missing notification id' }, 400);
     }
 
     const sb = createClient(supabaseUrl, serviceRoleKey);
@@ -310,16 +382,11 @@ Deno.serve(async (req) => {
       .single();
 
     if (notifErr || !notif) {
-      return new Response(JSON.stringify({ error: 'Notification not found' }), {
-        status: 404,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
+      return json(req, { error: 'Notification not found' }, 404);
     }
 
     if (notif.email_sent_at) {
-      return new Response(JSON.stringify({ ok: true, skipped: 'already_sent' }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
+      return json(req, { ok: true, skipped: 'already_sent' });
     }
 
     const { data: user, error: userErr } = await sb
@@ -333,12 +400,10 @@ Deno.serve(async (req) => {
         .from('notifications')
         .update({ email_error: 'No valid recipient email' })
         .eq('id', notificationId);
-      return new Response(JSON.stringify({ ok: true, skipped: 'no_email' }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
+      return json(req, { ok: true, skipped: 'no_email' });
     }
 
-    const payload = (notif.payload ?? {}) as Record<string, unknown>;
+    const payload = sanitizedPayload((notif.payload ?? {}) as Record<string, unknown>, user.role as UserRole);
     let propertyName = '';
     const propertyId = payload.property_id as string | undefined;
     if (propertyId) {
@@ -369,10 +434,7 @@ Deno.serve(async (req) => {
         .from('notifications')
         .update({ email_error: errText.slice(0, 500) })
         .eq('id', notificationId);
-      return new Response(JSON.stringify({ error: 'Resend failed', detail: errText }), {
-        status: 502,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
+      return json(req, { error: 'Resend failed', detail: errText }, 502);
     }
 
     await sb
@@ -380,14 +442,9 @@ Deno.serve(async (req) => {
       .update({ email_sent_at: new Date().toISOString(), email_error: null })
       .eq('id', notificationId);
 
-    return new Response(JSON.stringify({ ok: true }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
+    return json(req, { ok: true });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
-    return new Response(JSON.stringify({ error: message }), {
-      status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
+    return json(req, { error: message }, 500);
   }
 });

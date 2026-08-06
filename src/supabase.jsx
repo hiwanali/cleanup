@@ -280,6 +280,45 @@
     return out;
   }
 
+  const ALLOWED_NOTIFICATION_KINDS = new Set([
+    'sick_reported',
+    'assigned_shift',
+    'shift_approved',
+    'unassigned_shift',
+    'cleaner_swapped',
+    'time_adjusted',
+    'customer_cancelled',
+    'admin_deleted',
+    'paused_by_holiday',
+    'holiday_created',
+    'holiday_removed',
+    'incident_created',
+    'incident_resolved',
+    'incident_in_progress',
+    'shift_will_be_missed',
+    'shift_request_created',
+    'customer_booking_request',
+  ]);
+
+  function sanitizeNotificationPayloadForPersist(payload) {
+    const out = serializeNotificationPayload(payload);
+    const target = typeof out.target_path === 'string' ? out.target_path.trim() : '';
+    if (!target) return out;
+
+    const normalized = target.startsWith('#/')
+      ? target.slice(1)
+      : target.startsWith('/')
+        ? target
+        : null;
+
+    if (!normalized || /^https?:\/\//i.test(target) || !/^\/(admin|stadare|kund)\//.test(normalized)) {
+      delete out.target_path;
+      return out;
+    }
+
+    return { ...out, target_path: normalized };
+  }
+
   async function invokeNotificationEmail(notificationId) {
     if (!enabled || !sb || !isUuid(notificationId)) return;
     try {
@@ -384,7 +423,11 @@
       return { ok: true, skipped: true };
     }
 
-    const filtered = rows.filter((r) => r.recipient_user_id && isUuid(r.recipient_user_id) && r.kind);
+    const filtered = rows.filter((r) => (
+      r.recipient_user_id
+      && isUuid(r.recipient_user_id)
+      && ALLOWED_NOTIFICATION_KINDS.has(r.kind)
+    ));
     if (!filtered.length) {
       return { ok: true, skipped: true };
     }
@@ -392,7 +435,7 @@
     const p_rows = filtered.map((r) => ({
       recipient_user_id: r.recipient_user_id,
       kind: r.kind,
-      payload: serializeNotificationPayload(r.payload),
+      payload: sanitizeNotificationPayloadForPersist(r.payload),
     }));
 
     const { data, error } = await sb.rpc('insert_notifications', { p_rows });

@@ -56,7 +56,7 @@ Kvar att följa upp:
 
 ## Fas 2 - Notiser och e-postlänkar
 
-Status: [ ] Ej påbörjad
+Status: [D] Deployad/verifierad i Supabase
 
 Mål:
 - Ta bort klientens möjlighet att skapa godtyckliga notiser till valfri mottagare.
@@ -64,13 +64,40 @@ Mål:
 - Tillåt endast kända interna route-prefix per roll.
 
 Plan:
-- [ ] Ersätt generisk `insert_notifications` i klientflöden med domän-RPC:er.
-- [ ] Whitelista `target_path`.
-- [ ] Gör CORS strikt på `send-notification-email`.
-- [ ] Lägg verifiering för ny meddelandelänk, adminlänk och kundlänk.
+- [x] Ersätt osäker generisk `insert_notifications` med härdad kompatibilitets-RPC.
+- [x] Whitelista `target_path`.
+- [x] Gör CORS strikt på `send-notification-email`.
+- [x] Lägg verifiering för origin-skydd, intern route-prefix och notistabellens insert-yta.
 
 Resultat:
-- Ej påbörjat.
+- Migration skapad: `supabase/migrations/20260806065622_security_phase2_lock_notifications.sql`.
+- Frontend ändrad:
+  - `src/supabase.jsx`: filtrerar notiskind mot allowlist innan RPC.
+  - `src/supabase.jsx`: normaliserar `target_path` till interna `#/`/`/admin`/`/stadare`/`/kund`-vägar och släpper externa URL:er.
+- Edge Function ändrad:
+  - `supabase/functions/send-notification-email/index.ts`: strikt CORS med allowlist för CleanUp-domäner och lokala dev-URL:er.
+  - `send-notification-email`: externa `http(s)` target-länkar ignoreras; fallback blir rollstyrd intern vy.
+  - `send-notification-email`: nekad origin får 403 utan `Access-Control-Allow-Origin`.
+- Live Supabase:
+  - Migrationen dry-run-kördes med `BEGIN`/`ROLLBACK` utan SQL-fel.
+  - Migrationen applicerades på linked Supabase.
+  - Migration history reparerades för version `20260806065622`.
+  - Edge Function `send-notification-email` deployades till projekt `bkmnlcdsbvpucpqmaycx`.
+- Verifierat live:
+  - `notifications_insert`-policy finns inte längre.
+  - `authenticated` har inte längre `INSERT` eller `DELETE` på `public.notifications`; endast `SELECT` och `UPDATE` ligger kvar för läs/markera läst.
+  - `insert_notifications` är `SECURITY DEFINER` med `search_path=public`.
+  - OPTIONS från `https://www.logincleanup.app` returnerar 200 och rätt `Access-Control-Allow-Origin`.
+  - OPTIONS från `https://evil.example` returnerar 403 och ingen `Access-Control-Allow-Origin`.
+- Verifiering:
+  - `npm run build`: OK.
+  - `supabase db lint --linked --schema public --fail-on none`: OK för nya `insert_notifications`; kvarvarande äldre lint-varningar finns i andra befintliga funktioner.
+  - `supabase db advisors --linked --type security --level warn --fail-on none`: kvarvarande advisor-varningar finns för authenticated-callable `SECURITY DEFINER`-funktioner, inklusive denna härdade kompatibilitets-RPC.
+  - `supabase db advisors --linked --type performance --level warn --fail-on none`: kvarvarande performance-varningar finns i äldre policies.
+
+Kvar att följa upp:
+- `insert_notifications` är fortfarande en authenticated-callable kompatibilitets-RPC för äldre klientflöden. Den är nu begränsad med kind-allowlist, orgkontroll, rollstyrda interna länkar och shift/property/customer-kopplingar, men nästa hårdare nivå är att flytta notisskapande till mer specifika command-RPC:er per domänflöde.
+- `send_message_with_notifications` äger fortfarande meddelandenotiser, vilket är rätt riktning. Den bör ingå i senare RPC-granskning eftersom Supabase advisor flaggar alla `SECURITY DEFINER`-funktioner generellt.
 
 ## Fas 3 - Adminbokningar som transaktioner
 
