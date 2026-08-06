@@ -1,111 +1,114 @@
 # Vercel Deploy Guide
 
-## 🚀 Snabbstart
+## Canonical Production URL
 
-### 1. GitHub + Vercel Setup
-```bash
-# Pusha till GitHub (om inte redan gjort)
-git add .
-git commit -m "Production ready: security + config"
-git push origin main
+Use this app URL in production:
 
-# På vercel.com:
-# 1. New Project → Import från GitHub
-# 2. Välj städplattform repo
+```text
+https://www.logincleanup.app/CleanUp.html
 ```
 
-### 2. Miljövariabler i Vercel
-Lägg till i **Settings → Environment Variables** (både Production och Preview):
+`https://logincleanup.app` redirects to `https://www.logincleanup.app`.
 
-```
+Do not use `https://inlogg.cleanup.nu` or `https://login.cleanup.nu` for login, magic links, or notification links until their TLS certificates are fixed and verified.
+
+## Vercel Setup
+
+1. Import the GitHub repository in Vercel.
+2. Set Build Command to `npm run build`.
+3. Set Output Directory to `dist`.
+4. Keep `vercel.json` committed. It owns rewrites and security headers.
+
+Environment variables in Vercel, for Production and Preview:
+
+```text
 SUPABASE_URL=https://bkmnlcdsbvpucpqmaycx.supabase.co
-SUPABASE_ANON_KEY=<din_publishable_key_från_supabase_dashboard>
+SUPABASE_ANON_KEY=<publishable anon key from Supabase Dashboard>
 ```
 
-**Hämta anon key**: Supabase Dashboard → Project Settings → API → `anon public`
+Never add `SUPABASE_SERVICE_ROLE_KEY` to Vercel frontend environment variables.
 
-### 3. Custom Domain
-I Vercel **Settings → Domains**:
-1. Add Domain: `inlogg.cleanup.nu`
-2. Lägg till DNS-record hos domänleverantör (inleed.se):
-   ```
-   Type: CNAME
-   Name: inlogg
-   Value: cname.vercel-dns.com
-   ```
+## Build Process
 
-### 4. Deploy
-- Första deploy startar automatiskt vid import
-- `vercel.json` kör **`npm run build`** (Tailwind + JSX-bundle + prod-HTML → `dist/`)
-- Root `/` pekar på `CleanUp.html` (via rewrite)
+`npm run build` creates:
 
-## 🔧 Konfiguration
+- `dist/CleanUp.html`
+- `dist/src/styles.css`
+- `dist/src/app.bundle.js`
+- `dist/src/config.js`
 
-### vercel.json (ska matcha Vercel Dashboard)
-```json
-{
-  "buildCommand": "npm run build",
-  "outputDirectory": "dist",
-  "rewrites": [{ "source": "/", "destination": "/CleanUp.html" }]
-}
+The production HTML uses precompiled React/Tailwind assets. If Vercel serves the repo root instead of `dist`, the browser may load the development version and the app can look broken.
+
+## Supabase Auth
+
+In Supabase Dashboard -> Authentication -> URL Configuration:
+
+Site URL:
+
+```text
+https://www.logincleanup.app/CleanUp.html
 ```
 
-**Viktigt i Vercel → Settings → Build and Deployment:** stäng av *Override* för Output Directory (eller sätt den till `dist`). Om Output Directory är `.` serveras **dev-versionen** av `CleanUp.html` (CDN Tailwind + Babel i webbläsaren) – då saknas ofta CSS och appen ser ut som ett tidigt utkast.
+Additional Redirect URLs:
 
-### Buildprocess
-1. `npm install` (Tailwind + Babel som devDependencies)
-2. `npm run build` → `dist/` med `styles.css`, `app.bundle.js`, `config.js`, prod-`CleanUp.html`
-3. Vercel publicerar **endast** innehållet i `dist/`
+```text
+https://www.logincleanup.app/CleanUp.html
+https://www.logincleanup.app/CleanUp.html/**
+https://logincleanup.app/CleanUp.html
+https://logincleanup.app/CleanUp.html/**
+http://localhost:5500/CleanUp.html
+http://localhost:5500/CleanUp.html/**
+http://localhost:5173/CleanUp.html
+http://localhost:5173/CleanUp.html/**
+http://127.0.0.1:5500/CleanUp.html
+http://127.0.0.1:5500/CleanUp.html/**
+```
 
-Ett lyckat bygge tar flera sekunder (inte ~300 ms). I loggen ska du se t.ex. `Wrote .../dist/src/styles.css` och `Bygge klart -> dist/`.
+Supabase recommends exact production redirect URLs; use wildcards only for local dev and controlled preview environments.
 
-## 📋 Verifiering efter deploy
+## Edge Function Secrets
 
-### 1. Testa domäner
-- `https://inlogg.cleanup.nu` → CleanUp login
-- `https://[project].vercel.app` → Backup URL
+Set in Supabase Dashboard -> Edge Functions -> Secrets:
 
-### 2. Testa inloggning
-- `concito@cleanup.nu` / `Work123!`
-- `linneaconcito@cleanup.nu` / `Work123!`
-- `info@cleanup.nu` / `CleanUp2026!`
+```text
+RESEND_API_KEY=<resend key>
+RESEND_FROM=CleanUp <notis@cleanup.nu>
+CUSTOMER_PORTAL_SITE_URL=https://www.logincleanup.app/CleanUp.html
+CUSTOMER_LOGIN_ALLOWED_ORIGINS=https://www.logincleanup.app,https://logincleanup.app,https://cleanup.nu,https://www.cleanup.nu
+```
 
-### 3. Säkerhet
-- F12 → Network: Verifiera HTTPS + security headers
-- Testa att RLS fungerar (kunder ser bara sina objekt)
+`SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY` are Supabase-side function secrets/runtime values, not browser secrets.
 
-## 🛠️ Troubleshooting
+## Verification After Deploy
 
-### Sidan ser ostylad ut / gammalt utkast på produktion
-- Build-loggen visar bara `Wrote .../src/config.js` och bygget tar ~300 ms → **hela bygget körs inte**
-- Åtgärd: Build Command = `npm run build`, Output Directory = `dist`, trigga **Redeploy**
-- Lokalt: `npm run build` och öppna `dist/CleanUp.html` – det ska matcha produktion
+```powershell
+npm run build
+curl.exe -I https://www.logincleanup.app/CleanUp.html
+curl.exe -I https://logincleanup.app/CleanUp.html
+```
 
-### "Config missing" fel
-- Verifiera `SUPABASE_ANON_KEY` är satt i Vercel env vars
-- Trigga ny deploy (Settings → Deployments → Redeploy)
+Expected:
 
-### Domain inte aktiv
-- DNS kan ta 24h att propagera
-- Använd `dig inlogg.cleanup.nu` för att verifiera DNS
+- `www.logincleanup.app` returns 200.
+- `logincleanup.app` returns 308 to `www.logincleanup.app`.
+- Response headers include `Strict-Transport-Security`, `Content-Security-Policy`, `X-Content-Type-Options`, `Referrer-Policy`, and `Permissions-Policy`.
 
-### Auth fungerar ej
-- Kolla Supabase Dashboard → Authentication → Settings
-- Site URL ska vara `https://inlogg.cleanup.nu`
+## Troubleshooting
 
-## 🔐 Säkerhet i produktion
+If the app looks unstyled or like an old draft:
 
-### Automatiskt aktiverat
-✅ HTTPS (Vercel automatiskt)  
-✅ Security headers (X-Frame-Options, etc.)  
-✅ React production builds  
-✅ RLS på alla tabeller  
-✅ Function access controls  
+- Check Vercel Build Command is `npm run build`.
+- Check Output Directory is `dist`.
+- Redeploy from the latest Git commit.
 
-### Manuellt i Supabase Dashboard
-- [ ] Auth → Settings → **Leaked Password Protection** (rekommenderas)
-- [ ] Auth → URL Configuration → Lägg till `https://inlogg.cleanup.nu`
+If magic links land on the wrong URL:
 
----
+- Check `CUSTOMER_PORTAL_SITE_URL` in Supabase Edge Function secrets.
+- Check Supabase Auth Site URL and Redirect URLs.
+- Regenerate/resend the link after changing settings.
 
-**Status**: Redo för deploy! 🎯
+If a custom domain fails:
+
+- Verify DNS in the domain provider.
+- Verify the domain is assigned to the correct Vercel project.
+- Verify TLS with `curl.exe -I https://domain.example`.

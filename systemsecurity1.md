@@ -187,17 +187,35 @@ Kvar att följa upp:
 
 ## Fas 5 - URL, CSP och deploy-dokumentation
 
-Status: [ ] Ej påbörjad
+Status: [~] Pågår
 
 Mål:
-- Välj en kanonisk appdomän.
-- Säkerställ Supabase Auth Site URL och redirect URLs.
-- Fixa `inlogg.cleanup.nu`/`login.cleanup.nu` eller ta bort dem från dokumentation.
-- Skärp Content Security Policy.
-- Uppdatera utdaterade docs som säger att allt redan är färdigproduktionsklart.
+- [x] Välj en kanonisk appdomän.
+- [x] Dokumentera Supabase Auth Site URL och redirect URLs.
+- [x] Ta bort `inlogg.cleanup.nu`/`login.cleanup.nu` som rekommenderade produktions-URL:er i docs.
+- [x] Skärp Content Security Policy.
+- [x] Uppdatera utdaterade docs som säger att allt redan är färdigproduktionsklart.
+- [x] Bygg och verifiera lokalt.
+- [ ] Pusha och verifiera Vercel-liveheaders efter deploy.
 
 Resultat:
-- Ej påbörjat.
+- Kanonisk appdomän vald: `https://www.logincleanup.app/CleanUp.html`.
+- Ny dokumentation skapad: `docs/production-url-security.md`.
+- `DEPLOY.md` omskriven till aktuell Vercel/Supabase Auth-guide utan trasiga `cleanup.nu`-subdomäner som Site URL.
+- `supabase/README.md` uppdaterad med försiktigare produktionsrutiner, canonical URL och Edge Function secrets.
+- `vercel.json` skärpt:
+  - HSTS med `includeSubDomains` och `preload`.
+  - CSP med `default-src`, `script-src`, `connect-src`, `object-src`, `base-uri`, `form-action`, `worker-src` och `frame-ancestors`.
+  - `frame-ancestors` tillåter fortsatt iframe från `cleanup.nu`/`www.cleanup.nu`.
+  - `Permissions-Policy` utökad för att stänga fler browser-capabilities.
+
+Kvar att verifiera:
+- `npm run build`: OK.
+- Efter Vercel-deploy: `curl.exe -I https://www.logincleanup.app/CleanUp.html`.
+- Manuellt i Supabase Dashboard:
+  - Site URL = `https://www.logincleanup.app/CleanUp.html`.
+  - Redirect URLs enligt `docs/production-url-security.md`.
+  - `CUSTOMER_PORTAL_SITE_URL=https://www.logincleanup.app/CleanUp.html`.
 
 ## Fas 6 - Tester och regressionsskydd
 

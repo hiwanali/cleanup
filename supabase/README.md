@@ -14,7 +14,7 @@ Databasen speglar **§5 i `mvpfinal.md`** och är deployad till projektet **Clea
 | `20260529100500_properties_customer_view.sql` | Vy utan `access_info` för kundroller |
 | `20260531120000_notification_email.sql` | `email_sent_at`, RPC `insert_notifications` |
 
-> Första deploy till molnet gjordes delvis via Supabase MCP; kör `supabase db push` för att synka lokala filer.
+> Produktionsdatabasen har delvis driftad migrationshistorik. Kör inte `supabase db push` slentrianmässigt mot produktion; använd granskade migrationsfiler och verifiera först med dry-run/advisors.
 
 ## E-postnotiser (Resend)
 
@@ -41,10 +41,13 @@ Ytterligare secrets för kundens självservice-login:
 
 | Secret | Exempel |
 |--------|---------|
+| `CUSTOMER_PORTAL_SITE_URL` | `https://www.logincleanup.app/CleanUp.html` |
 | `CUSTOMER_LOGIN_HASH_SECRET` | Slumpad hemlighet för hashad audit/rate limit (rekommenderas) |
-| `CUSTOMER_LOGIN_ALLOWED_ORIGINS` | Kommaseparerad allowlist vid behov, t.ex. `https://www.logincleanup.app,https://cleanup.nu` |
+| `CUSTOMER_LOGIN_ALLOWED_ORIGINS` | `https://www.logincleanup.app,https://logincleanup.app,https://cleanup.nu,https://www.cleanup.nu` |
 
 Auth signup ska vara avstängd i Supabase Dashboard. Kundens självservice-login ska gå via `request-customer-login-link`, som alltid svarar neutralt och bara skickar magic link till befintliga kundkonton.
+
+Supabase Auth URL Configuration ska använda `https://www.logincleanup.app/CleanUp.html` som Site URL. Se `docs/production-url-security.md` för redirect-allowlist och verifieringskommandon.
 
 ### 3. Flöde
 
@@ -89,7 +92,9 @@ Admin/städare i demodata använder `demo1234`. Kundroller ska logga in via magi
 cd "c:\Users\Hiwan\Downloads\städplattform"
 supabase login
 supabase link --project-ref bkmnlcdsbvpucpqmaycx
-supabase db push
+supabase migration list --linked
+supabase db lint --linked --schema public --fail-on none
+supabase db advisors --linked --type security --level warn --fail-on none
 ```
 
 ## Vercel-deploy
@@ -100,6 +105,7 @@ supabase db push
    - `SUPABASE_ANON_KEY` = publishable key från Supabase Dashboard → API
 3. Build command körs automatiskt via `vercel.json` (`npm run build` → output `dist/`).
 4. Rot-URL `/` pekar på `CleanUp.html`.
+5. Kanonisk produktions-URL är `https://www.logincleanup.app/CleanUp.html`.
 
 Lokal utveckling:
 
