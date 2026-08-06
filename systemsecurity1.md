@@ -187,7 +187,7 @@ Kvar att följa upp:
 
 ## Fas 5 - URL, CSP och deploy-dokumentation
 
-Status: [~] Pågår
+Status: [D] Deployad/verifierad i Vercel
 
 Mål:
 - [x] Välj en kanonisk appdomän.
@@ -196,7 +196,7 @@ Mål:
 - [x] Skärp Content Security Policy.
 - [x] Uppdatera utdaterade docs som säger att allt redan är färdigproduktionsklart.
 - [x] Bygg och verifiera lokalt.
-- [ ] Pusha och verifiera Vercel-liveheaders efter deploy.
+- [x] Pusha och verifiera Vercel-liveheaders efter deploy.
 
 Resultat:
 - Kanonisk appdomän vald: `https://www.logincleanup.app/CleanUp.html`.
@@ -208,11 +208,14 @@ Resultat:
   - CSP med `default-src`, `script-src`, `connect-src`, `object-src`, `base-uri`, `form-action`, `worker-src` och `frame-ancestors`.
   - `frame-ancestors` tillåter fortsatt iframe från `cleanup.nu`/`www.cleanup.nu`.
   - `Permissions-Policy` utökad för att stänga fler browser-capabilities.
+- Verifiering:
+  - `npm run build`: OK.
+  - `vercel.json` JSON-parse: OK.
+  - `git diff --check`: OK.
+  - Live `curl.exe -I https://www.logincleanup.app/CleanUp.html`: 200 OK med ny CSP, HSTS `includeSubDomains; preload`, `nosniff`, Referrer-Policy, Permissions-Policy och `X-Permitted-Cross-Domain-Policies`.
+  - Live `curl.exe -I https://logincleanup.app/CleanUp.html`: 308 redirect till `https://www.logincleanup.app/CleanUp.html`.
 
-Kvar att verifiera:
-- `npm run build`: OK.
-- Efter Vercel-deploy: `curl.exe -I https://www.logincleanup.app/CleanUp.html`.
-- Manuellt i Supabase Dashboard:
+Kvar som manuell Supabase Dashboard-kontroll:
   - Site URL = `https://www.logincleanup.app/CleanUp.html`.
   - Redirect URLs enligt `docs/production-url-security.md`.
   - `CUSTOMER_PORTAL_SITE_URL=https://www.logincleanup.app/CleanUp.html`.
