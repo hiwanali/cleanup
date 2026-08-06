@@ -222,7 +222,7 @@ Kvar som manuell Supabase Dashboard-kontroll:
 
 ## Fas 6 - Tester och regressionsskydd
 
-Status: [x] Klar lokalt
+Status: [D] Pushad och verifierad
 
 Mål:
 - [x] Lägg första icke-destruktiva RLS-/RPC-regressionerna.
@@ -253,6 +253,7 @@ Resultat:
   - `npm run test:smoke`: OK för publika smoke-flöden; admin/städare/kund hoppades över eftersom `CLEANUP_E2E_*` saknas.
   - `npm run build`: OK.
   - JSON-parse av `package.json` och `vercel.json`: OK.
+  - Live `curl.exe -I https://www.logincleanup.app/CleanUp.html`: OK efter push; CSP innehåller `fonts.googleapis.com` och `fonts.gstatic.com`.
 
 Kvar att följa upp:
 - Skapa dedikerade testkonton/testbokning i Supabase för muterande E2E.
